@@ -78,6 +78,12 @@ reached in two through the edge itself.
 | `amended_at` | TEXT | When |
 | `created_at` | TEXT | Store bookkeeping, not a bundle property |
 
+> **`provenance` is the immutable record; the instance row is the current one.**
+> Amending an instance overwrites its `confidence` and `source` with the human's
+> values, because after a correction the row is ground truth. The provenance row
+> keeps what the machine originally claimed, which is what makes extraction
+> quality measurable after people start correcting things.
+
 `source`, `confidence` and `status` are declared as **bundle properties**, not
 hidden metadata. `objectSetsR` projects an object set down to declared
 properties only, so a query that cannot see `status` cannot exclude rejected
@@ -141,7 +147,7 @@ contract mailed round twice under different names is one document.
 | `instances_*` | One table per object type, generated from the bundle |
 | `instance_index` | `instance_id → type_id, table_name, document_id`. The type-agnostic handle: makes "find this instance" one lookup instead of a scan across every type table |
 | `edges` | Extracted relationships, with the same provenance tail as instances |
-| `provenance` | `instance_id, document_id, source_label, page_no, excerpt, confidence` — where each fact came from |
+| `provenance` | `instance_id, document_id, source_label, page_no, excerpt, confidence, source` — where each fact came from, and what the machine claimed at the time |
 
 ### Interpretation
 

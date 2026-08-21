@@ -435,6 +435,20 @@ orph_migrations <- function() {
            updated_at TEXT
          )"
       )
+    ),
+
+    list(
+      version = 2L,
+      name    = "provenance_source",
+      statements = c(
+        # provenance already held the confidence the machine assigned. It needs
+        # the tier too: amending an instance overwrites `source` on the
+        # instance row to 'human' (correctly -- it is ground truth now), which
+        # means the instance table can no longer say which tier originally
+        # produced it. Without this column, extraction quality cannot be
+        # attributed to local or cloud once anyone starts correcting things.
+        "ALTER TABLE provenance ADD COLUMN source TEXT"
+      )
     )
   )
 }

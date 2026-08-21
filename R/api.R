@@ -368,6 +368,28 @@ orph_api <- function(db_path = Sys.getenv("ORPHEUS_DB", "data/orpheus.sqlite"),
     })
   })
 
+  # --- extraction quality ---------------------------------------------------
+  pr <- GET(pr, "/quality", function(req, res) {
+    actor <- require_actor(req, res); if (is.null(actor)) return(json_error(res, 401L, "Authentication required."))
+    # Corpus-wide figures span documents this actor may not be able to read, so
+    # they are aggregate-only and restricted to administrators. A per-document
+    # report is available to anyone who can view that document.
+    if (!isTRUE(actor$is_admin)) return(json_error(res, 403L,
+      "Corpus-wide quality figures are administrator only.",
+      "Use /documents/<id>/quality for a document you can view."))
+    guard(res, orph_quality_report(con,
+      min_reviewed = as.integer(param(req, "min_reviewed", 5L))))
+  })
+
+  pr <- GET(pr, "/documents/<id>/quality", function(req, res, id) {
+    actor <- require_actor(req, res); if (is.null(actor)) return(json_error(res, 401L, "Authentication required."))
+    guard(res, {
+      orph_require(con, actor, id, "view")
+      orph_quality_report(con, document_id = id,
+                          min_reviewed = as.integer(param(req, "min_reviewed", 1L)))
+    })
+  })
+
   # --- audit and administration --------------------------------------------
   pr <- GET(pr, "/audit/llm", function(req, res) {
     actor <- require_actor(req, res); if (is.null(actor)) return(json_error(res, 401L, "Authentication required."))

@@ -111,6 +111,50 @@ problem.
 
 ---
 
+## The rest of the ontology stack: what was taken, what was left
+
+The account holds fifteen ontology-family packages. They were surveyed once so
+that this does not have to happen again. `ontologyR` is out of scope by
+instruction.
+
+**Taken: one idea, from `auditR`.** It samples a concept's output, records human
+judgments and computes disagreement rates. Orpheus does not need its sampling —
+review here is exhaustive, so every reviewed row is already a labelled example —
+but the underlying point was a real gap: Phase 1 turns on extraction being good
+enough, and nothing measured it. That gap is now closed by
+[`orph_quality_report()`](provenance-and-amendment.md#measuring-extraction-quality),
+built on data the store already held. The package itself is not a dependency.
+
+**Left, as later phases:**
+
+| Package | Belongs to |
+|---|---|
+| `ontologyMCP` — MCP server, 10 tools | Phase 3, the reading companion. agents.md already names it |
+| `vertexR` — graph, alert rules, risk propagation | Phase 5. Substantially more than the graph work Phase 5 anticipates |
+| `ontologyConnectR` — REST/FHIR/JDBC/GraphQL, plus `live_icij` | Phase 5. An ICIJ Offshore Leaks connector is squarely conflict-of-interest territory |
+| `actionTypesR`, `machineryR` — action lifecycle, state machines | Could back the review workflow later; Phase 1's four statuses do not need them |
+| `lineageR` — source/transform/column lineage | Overlaps staleness tracking, but at dataset level rather than fact level |
+| `datapond` — DuckLake | The storage migration above |
+
+**A caveat on all of it.** Commit counts suggest how much has actually been
+exercised: `datapond` 172, `explicaR` 38, `actionTypesR` 13, most others 4–6 —
+and `auditR`, `sqlglotR`, `ontologyAPI`, `ontologyMCP` and `objectExploreR` have
+**one or two commits each**. Those read as generated once and never run. Treat
+the list as available ideas rather than as working machinery until something has
+been exercised.
+
+**Two findings that bear on the R-versus-Python question above:**
+
+- `ontologyAPI` already exposes ontology queries over plumber, but its auth is a
+  **single shared API key with no actor concept**. It could not have backed
+  Orpheus's per-document permissions, which need `created_by`, share grants and
+  `amended_by` tied to a real person. Building a separate API was right; mounting
+  ontologyAPI alongside for generic querying is still an option.
+- `sqlglotR` wraps Python SQLGlot through reticulate. The stack is **already not
+  pure R**, so "R or Python" was never the real choice.
+
+---
+
 ## Decisions the build made, and why
 
 These were open in the architecture and are now settled in code. They can still

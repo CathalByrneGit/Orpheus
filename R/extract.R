@@ -279,7 +279,8 @@ persist_population <- function(con, document_id, bundle, pop, source_label, acto
       db_insert(con, "provenance", list(
         provenance_id = orph_id("prov"), instance_id = new_id, document_id = document_id,
         source_label  = e$source_label %||% "", page_no = nullable(e$page_no),
-        excerpt = e$excerpt %||% "", confidence = e$confidence, created_at = orph_now()))
+        excerpt = e$excerpt %||% "", confidence = e$confidence,
+        source = source_label, created_at = orph_now()))
 
       record_edit(con, orph_object_type(bundle, e$type_id)$table_name, new_id, document_id,
                   "extract", previous = NULL,
@@ -374,7 +375,7 @@ run_deterministic_pass <- function(con, document_id, bundle, actor_id) {
                         "ai_local", dates$confidence[[j]], actor_id = actor_id)
         db_insert(con, "provenance", list(
           provenance_id = orph_id("prov"), instance_id = id, document_id = document_id,
-          source_label = "deterministic:date", page_no = page_no,
+          source_label = "deterministic:date", source = "ai_local", page_no = page_no,
           excerpt = excerpt_around(text, pos, dates$raw_text[[j]]),
           confidence = dates$confidence[[j]], created_at = orph_now()))
         record_edit(con, "instances_KeyDate", id, document_id, "extract", NULL,
@@ -395,7 +396,7 @@ run_deterministic_pass <- function(con, document_id, bundle, actor_id) {
                         "ai_local", amounts$confidence[[j]], actor_id = actor_id)
         db_insert(con, "provenance", list(
           provenance_id = orph_id("prov"), instance_id = id, document_id = document_id,
-          source_label = "deterministic:amount", page_no = page_no,
+          source_label = "deterministic:amount", source = "ai_local", page_no = page_no,
           excerpt = excerpt_around(text, pos, amounts$raw_text[[j]]),
           confidence = amounts$confidence[[j]], created_at = orph_now()))
         record_edit(con, "instances_MonetaryAmount", id, document_id, "extract", NULL,

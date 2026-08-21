@@ -198,6 +198,106 @@ re-running.
 
 ---
 
+## Measuring extraction quality
+
+Everything above preserves the machine's value beside the human's. This is what
+that is for.
+
+Phase 1's definition of done is extraction *good enough to trust as a
+foundation*. That is a claim about a number, and until the number exists the
+claim cannot be made either way. `orph_quality_report()` computes it from data
+the store already holds — every reviewed row is a labelled example, so there is
+nothing to sample.
+
+| Function | Question it answers |
+|---|---|
+| `orph_extraction_quality()` | How often did extracted facts survive review, by type, confidence and tier? |
+| `orph_confidence_calibration()` | Does a higher rubric level actually mean a more reliable fact? |
+| `orph_concept_precision()` | How often does each rule concept point at something real? |
+| `orph_property_corrections()` | Which fields do people keep having to fix? |
+| `orph_quality_report()` | All of the above, plus a readiness verdict |
+
+### Three things it refuses to do
+
+**It never counts an unreviewed row as correct.** An `unconfirmed` instance is
+an unknown one. Every rate is computed over the reviewed subset only, and
+reported next to the `coverage` it rests on. Below 20% coverage the report
+declines to give a verdict at all:
+
+```r
+orph_quality_report(con)$readiness
+#> $state "insufficient_review"
+#> $note  "Only 8% of instances have been reviewed. Too little to judge extraction on."
+```
+
+**It attributes a correction to the confidence the machine originally gave it.**
+Amending a row sets its `confidence` to `1.0` and `source` to `human` — correct,
+because the row is ground truth afterwards. But grouping by those values would
+report every correction as a full-confidence success, inverting the very thing
+being measured. The original values come from `provenance`, which is written
+once at extraction and never amended.
+
+**It keeps rule flags out of the extraction figures.** A concept-raised `Flag`
+carries confidence `explicit` because a SQL expression evaluated true, which
+says nothing about extraction. Mixing them in makes a coarse rule look like an
+extraction failure — and makes the rubric look inverted when it is fine. Rules
+are measured separately, by precision.
+
+### What it looks like when it works
+
+```r
+orph_quality_report(con)$by_confidence
+#>   confidence_label n_reviewed accuracy amend_rate reject_rate
+#> 1         explicit         12    0.917      0.083       0.000
+#> 2            named         16    0.812      0.188       0.000
+#> 3          implied          8    0.500      0.250       0.250
+#> 4         inferred          8    0.250      0.250       0.500
+```
+
+That is the rubric earning its place: accuracy falls as confidence falls. When
+it does not, the report says so plainly rather than leaving it to be noticed:
+
+```r
+orph_confidence_calibration(con)$note
+#> "A higher rubric level scored worse than a lower one. The rubric is not
+#>  ranking reliability here -- treat the levels as labels, not as a ranking,
+#>  until this resolves."
+```
+
+A rubric that does not rank correctly is worse than no rubric, because people
+trust it.
+
+### Rule precision
+
+```r
+orph_concept_precision(con)
+#>          concept_id n_raised n_reviewed n_upheld n_dismissed precision
+#> 1   open_ended_term        8          8        1           7     0.125
+#> 2  missing_signature        8          8        6           2     0.750
+#> 3 uncapped_liability        8          8        7           1     0.875
+```
+
+`open_ended_term` firing on eight documents and being dismissed seven times is
+the signal to tighten its expression — or to accept that a missing `end_date`
+usually means failed extraction rather than an open-ended contract, which is
+exactly what its seed rationale predicted.
+
+This measures precision only. **Nothing in the store knows about the issues a
+concept failed to raise**, so recall is unmeasurable here, and reporting a
+number for it would be worse than the gap.
+
+### Where to read it
+
+| Route | Access |
+|---|---|
+| `GET /quality` | Administrator — corpus figures span documents an actor may not be able to read |
+| `GET /documents/<id>/quality` | Anyone who can view that document |
+
+In Datasette, the `extraction_accuracy_by_confidence` and
+`rule_concept_precision` canned queries cover the same ground.
+
+---
+
 ## The cloud gate
 
 Cloud processing is opt-in, and an opt-in nobody can audit afterwards is a

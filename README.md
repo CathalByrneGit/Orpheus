@@ -29,6 +29,12 @@ Every fact carries `source` (`ai_local` / `ai_cloud` / `human`), a `confidence`
 from a five-level rubric, a review `status`, and a row in an append-only audit
 trail.
 
+Because corrections preserve the machine's value beside the human's, the store
+answers the question Phase 1 actually turns on: **is extraction good enough to
+build on yet?** `orph_quality_report()` computes it — accuracy by confidence
+level, whether the rubric ranks reliability at all, which rule concepts
+over-fire, and which fields people keep fixing.
+
 ---
 
 ## Documentation
@@ -94,7 +100,7 @@ both the audit story and the only way to measure whether extraction is improving
 
 ## Status
 
-442 tests, no skips with `conceptR` installed:
+498 tests, no skips with `conceptR` installed:
 
 ```bash
 Rscript -e 'testthat::test_dir("tests/testthat")'

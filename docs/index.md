@@ -17,7 +17,7 @@ views and the live reading-companion UI are deliberately out of scope — see
 |---|---|
 | [Data model](data-model.md) | Every table in the store, the ontology bundle, and the confidence rubric |
 | [Pipeline walkthrough](pipeline-walkthrough.md) | Steps 1–9, in execution order, with the function that runs each |
-| [Provenance and amendment](provenance-and-amendment.md) | The hardest part: how a machine guess becomes a checked fact without losing either |
+| [Provenance and amendment](provenance-and-amendment.md) | The hardest part: how a machine guess becomes a checked fact, and how extraction quality gets measured |
 | [API reference](api-reference.md) | Every HTTP endpoint, its permissions, and its response shape |
 | [Deployment](deployment.md) | Running the API and Datasette together, and the WAL trap that catches people |
 | [Developer guide](developer-guide.md) | Setup, tests, troubleshooting, project structure |
@@ -67,7 +67,8 @@ A document is ingested and hashed, classified by a local model, populated into
 per-object-type instance tables by the `ontologyDiscoverR` flow plus a
 deterministic date-and-money pass, evaluated against versioned `conceptR` rule
 concepts and an optional narrative analysis, and every resulting fact is
-correctable by a named person without anything being overwritten.
+correctable by a named person without anything being overwritten -- which is
+also what makes extraction quality measurable rather than asserted.
 
 ---
 

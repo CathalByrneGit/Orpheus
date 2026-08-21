@@ -206,3 +206,42 @@ test_that("an upload with no file is a 400 with a usable message", {
   expect_equal(res$status, 400L)
   expect_match(res$body$error$detail, "multipart")
 })
+
+test_that("corpus-wide quality is administrator only, per-document is not", {
+  api <- new_test_api(); use_fakes()
+  user  <- orph_create_actor(api$con, "User")
+  admin <- orph_create_actor(api$con, "Admin", is_admin = TRUE)
+  user_token  <- orph_create_token(api$con, user, "t")$token
+  admin_token <- orph_create_token(api$con, admin, "t")$token
+
+  doc <- call_route(api, "POST", "/documents", user_token,
+                    body = list(path = write_contract_file()))$body$document_id
+  call_route(api, "POST", "/documents/<id>/extract", user_token,
+             body = list(tier = "local"), params = list(id = doc))
+
+  denied <- call_route(api, "GET", "/quality", user_token)
+  expect_equal(denied$status, 403L)
+  expect_match(denied$body$error$detail, "documents/<id>/quality")
+
+  allowed <- call_route(api, "GET", "/quality", admin_token)
+  expect_equal(allowed$status, 200L)
+  expect_equal(allowed$body$readiness$state, "unmeasured")
+
+  # The owner can measure their own document without being an administrator.
+  scoped <- call_route(api, "GET", "/documents/<id>/quality", user_token, params = list(id = doc))
+  expect_equal(scoped$status, 200L)
+  expect_equal(scoped$body$scope, doc)
+})
+
+test_that("a stranger cannot read a document's quality report", {
+  api <- new_test_api(); use_fakes()
+  owner <- orph_create_actor(api$con, "Owner")
+  other <- orph_create_actor(api$con, "Other")
+  owner_token <- orph_create_token(api$con, owner, "t")$token
+  other_token <- orph_create_token(api$con, other, "t")$token
+  doc <- call_route(api, "POST", "/documents", owner_token,
+                    body = list(path = write_contract_file()))$body$document_id
+
+  expect_equal(call_route(api, "GET", "/documents/<id>/quality", other_token,
+                          params = list(id = doc))$status, 403L)
+})

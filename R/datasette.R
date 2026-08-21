@@ -123,6 +123,43 @@ databases:
         allow:
           is_admin: 1
 
+      extraction_accuracy_by_confidence:
+        title: Does the confidence rubric actually rank reliability?
+        sql: |-
+          SELECT p.confidence,
+                 COUNT(*) AS reviewed,
+                 SUM(CASE WHEN x.status = \'confirmed\' THEN 1 ELSE 0 END) AS confirmed,
+                 SUM(CASE WHEN x.status = \'amended\'   THEN 1 ELSE 0 END) AS amended,
+                 SUM(CASE WHEN x.status = \'rejected\'  THEN 1 ELSE 0 END) AS rejected,
+                 ROUND(1.0 * SUM(CASE WHEN x.status = \'confirmed\' THEN 1 ELSE 0 END)
+                       / COUNT(*), 3) AS accuracy
+          FROM provenance p
+          JOIN (
+            SELECT instance_id, status FROM instances_Contract
+            UNION ALL SELECT instance_id, status FROM instances_Company
+            UNION ALL SELECT instance_id, status FROM instances_Person
+            UNION ALL SELECT instance_id, status FROM instances_Clause
+            UNION ALL SELECT instance_id, status FROM instances_Obligation
+            UNION ALL SELECT instance_id, status FROM instances_KeyDate
+            UNION ALL SELECT instance_id, status FROM instances_MonetaryAmount
+          ) x ON x.instance_id = p.instance_id
+          WHERE x.status IN (\'confirmed\', \'amended\', \'rejected\')
+          GROUP BY p.confidence
+          ORDER BY p.confidence DESC
+
+      rule_concept_precision:
+        title: How often does each rule concept point at something real?
+        sql: |-
+          SELECT flag_type AS concept_id,
+                 COUNT(*) AS raised,
+                 SUM(CASE WHEN status IN (\'confirmed\', \'amended\') THEN 1 ELSE 0 END) AS upheld,
+                 SUM(CASE WHEN status = \'rejected\' THEN 1 ELSE 0 END) AS dismissed,
+                 SUM(CASE WHEN status = \'unconfirmed\' THEN 1 ELSE 0 END) AS unreviewed
+          FROM instances_Flag
+          WHERE raised_by_pass = \'concept\'
+          GROUP BY flag_type
+          ORDER BY dismissed DESC
+
       amendment_trail:
         title: Every human correction, newest first
         sql: |-

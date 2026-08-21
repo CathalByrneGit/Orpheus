@@ -170,6 +170,29 @@ separate review from correcting one row.
 | `GET` | `/schema-amendments` | actor (`?status=`) |
 | `POST` | `/schema-amendments/<id>/review` | **administrator** |
 
+### Extraction quality
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| `GET` | `/quality` | **administrator** | Corpus-wide; `?min_reviewed=` |
+| `GET` | `/documents/<id>/quality` | view | Scoped to one document |
+
+Corpus figures aggregate across documents the caller may not be able to read,
+so they are administrator-only. A per-document report needs only `view` on that
+document.
+
+```json
+{ "readiness": { "state": "measured",
+                 "note": "67% of instances reviewed; 59% were accepted exactly as extracted." },
+  "by_confidence": [ { "confidence_label": "named", "n_reviewed": 16, "accuracy": 0.812 } ],
+  "calibration": { "verdict": "monotonic" },
+  "concept_precision": [ { "concept_id": "open_ended_term", "precision": 0.125 } ] }
+```
+
+`state` is `unmeasured` when nothing has been reviewed, `insufficient_review`
+below 20% coverage, and `measured` above it. Every rate covers reviewed rows
+only — see [Provenance and amendment](provenance-and-amendment.md#measuring-extraction-quality).
+
 ### Administration
 
 | Method | Path | Permission | Body |
