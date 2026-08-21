@@ -154,6 +154,7 @@ pr <- POST(pr, "/documents/<id>/thing", function(req, res, id) {
 | `Cloud processing is disabled` | `cloud_ai_policy` is `disabled` | An admin sets it via `POST /admin/settings` |
 | `needs an explicit per-request opt-in` | Policy allows cloud, request did not ask | Send `cloud_opt_in: true` |
 | `The local tier has already run` | Re-running an extraction | Pass `force: true` to supersede the earlier results |
+| A first extraction fails, then works after installing the engine | Expected — the deterministic pass commits before the model pass, so its findings survive the failure | Just retry. Findings are matched on raw text and page, so the retry will not duplicate them |
 | `… is not a declared property` | Amending a property the bundle lacks | Accept the schema amendment first |
 | `Model did not return usable JSON` | A small local model wandered | Check the raw reply in the error; try a larger model |
 | Euro amounts never extracted | Symbol matching broken by a locale mismatch | Should not happen — symbols are byte-matched. If it recurs, check `orph_find_amounts()` against `orpheus:::utf8_symbol(0xe2, 0x82, 0xac)` |

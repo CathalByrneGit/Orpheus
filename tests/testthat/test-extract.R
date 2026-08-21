@@ -185,3 +185,46 @@ test_that("the two tiers do not block each other", {
   sources <- DBI::dbGetQuery(con, "SELECT DISTINCT source FROM instances_Contract")$source
   expect_setequal(sources, c("ai_local", "ai_cloud"))
 })
+
+test_that("retrying after a failed extraction does not duplicate deterministic findings", {
+  con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
+  path <- write_contract_file()
+  doc <- orph_ingest(con, path, actor_id = "act_test", storage_root = root)$document_id
+
+  # The deterministic pass commits before the model pass, so its findings
+  # survive a model failure -- which is wanted. What is not wanted is a second
+  # copy of them when the user fixes the problem and runs again.
+  use_fakes(populator = function(...) stop("no engine available"))
+  expect_error(orph_extract(con, doc, "local", actor_id = "act_test"), "Extraction failed")
+  after_failure <- DBI::dbGetQuery(con, "SELECT COUNT(*) n FROM instances_KeyDate")$n
+  expect_gt(after_failure, 0)
+
+  # The run is recorded failed, so a retry is allowed without force = TRUE.
+  expect_equal(DBI::dbGetQuery(con, "SELECT status FROM extraction_runs")$status, "failed")
+
+  orph_set_populator(fake_populator())
+  orph_extract(con, doc, "local", actor_id = "act_test")
+
+  expect_equal(DBI::dbGetQuery(con, "SELECT COUNT(*) n FROM instances_KeyDate")$n, after_failure)
+  expect_equal(
+    DBI::dbGetQuery(con, "SELECT COUNT(*) n FROM (SELECT raw_text, page_no FROM instances_KeyDate
+                          GROUP BY raw_text, page_no HAVING COUNT(*) > 1)")$n, 0)
+})
+
+test_that("a forced re-run still refreshes deterministic findings", {
+  con <- new_test_store(); root <- test_storage_root(); seed_actors(con); use_fakes()
+  path <- write_contract_file()
+  doc <- orph_ingest(con, path, actor_id = "act_test", storage_root = root)$document_id
+  orph_extract(con, doc, "local", actor_id = "act_test")
+  first <- DBI::dbGetQuery(con,
+    "SELECT COUNT(*) n FROM instances_KeyDate WHERE status = 'unconfirmed'")$n
+  expect_gt(first, 0)
+
+  # force supersedes the old findings, so fresh ones are written rather than
+  # being suppressed by the duplicate guard.
+  orph_extract(con, doc, "local", actor_id = "act_test", force = TRUE)
+  expect_equal(DBI::dbGetQuery(con,
+    "SELECT COUNT(*) n FROM instances_KeyDate WHERE status = 'unconfirmed'")$n, first)
+  expect_equal(DBI::dbGetQuery(con,
+    "SELECT COUNT(*) n FROM instances_KeyDate WHERE status = 'rejected'")$n, first)
+})

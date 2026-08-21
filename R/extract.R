@@ -350,6 +350,29 @@ link_deterministic_to_contract <- function(con, document_id) {
   invisible(TRUE)
 }
 
+#' Has this deterministic finding already been recorded for this document?
+#'
+#' The deterministic pass commits in its own transaction, before the model pass
+#' runs. That is deliberate -- a pattern-matched date is worth keeping even if
+#' the model call then fails -- but it means a retry after a failure would write
+#' the same findings a second time. The guard in orph_extract() does not catch
+#' it, because that only refuses a tier that already *succeeded*.
+#'
+#' Findings are therefore matched on what they are: the same raw text on the
+#' same page of the same document is the same finding. A row a reviewer already
+#' rejected does not block a fresh one, so a deliberate re-run still refreshes.
+#'
+#' @keywords internal
+deterministic_finding_exists <- function(con, table_name, document_id, raw_text, page_no) {
+  if (!DBI::dbExistsTable(con, table_name)) return(FALSE)
+  hit <- db_get_one(con, sprintf(
+    "SELECT instance_id FROM %s
+     WHERE document_id = ? AND raw_text = ? AND page_no = ? AND status != 'rejected'
+     LIMIT 1", DBI::dbQuoteIdentifier(con, table_name)),
+    list(document_id, raw_text, page_no))
+  !is.null(hit)
+}
+
 #' @keywords internal
 run_deterministic_pass <- function(con, document_id, bundle, actor_id) {
   pages <- db_query(con,
@@ -366,6 +389,8 @@ run_deterministic_pass <- function(con, document_id, bundle, actor_id) {
 
       dates <- orph_find_dates(text)
       for (j in seq_len(nrow(dates))) {
+        if (deterministic_finding_exists(con, "instances_KeyDate", document_id,
+                                         dates$raw_text[[j]], page_no)) next
         pos  <- regexpr(dates$raw_text[[j]], text, fixed = TRUE)
         role <- infer_role(text, pos, DATE_ROLE_CUES)
         id   <- orph_id("inst")
@@ -387,6 +412,8 @@ run_deterministic_pass <- function(con, document_id, bundle, actor_id) {
 
       amounts <- orph_find_amounts(text)
       for (j in seq_len(nrow(amounts))) {
+        if (deterministic_finding_exists(con, "instances_MonetaryAmount", document_id,
+                                         amounts$raw_text[[j]], page_no)) next
         pos  <- regexpr(amounts$raw_text[[j]], text, fixed = TRUE)
         role <- infer_role(text, pos, AMOUNT_ROLE_CUES)
         id   <- orph_id("inst")

@@ -19,6 +19,6 @@ A list with the per-level table, a verdict, and any inversions found.
 \description{
 The rubric is only worth carrying if a higher level really does mean a more
 reliable fact. This compares accuracy across levels and says plainly whether
-the ordering survives contact with real review — a rubric that does not rank
+the ordering survives contact with real review -- a rubric that does not rank
 correctly is worse than no rubric, because people trust it.
 }
