@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+data/
+storage/
+.env

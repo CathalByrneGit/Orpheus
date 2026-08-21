@@ -1,0 +1,58 @@
+# Orpheus: one writer, one reader, one local model.
+#
+# The store is a single SQLite file on a shared volume. Only `api` may write to
+# it — datasette mounts the same volume read-only, which turns the single-writer
+# rule into something the container runtime enforces rather than something
+# people remember.
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    volumes:
+      - orpheus-data:/data
+    environment:
+      ORPHEUS_DB: /data/orpheus.sqlite
+      ORPHEUS_STORAGE: /data/storage
+      ORPHEUS_LOCAL_MODEL: ${ORPHEUS_LOCAL_MODEL:-llama3.1:8b}
+      ORPHEUS_OLLAMA_HOST: http://ollama:11434
+      # Only read if cloud processing is enabled, which it is not by default.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  datasette:
+    image: datasetteproject/datasette:latest
+    volumes:
+      # Read-only: datasette is a client here, never a writer.
+      - orpheus-data:/data:ro
+      - ../inst/datasette/metadata.yml:/metadata.yml:ro
+    # Deliberately NOT --immutable. That flag makes SQLite skip the WAL, so a
+    # live store appears empty with no error. See docs/deployment.md.
+    # The filename stem must stay `orpheus` -- datasette derives the database
+    # name from it and matches metadata keys against that name.
+    command: >
+      datasette serve /data/orpheus.sqlite
+      --metadata /metadata.yml
+      --host 0.0.0.0 --port 8001
+      --setting sql_time_limit_ms 3000
+      --setting max_returned_rows 2000
+    ports:
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  orpheus-data:
+  ollama-models:

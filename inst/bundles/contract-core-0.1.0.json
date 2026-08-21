@@ -1,0 +1,2999 @@
+{
+  "bundle_id": "contract-core",
+  "bundle_name": "Core contract ontology",
+  "version": "0.1.0",
+  "spec_version": "0.1.0",
+  "created_at": "2026-08-21T19:48:51Z",
+  "description": "Hand-seeded starting bundle for Phase 1. Replaceable by dis_to_bundle() output from an ontologyDiscoverR discovery run over a real contract sample.",
+  "object_types": [
+    {
+      "id": "Contract",
+      "display_name": "Contract",
+      "description": "An agreement between a public body and one or more other parties.",
+      "table_name": "instances_Contract",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Contract"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Title of the agreement",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "reference",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract or tender reference number",
+          "source": {
+            "column": "reference"
+          }
+        },
+        {
+          "id": "description",
+          "type": "string",
+          "nullable": true,
+          "description": "Short description of the subject matter",
+          "source": {
+            "column": "description"
+          }
+        },
+        {
+          "id": "value_amount",
+          "type": "double",
+          "nullable": true,
+          "description": "Headline contract value",
+          "source": {
+            "column": "value_amount"
+          }
+        },
+        {
+          "id": "value_currency",
+          "type": "string",
+          "nullable": true,
+          "description": "ISO currency code of the headline value",
+          "source": {
+            "column": "value_currency"
+          }
+        },
+        {
+          "id": "start_date",
+          "type": "string",
+          "nullable": true,
+          "description": "Commencement date (ISO-8601)",
+          "source": {
+            "column": "start_date"
+          }
+        },
+        {
+          "id": "end_date",
+          "type": "string",
+          "nullable": true,
+          "description": "Expiry date (ISO-8601); null if open-ended",
+          "source": {
+            "column": "end_date"
+          }
+        },
+        {
+          "id": "signed_date",
+          "type": "string",
+          "nullable": true,
+          "description": "Date of execution (ISO-8601)",
+          "source": {
+            "column": "signed_date"
+          }
+        },
+        {
+          "id": "procurement_procedure",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. open, restricted, negotiated, direct award",
+          "source": {
+            "column": "procurement_procedure"
+          }
+        },
+        {
+          "id": "governing_law",
+          "type": "string",
+          "nullable": true,
+          "description": "Jurisdiction whose law governs the agreement",
+          "source": {
+            "column": "governing_law"
+          }
+        },
+        {
+          "id": "signature_block_present",
+          "type": "string",
+          "nullable": true,
+          "description": "Whether a signature block was found: yes | no | unclear",
+          "source": {
+            "column": "signature_block_present"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Company",
+      "display_name": "Company",
+      "description": "A legal entity party to, or named in, an agreement. Includes public bodies.",
+      "table_name": "instances_Company",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Company"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort cross-document matching",
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "registration_number",
+          "type": "string",
+          "nullable": true,
+          "description": "Company registration number, if stated",
+          "source": {
+            "column": "registration_number"
+          }
+        },
+        {
+          "id": "address",
+          "type": "string",
+          "nullable": true,
+          "description": "Registered or stated address",
+          "source": {
+            "column": "address"
+          }
+        },
+        {
+          "id": "role",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. contracting_authority, supplier, subcontractor, guarantor",
+          "source": {
+            "column": "role"
+          }
+        },
+        {
+          "id": "entity_kind",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. private_company, public_body, charity, partnership",
+          "source": {
+            "column": "entity_kind"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Person",
+      "display_name": "Person",
+      "description": "A named individual appearing in an agreement.",
+      "table_name": "instances_Person",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Person"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort cross-document matching",
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "job_title",
+          "type": "string",
+          "nullable": true,
+          "description": "Stated role or title",
+          "source": {
+            "column": "job_title"
+          }
+        },
+        {
+          "id": "acting_for",
+          "type": "string",
+          "nullable": true,
+          "description": "Organisation the person is stated to act for",
+          "source": {
+            "column": "acting_for"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Clause",
+      "display_name": "Clause",
+      "description": "A numbered or titled provision within an agreement.",
+      "table_name": "instances_Clause",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Clause"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "contract_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract this clause belongs to",
+          "source": {
+            "column": "contract_instance_id"
+          }
+        },
+        {
+          "id": "clause_number",
+          "type": "string",
+          "nullable": true,
+          "description": "Clause number as printed",
+          "source": {
+            "column": "clause_number"
+          }
+        },
+        {
+          "id": "heading",
+          "type": "string",
+          "nullable": true,
+          "description": "Clause heading",
+          "source": {
+            "column": "heading"
+          }
+        },
+        {
+          "id": "clause_type",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. indemnity, liability, termination, confidentiality, payment, renewal",
+          "source": {
+            "column": "clause_type"
+          }
+        },
+        {
+          "id": "text",
+          "type": "string",
+          "nullable": true,
+          "description": "Clause text as extracted",
+          "source": {
+            "column": "text"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page the clause starts on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Obligation",
+      "display_name": "Obligation",
+      "description": "A duty a clause places on a named party.",
+      "table_name": "instances_Obligation",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Obligation"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "clause_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Clause imposing this obligation",
+          "source": {
+            "column": "clause_instance_id"
+          }
+        },
+        {
+          "id": "obligated_party",
+          "type": "string",
+          "nullable": true,
+          "description": "Party bound, as named in the text",
+          "source": {
+            "column": "obligated_party"
+          }
+        },
+        {
+          "id": "summary",
+          "type": "string",
+          "nullable": true,
+          "description": "What must be done",
+          "source": {
+            "column": "summary"
+          }
+        },
+        {
+          "id": "due_date",
+          "type": "string",
+          "nullable": true,
+          "description": "Deadline, if stated (ISO-8601)",
+          "source": {
+            "column": "due_date"
+          }
+        },
+        {
+          "id": "recurrence",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. one_off, monthly, quarterly, annual",
+          "source": {
+            "column": "recurrence"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Flag",
+      "display_name": "Flag",
+      "description": "An issue raised against a document or one of its clauses.",
+      "table_name": "instances_Flag",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Flag"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "target_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Instance the flag is raised against",
+          "source": {
+            "column": "target_instance_id"
+          }
+        },
+        {
+          "id": "flag_type",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. unusual_indemnity, missing_signature, ambiguous_term, uncapped_liability",
+          "source": {
+            "column": "flag_type"
+          }
+        },
+        {
+          "id": "severity",
+          "type": "string",
+          "nullable": true,
+          "description": "low | medium | high",
+          "source": {
+            "column": "severity"
+          }
+        },
+        {
+          "id": "rationale",
+          "type": "string",
+          "nullable": true,
+          "description": "Why this was flagged",
+          "source": {
+            "column": "rationale"
+          }
+        },
+        {
+          "id": "raised_by_pass",
+          "type": "string",
+          "nullable": true,
+          "description": "Which pass raised it: local | cloud | concept | human",
+          "source": {
+            "column": "raised_by_pass"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "KeyDate",
+      "display_name": "Key date",
+      "description": "A date found in the document, with the phrase that introduced it.",
+      "table_name": "instances_KeyDate",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_KeyDate"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "contract_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract this date was found in",
+          "source": {
+            "column": "contract_instance_id"
+          }
+        },
+        {
+          "id": "value",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised date (ISO-8601)",
+          "source": {
+            "column": "value"
+          }
+        },
+        {
+          "id": "raw_text",
+          "type": "string",
+          "nullable": true,
+          "description": "Date exactly as printed",
+          "source": {
+            "column": "raw_text"
+          }
+        },
+        {
+          "id": "date_role",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. start, end, signature, milestone, unknown",
+          "source": {
+            "column": "date_role"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page the date appears on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "MonetaryAmount",
+      "display_name": "Monetary amount",
+      "description": "A monetary value found in the document.",
+      "table_name": "instances_MonetaryAmount",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_MonetaryAmount"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "contract_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract this amount was found in",
+          "source": {
+            "column": "contract_instance_id"
+          }
+        },
+        {
+          "id": "amount",
+          "type": "double",
+          "nullable": true,
+          "description": "Numeric value",
+          "source": {
+            "column": "amount"
+          }
+        },
+        {
+          "id": "currency",
+          "type": "string",
+          "nullable": true,
+          "description": "ISO currency code",
+          "source": {
+            "column": "currency"
+          }
+        },
+        {
+          "id": "raw_text",
+          "type": "string",
+          "nullable": true,
+          "description": "Amount exactly as printed",
+          "source": {
+            "column": "raw_text"
+          }
+        },
+        {
+          "id": "role",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. contract_value, cap, penalty, rate, unknown",
+          "source": {
+            "column": "role"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page the amount appears on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Relationship",
+      "display_name": "Relationship",
+      "description": "A link between two instances, as extracted from a document.",
+      "table_name": "edges",
+      "primary_key": "edge_id",
+      "primaryKey": "edge_id",
+      "source": {
+        "kind": "table",
+        "table": "edges"
+      },
+      "properties": [
+        {
+          "id": "edge_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Edge identifier",
+          "source": {
+            "column": "edge_id"
+          }
+        },
+        {
+          "id": "from_instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Source instance",
+          "source": {
+            "column": "from_instance_id"
+          }
+        },
+        {
+          "id": "to_instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Target instance",
+          "source": {
+            "column": "to_instance_id"
+          }
+        },
+        {
+          "id": "link_type_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Which link type this edge instantiates",
+          "source": {
+            "column": "link_type_id"
+          }
+        },
+        {
+          "id": "evidence",
+          "type": "string",
+          "nullable": true,
+          "description": "Text supporting the link",
+          "source": {
+            "column": "evidence"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": false
+      }
+    }
+  ],
+  "link_types": [
+    {
+      "id": "contains_clause",
+      "display_name": "contains clause",
+      "description": "Clause belongs to this contract",
+      "from": "Contract",
+      "to": "Clause",
+      "from_type_id": "Contract",
+      "to_type_id": "Clause",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "contract_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "imposes",
+      "display_name": "imposes",
+      "description": "Obligation arises from this clause",
+      "from": "Clause",
+      "to": "Obligation",
+      "from_type_id": "Clause",
+      "to_type_id": "Obligation",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "clause_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "dated_by",
+      "display_name": "has key date",
+      "description": "Date found in this contract",
+      "from": "Contract",
+      "to": "KeyDate",
+      "from_type_id": "Contract",
+      "to_type_id": "KeyDate",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "contract_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "valued_at",
+      "display_name": "has amount",
+      "description": "Monetary amount found in this contract",
+      "from": "Contract",
+      "to": "MonetaryAmount",
+      "from_type_id": "Contract",
+      "to_type_id": "MonetaryAmount",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "contract_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "edge_from",
+      "display_name": "edge source",
+      "description": "Instance an edge starts at",
+      "from": "Relationship",
+      "to": "Contract",
+      "from_type_id": "Relationship",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-one",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "from_instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "edge_to",
+      "display_name": "edge target",
+      "description": "Instance an edge points to",
+      "from": "Relationship",
+      "to": "Company",
+      "from_type_id": "Relationship",
+      "to_type_id": "Company",
+      "cardinality": "many-to-one",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "to_instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "party_to",
+      "display_name": "party to",
+      "description": "Company is a party to this contract",
+      "from": "Company",
+      "to": "Contract",
+      "from_type_id": "Company",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "signed_by",
+      "display_name": "signed",
+      "description": "Person signed this contract",
+      "from": "Person",
+      "to": "Contract",
+      "from_type_id": "Person",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "subcontracts_to",
+      "display_name": "subcontracts to",
+      "description": "Company subcontracts work to another company",
+      "from": "Company",
+      "to": "Company",
+      "from_type_id": "Company",
+      "to_type_id": "Company",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "references",
+      "display_name": "references",
+      "description": "Contract refers to another agreement",
+      "from": "Contract",
+      "to": "Contract",
+      "from_type_id": "Contract",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "mentions",
+      "display_name": "mentions",
+      "description": "Clause names a company",
+      "from": "Clause",
+      "to": "Company",
+      "from_type_id": "Clause",
+      "to_type_id": "Company",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "employed_by",
+      "display_name": "employed by",
+      "description": "Person acts for this company",
+      "from": "Person",
+      "to": "Company",
+      "from_type_id": "Person",
+      "to_type_id": "Company",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "raised_against",
+      "display_name": "raised against",
+      "description": "Flag concerns this clause",
+      "from": "Flag",
+      "to": "Clause",
+      "from_type_id": "Flag",
+      "to_type_id": "Clause",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    }
+  ],
+  "action_types": [],
+  "concept_defs": [
+    {
+      "id": "high_value",
+      "object_type_id": "Contract",
+      "scope": "commercial",
+      "display_name": "High value",
+      "description": "Headline value at or above the review threshold.",
+      "sql_expr": "value_amount IS NOT NULL AND CAST(value_amount AS REAL) >= 1000000",
+      "rationale": "Placeholder threshold. Confirm the real review threshold with stakeholders before relying on this."
+    },
+    {
+      "id": "missing_signature",
+      "object_type_id": "Contract",
+      "scope": "compliance",
+      "display_name": "Missing signature block",
+      "description": "No signature block was found in the document.",
+      "sql_expr": "signature_block_present = 'no'",
+      "rationale": "A contract with no signature block needs a human to confirm execution."
+    },
+    {
+      "id": "open_ended_term",
+      "object_type_id": "Contract",
+      "scope": "commercial",
+      "display_name": "Open-ended term",
+      "description": "No expiry date was extracted.",
+      "sql_expr": "end_date IS NULL OR end_date = ''",
+      "rationale": "Distinguishing a genuinely open-ended term from a failed extraction is exactly what human review is for."
+    },
+    {
+      "id": "direct_award",
+      "object_type_id": "Contract",
+      "scope": "procurement",
+      "display_name": "Direct award",
+      "description": "Awarded without a competitive procedure.",
+      "sql_expr": "LOWER(COALESCE(procurement_procedure,'')) IN ('direct award','direct_award','negotiated without prior publication')",
+      "rationale": "Direct awards attract the most procurement scrutiny."
+    },
+    {
+      "id": "uncapped_liability",
+      "object_type_id": "Clause",
+      "scope": "risk",
+      "display_name": "Uncapped liability",
+      "description": "A liability clause with no cap language.",
+      "sql_expr": "clause_type = 'liability' AND LOWER(COALESCE(text,'')) NOT LIKE '%cap%' AND LOWER(COALESCE(text,'')) NOT LIKE '%limited to%'",
+      "rationale": "Coarse by design: it over-selects, and review narrows it."
+    },
+    {
+      "id": "auto_renewal",
+      "object_type_id": "Clause",
+      "scope": "commercial",
+      "display_name": "Automatic renewal",
+      "description": "A clause that renews the agreement without a positive decision.",
+      "sql_expr": "LOWER(COALESCE(text,'')) LIKE '%automatically renew%' OR LOWER(COALESCE(text,'')) LIKE '%unless terminated%'",
+      "rationale": "Auto-renewal is a common source of unintended spend."
+    }
+  ],
+  "objects": [
+    {
+      "id": "Contract",
+      "display_name": "Contract",
+      "description": "An agreement between a public body and one or more other parties.",
+      "table_name": "instances_Contract",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Contract"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Title of the agreement",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "reference",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract or tender reference number",
+          "source": {
+            "column": "reference"
+          }
+        },
+        {
+          "id": "description",
+          "type": "string",
+          "nullable": true,
+          "description": "Short description of the subject matter",
+          "source": {
+            "column": "description"
+          }
+        },
+        {
+          "id": "value_amount",
+          "type": "double",
+          "nullable": true,
+          "description": "Headline contract value",
+          "source": {
+            "column": "value_amount"
+          }
+        },
+        {
+          "id": "value_currency",
+          "type": "string",
+          "nullable": true,
+          "description": "ISO currency code of the headline value",
+          "source": {
+            "column": "value_currency"
+          }
+        },
+        {
+          "id": "start_date",
+          "type": "string",
+          "nullable": true,
+          "description": "Commencement date (ISO-8601)",
+          "source": {
+            "column": "start_date"
+          }
+        },
+        {
+          "id": "end_date",
+          "type": "string",
+          "nullable": true,
+          "description": "Expiry date (ISO-8601); null if open-ended",
+          "source": {
+            "column": "end_date"
+          }
+        },
+        {
+          "id": "signed_date",
+          "type": "string",
+          "nullable": true,
+          "description": "Date of execution (ISO-8601)",
+          "source": {
+            "column": "signed_date"
+          }
+        },
+        {
+          "id": "procurement_procedure",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. open, restricted, negotiated, direct award",
+          "source": {
+            "column": "procurement_procedure"
+          }
+        },
+        {
+          "id": "governing_law",
+          "type": "string",
+          "nullable": true,
+          "description": "Jurisdiction whose law governs the agreement",
+          "source": {
+            "column": "governing_law"
+          }
+        },
+        {
+          "id": "signature_block_present",
+          "type": "string",
+          "nullable": true,
+          "description": "Whether a signature block was found: yes | no | unclear",
+          "source": {
+            "column": "signature_block_present"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Company",
+      "display_name": "Company",
+      "description": "A legal entity party to, or named in, an agreement. Includes public bodies.",
+      "table_name": "instances_Company",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Company"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort cross-document matching",
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "registration_number",
+          "type": "string",
+          "nullable": true,
+          "description": "Company registration number, if stated",
+          "source": {
+            "column": "registration_number"
+          }
+        },
+        {
+          "id": "address",
+          "type": "string",
+          "nullable": true,
+          "description": "Registered or stated address",
+          "source": {
+            "column": "address"
+          }
+        },
+        {
+          "id": "role",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. contracting_authority, supplier, subcontractor, guarantor",
+          "source": {
+            "column": "role"
+          }
+        },
+        {
+          "id": "entity_kind",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. private_company, public_body, charity, partnership",
+          "source": {
+            "column": "entity_kind"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Person",
+      "display_name": "Person",
+      "description": "A named individual appearing in an agreement.",
+      "table_name": "instances_Person",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Person"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort cross-document matching",
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "job_title",
+          "type": "string",
+          "nullable": true,
+          "description": "Stated role or title",
+          "source": {
+            "column": "job_title"
+          }
+        },
+        {
+          "id": "acting_for",
+          "type": "string",
+          "nullable": true,
+          "description": "Organisation the person is stated to act for",
+          "source": {
+            "column": "acting_for"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Clause",
+      "display_name": "Clause",
+      "description": "A numbered or titled provision within an agreement.",
+      "table_name": "instances_Clause",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Clause"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "contract_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract this clause belongs to",
+          "source": {
+            "column": "contract_instance_id"
+          }
+        },
+        {
+          "id": "clause_number",
+          "type": "string",
+          "nullable": true,
+          "description": "Clause number as printed",
+          "source": {
+            "column": "clause_number"
+          }
+        },
+        {
+          "id": "heading",
+          "type": "string",
+          "nullable": true,
+          "description": "Clause heading",
+          "source": {
+            "column": "heading"
+          }
+        },
+        {
+          "id": "clause_type",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. indemnity, liability, termination, confidentiality, payment, renewal",
+          "source": {
+            "column": "clause_type"
+          }
+        },
+        {
+          "id": "text",
+          "type": "string",
+          "nullable": true,
+          "description": "Clause text as extracted",
+          "source": {
+            "column": "text"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page the clause starts on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Obligation",
+      "display_name": "Obligation",
+      "description": "A duty a clause places on a named party.",
+      "table_name": "instances_Obligation",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Obligation"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "clause_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Clause imposing this obligation",
+          "source": {
+            "column": "clause_instance_id"
+          }
+        },
+        {
+          "id": "obligated_party",
+          "type": "string",
+          "nullable": true,
+          "description": "Party bound, as named in the text",
+          "source": {
+            "column": "obligated_party"
+          }
+        },
+        {
+          "id": "summary",
+          "type": "string",
+          "nullable": true,
+          "description": "What must be done",
+          "source": {
+            "column": "summary"
+          }
+        },
+        {
+          "id": "due_date",
+          "type": "string",
+          "nullable": true,
+          "description": "Deadline, if stated (ISO-8601)",
+          "source": {
+            "column": "due_date"
+          }
+        },
+        {
+          "id": "recurrence",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. one_off, monthly, quarterly, annual",
+          "source": {
+            "column": "recurrence"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Flag",
+      "display_name": "Flag",
+      "description": "An issue raised against a document or one of its clauses.",
+      "table_name": "instances_Flag",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_Flag"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "target_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Instance the flag is raised against",
+          "source": {
+            "column": "target_instance_id"
+          }
+        },
+        {
+          "id": "flag_type",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. unusual_indemnity, missing_signature, ambiguous_term, uncapped_liability",
+          "source": {
+            "column": "flag_type"
+          }
+        },
+        {
+          "id": "severity",
+          "type": "string",
+          "nullable": true,
+          "description": "low | medium | high",
+          "source": {
+            "column": "severity"
+          }
+        },
+        {
+          "id": "rationale",
+          "type": "string",
+          "nullable": true,
+          "description": "Why this was flagged",
+          "source": {
+            "column": "rationale"
+          }
+        },
+        {
+          "id": "raised_by_pass",
+          "type": "string",
+          "nullable": true,
+          "description": "Which pass raised it: local | cloud | concept | human",
+          "source": {
+            "column": "raised_by_pass"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "KeyDate",
+      "display_name": "Key date",
+      "description": "A date found in the document, with the phrase that introduced it.",
+      "table_name": "instances_KeyDate",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_KeyDate"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "contract_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract this date was found in",
+          "source": {
+            "column": "contract_instance_id"
+          }
+        },
+        {
+          "id": "value",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised date (ISO-8601)",
+          "source": {
+            "column": "value"
+          }
+        },
+        {
+          "id": "raw_text",
+          "type": "string",
+          "nullable": true,
+          "description": "Date exactly as printed",
+          "source": {
+            "column": "raw_text"
+          }
+        },
+        {
+          "id": "date_role",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. start, end, signature, milestone, unknown",
+          "source": {
+            "column": "date_role"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page the date appears on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "MonetaryAmount",
+      "display_name": "Monetary amount",
+      "description": "A monetary value found in the document.",
+      "table_name": "instances_MonetaryAmount",
+      "primary_key": "instance_id",
+      "primaryKey": "instance_id",
+      "source": {
+        "kind": "table",
+        "table": "instances_MonetaryAmount"
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "contract_instance_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract this amount was found in",
+          "source": {
+            "column": "contract_instance_id"
+          }
+        },
+        {
+          "id": "amount",
+          "type": "double",
+          "nullable": true,
+          "description": "Numeric value",
+          "source": {
+            "column": "amount"
+          }
+        },
+        {
+          "id": "currency",
+          "type": "string",
+          "nullable": true,
+          "description": "ISO currency code",
+          "source": {
+            "column": "currency"
+          }
+        },
+        {
+          "id": "raw_text",
+          "type": "string",
+          "nullable": true,
+          "description": "Amount exactly as printed",
+          "source": {
+            "column": "raw_text"
+          }
+        },
+        {
+          "id": "role",
+          "type": "string",
+          "nullable": true,
+          "description": "e.g. contract_value, cap, penalty, rate, unknown",
+          "source": {
+            "column": "role"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page the amount appears on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": true
+      }
+    },
+    {
+      "id": "Relationship",
+      "display_name": "Relationship",
+      "description": "A link between two instances, as extracted from a document.",
+      "table_name": "edges",
+      "primary_key": "edge_id",
+      "primaryKey": "edge_id",
+      "source": {
+        "kind": "table",
+        "table": "edges"
+      },
+      "properties": [
+        {
+          "id": "edge_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Edge identifier",
+          "source": {
+            "column": "edge_id"
+          }
+        },
+        {
+          "id": "from_instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Source instance",
+          "source": {
+            "column": "from_instance_id"
+          }
+        },
+        {
+          "id": "to_instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Target instance",
+          "source": {
+            "column": "to_instance_id"
+          }
+        },
+        {
+          "id": "link_type_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Which link type this edge instantiates",
+          "source": {
+            "column": "link_type_id"
+          }
+        },
+        {
+          "id": "evidence",
+          "type": "string",
+          "nullable": true,
+          "description": "Text supporting the link",
+          "source": {
+            "column": "evidence"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document this instance was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "description": "Actor who last amended this row",
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "description": "When this row was last amended",
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "x_orpheus": {
+        "managed": false
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "contains_clause",
+      "display_name": "contains clause",
+      "description": "Clause belongs to this contract",
+      "from": "Contract",
+      "to": "Clause",
+      "from_type_id": "Contract",
+      "to_type_id": "Clause",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "contract_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "imposes",
+      "display_name": "imposes",
+      "description": "Obligation arises from this clause",
+      "from": "Clause",
+      "to": "Obligation",
+      "from_type_id": "Clause",
+      "to_type_id": "Obligation",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "clause_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "dated_by",
+      "display_name": "has key date",
+      "description": "Date found in this contract",
+      "from": "Contract",
+      "to": "KeyDate",
+      "from_type_id": "Contract",
+      "to_type_id": "KeyDate",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "contract_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "valued_at",
+      "display_name": "has amount",
+      "description": "Monetary amount found in this contract",
+      "from": "Contract",
+      "to": "MonetaryAmount",
+      "from_type_id": "Contract",
+      "to_type_id": "MonetaryAmount",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "contract_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "edge_from",
+      "display_name": "edge source",
+      "description": "Instance an edge starts at",
+      "from": "Relationship",
+      "to": "Contract",
+      "from_type_id": "Relationship",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-one",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "from_instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "edge_to",
+      "display_name": "edge target",
+      "description": "Instance an edge points to",
+      "from": "Relationship",
+      "to": "Company",
+      "from_type_id": "Relationship",
+      "to_type_id": "Company",
+      "cardinality": "many-to-one",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "to_instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "party_to",
+      "display_name": "party to",
+      "description": "Company is a party to this contract",
+      "from": "Company",
+      "to": "Contract",
+      "from_type_id": "Company",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "signed_by",
+      "display_name": "signed",
+      "description": "Person signed this contract",
+      "from": "Person",
+      "to": "Contract",
+      "from_type_id": "Person",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "subcontracts_to",
+      "display_name": "subcontracts to",
+      "description": "Company subcontracts work to another company",
+      "from": "Company",
+      "to": "Company",
+      "from_type_id": "Company",
+      "to_type_id": "Company",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "references",
+      "display_name": "references",
+      "description": "Contract refers to another agreement",
+      "from": "Contract",
+      "to": "Contract",
+      "from_type_id": "Contract",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "mentions",
+      "display_name": "mentions",
+      "description": "Clause names a company",
+      "from": "Clause",
+      "to": "Company",
+      "from_type_id": "Clause",
+      "to_type_id": "Company",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "employed_by",
+      "display_name": "employed by",
+      "description": "Person acts for this company",
+      "from": "Person",
+      "to": "Company",
+      "from_type_id": "Person",
+      "to_type_id": "Company",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "raised_against",
+      "display_name": "raised against",
+      "description": "Flag concerns this clause",
+      "from": "Flag",
+      "to": "Clause",
+      "from_type_id": "Flag",
+      "to_type_id": "Clause",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    }
+  ],
+  "concepts": [
+    {
+      "id": "high_value",
+      "object_type_id": "Contract",
+      "scope": "commercial",
+      "display_name": "High value",
+      "description": "Headline value at or above the review threshold.",
+      "sql_expr": "value_amount IS NOT NULL AND CAST(value_amount AS REAL) >= 1000000",
+      "rationale": "Placeholder threshold. Confirm the real review threshold with stakeholders before relying on this."
+    },
+    {
+      "id": "missing_signature",
+      "object_type_id": "Contract",
+      "scope": "compliance",
+      "display_name": "Missing signature block",
+      "description": "No signature block was found in the document.",
+      "sql_expr": "signature_block_present = 'no'",
+      "rationale": "A contract with no signature block needs a human to confirm execution."
+    },
+    {
+      "id": "open_ended_term",
+      "object_type_id": "Contract",
+      "scope": "commercial",
+      "display_name": "Open-ended term",
+      "description": "No expiry date was extracted.",
+      "sql_expr": "end_date IS NULL OR end_date = ''",
+      "rationale": "Distinguishing a genuinely open-ended term from a failed extraction is exactly what human review is for."
+    },
+    {
+      "id": "direct_award",
+      "object_type_id": "Contract",
+      "scope": "procurement",
+      "display_name": "Direct award",
+      "description": "Awarded without a competitive procedure.",
+      "sql_expr": "LOWER(COALESCE(procurement_procedure,'')) IN ('direct award','direct_award','negotiated without prior publication')",
+      "rationale": "Direct awards attract the most procurement scrutiny."
+    },
+    {
+      "id": "uncapped_liability",
+      "object_type_id": "Clause",
+      "scope": "risk",
+      "display_name": "Uncapped liability",
+      "description": "A liability clause with no cap language.",
+      "sql_expr": "clause_type = 'liability' AND LOWER(COALESCE(text,'')) NOT LIKE '%cap%' AND LOWER(COALESCE(text,'')) NOT LIKE '%limited to%'",
+      "rationale": "Coarse by design: it over-selects, and review narrows it."
+    },
+    {
+      "id": "auto_renewal",
+      "object_type_id": "Clause",
+      "scope": "commercial",
+      "display_name": "Automatic renewal",
+      "description": "A clause that renews the agreement without a positive decision.",
+      "sql_expr": "LOWER(COALESCE(text,'')) LIKE '%automatically renew%' OR LOWER(COALESCE(text,'')) LIKE '%unless terminated%'",
+      "rationale": "Auto-renewal is a common source of unintended spend."
+    }
+  ]
+}
