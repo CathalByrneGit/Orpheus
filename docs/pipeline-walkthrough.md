@@ -151,6 +151,32 @@ Two filters are applied that `conceptR` cannot apply itself, because it evaluate
 a whole table: results are restricted to this document, and rejected rows are
 excluded. A fact a reviewer threw out must not come back as a finding.
 
+**Composite scores** — `orph_evaluate_score()` sums the weights of the concepts
+a contract triggered and bands the total (`low` / `medium` / `high`). Arithmetic
+over concepts already evaluated, so it is reproducible, decomposable and
+diffable between versions. Every result carries its `contributions`: which
+concepts fired and by how much. A score nobody can decompose is no better than
+the model's opinion.
+
+`orph_risk_comparison()` puts it beside the narrative risk level. Agreement is
+mild evidence both are working; **disagreement is the useful signal**, and says
+nothing about which one is wrong — the score sees only concepts that were
+evaluated, the model sees only facts that were extracted.
+
+**Templated thresholds** — `high_value` does not carry a number. It renders from
+a `value_threshold` template whose parameter defaults in the bundle and is
+overridden per deployment:
+
+```r
+orph_set_concept_parameter(con, "value_threshold", "threshold", 5000000, actor_id)
+```
+
+That adds a **new concept version** rather than editing the current one, so an
+evaluation made under the old threshold still points at a version that exists
+and still explains itself. A threshold is local policy, not a fact about
+contracts, and treating it as configuration rather than code is what stops a
+placeholder quietly becoming the rule.
+
 **Narrative analysis** — `orph_analyse_document()` gives a model the extracted
 instances, with their confidence and status, and asks for a summary, risk level,
 key issues and recommendations. It reads *structured facts, not document text*,

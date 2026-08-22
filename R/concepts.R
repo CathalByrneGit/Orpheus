@@ -44,6 +44,166 @@ orph_concept_context <- function(con, bundle = NULL) {
   conceptR::concept_context(bundle, con)
 }
 
+# ---------------------------------------------------------------------------
+# Concept parameters
+# ---------------------------------------------------------------------------
+
+#' Setting key holding a deployment's override for a template parameter
+#' @keywords internal
+concept_param_key <- function(template_id, parameter) {
+  paste0("concept_param.", template_id, ".", parameter)
+}
+
+#' Effective value of every concept template parameter
+#'
+#' A threshold like "high value means a million" is a local policy question, not
+#' a fact about contracts. The bundle carries a default so the pipeline runs out
+#' of the box; a deployment overrides it without editing the bundle. This shows
+#' both, and which one is in force.
+#'
+#' @param con A connection.
+#' @param bundle A bundle. Defaults to the active one.
+#' @return A data frame of template, parameter, default, effective value and source.
+#' @export
+orph_concept_parameters <- function(con, bundle = NULL) {
+  bundle <- bundle %||% orph_active_bundle(con)
+  rows <- list()
+  for (tmpl in bundle$concept_templates %||% list()) {
+    for (nm in names(tmpl$parameters %||% list())) {
+      spec <- tmpl$parameters[[nm]]
+      override <- orph_setting(con, concept_param_key(tmpl$template_id, nm), NULL)
+      rows[[length(rows) + 1L]] <- data.frame(
+        template_id = tmpl$template_id,
+        parameter   = nm,
+        type        = spec$type %||% "string",
+        default     = as.character(spec$default %||% NA),
+        effective   = as.character(override %||% spec$default %||% NA),
+        source      = if (is.null(override)) "bundle_default" else "deployment_override",
+        description = spec$description %||% "",
+        stringsAsFactors = FALSE)
+    }
+  }
+  if (length(rows) == 0) return(data.frame())
+  do.call(rbind, rows)
+}
+
+#' Set a concept template parameter for this deployment
+#'
+#' Takes effect by adding a **new concept version** rather than editing the
+#' current one, so an evaluation made under the old threshold still points at a
+#' version that exists and still explains itself. Changing the number is a
+#' schema-level act, and it is recorded as one.
+#'
+#' @param con A writable connection.
+#' @param template_id Template identifier.
+#' @param parameter Parameter name.
+#' @param value New value.
+#' @param actor_id Actor making the change.
+#' @return Invisibly, the result of re-registering the affected concepts.
+#' @export
+orph_set_concept_parameter <- function(con, template_id, parameter, value, actor_id) {
+  assert_writable(con)
+  assert_string(actor_id, "actor_id")
+  bundle <- orph_active_bundle(con)
+
+  tmpl <- NULL
+  for (candidate in bundle$concept_templates %||% list()) {
+    if (identical(candidate$template_id, template_id)) tmpl <- candidate
+  }
+  if (is.null(tmpl)) cli::cli_abort("No concept template {.val {template_id}} in the bundle.")
+  if (!(parameter %in% names(tmpl$parameters %||% list()))) {
+    known <- names(tmpl$parameters %||% list())
+    cli::cli_abort(c("Template {.val {template_id}} has no parameter {.val {parameter}}.",
+                     i = "Its parameters are {.val {known}}."))
+  }
+
+  # Formatted before storing, not at render time: the setting is what
+  # orph_concept_parameters() shows an administrator, so storing "5e+06" would
+  # put scientific notation in front of the person checking the threshold even
+  # if the SQL came out fine.
+  stored <- format_param(value)
+  previous <- orph_setting(con, concept_param_key(template_id, parameter), NULL)
+  with_tx(con, {
+    orph_set_setting(con, concept_param_key(template_id, parameter), stored, actor_id)
+    record_edit(con, "org_settings", concept_param_key(template_id, parameter), NULL,
+                "concept_parameter_changed",
+                previous = list(value = previous), new = list(value = stored),
+                actor_id = actor_id)
+  })
+  result <- orph_setup_concepts(con, bundle, actor_id = actor_id)
+  # A new concept version means any score built on it is pinned to the old one
+  # until its components are re-synced.
+  if (length(bundle$scores %||% list()) > 0) {
+    try(orph_setup_scores(con, bundle, actor_id = actor_id), silent = TRUE)
+  }
+  invisible(result)
+}
+
+#' Resolve a concept definition to SQL, rendering its template if it has one
+#' @keywords internal
+resolve_concept_sql <- function(con, bundle, cd) {
+  if (is.null(cd$template_id)) return(cd$sql_expr)
+
+  tmpl <- NULL
+  for (candidate in bundle$concept_templates %||% list()) {
+    if (identical(candidate$template_id, cd$template_id)) tmpl <- candidate
+  }
+  if (is.null(tmpl)) {
+    cli::cli_abort("Concept {.val {cd$id}} names unknown template {.val {cd$template_id}}.")
+  }
+
+  values <- list()
+  for (nm in names(tmpl$parameters %||% list())) {
+    spec <- tmpl$parameters[[nm]]
+    override <- orph_setting(con, concept_param_key(tmpl$template_id, nm), NULL)
+    supplied <- (cd$parameter_values %||% list())[[nm]]
+    values[[nm]] <- override %||% supplied %||% spec$default
+    if (is.null(values[[nm]])) {
+      cli::cli_abort("Parameter {.val {nm}} of template {.val {tmpl$template_id}} has no value.")
+    }
+  }
+
+  sql <- tmpl$base_sql_expr
+  for (nm in names(values)) {
+    sql <- gsub(paste0("\\{\\{", nm, "\\}\\}"), format_param(values[[nm]]), sql)
+  }
+  left <- regmatches(sql, gregexpr("\\{\\{[A-Za-z_][A-Za-z0-9_]*\\}\\}", sql, perl = TRUE))[[1]]
+  if (length(left) > 0) {
+    cli::cli_abort("Template {.val {tmpl$template_id}} left placeholders unfilled: {.val {left}}")
+  }
+  sql
+}
+
+#' Render a parameter value into SQL text
+#'
+#' `as.character(5000000)` is `"5e+06"`. SQLite parses that, but the rendered
+#' expression is stored, versioned and read by people deciding whether a concept
+#' is right -- and a threshold that reads as `5e+06` in the audit trail is a
+#' threshold nobody checks.
+#'
+#' @keywords internal
+format_param <- function(x) {
+  if (is.numeric(x)) format(x, scientific = FALSE, trim = TRUE)
+  else as.character(x)
+}
+
+#' Register the bundle's concept templates with conceptR
+#' @keywords internal
+register_concept_templates <- function(con, bundle, ctx) {
+  for (tmpl in bundle$concept_templates %||% list()) {
+    existing <- db_query(con, "SELECT template_id FROM concept_templates WHERE template_id = ?",
+                         list(tmpl$template_id))
+    if (nrow(existing) > 0) next
+    params <- lapply(tmpl$parameters %||% list(), function(spec) {
+      list(type = spec$type %||% "string", default = spec$default)
+    })
+    conceptR::cpt_define_template(ctx, tmpl$template_id, tmpl$object_type_id,
+                                  tmpl$base_sql_expr, params,
+                                  description = tmpl$description %||% "")
+  }
+  invisible(TRUE)
+}
+
 #' Register the bundle's seed concepts with conceptR
 #'
 #' Idempotent: a concept already defined keeps its version history, and a
@@ -59,10 +219,12 @@ orph_setup_concepts <- function(con, bundle = NULL, actor_id = NULL) {
   assert_writable(con)
   bundle <- bundle %||% orph_active_bundle(con)
   ctx <- orph_concept_context(con, bundle)
+  register_concept_templates(con, bundle, ctx)
 
   out <- list()
   for (cd in bundle$concept_defs %||% list()) {
     scope <- cd$scope %||% "default"
+    sql_expr <- resolve_concept_sql(con, bundle, cd)
     defined <- db_query(con, "SELECT concept_id FROM concept_definitions WHERE concept_id = ?",
                         list(cd$id))
     if (nrow(defined) == 0) {
@@ -74,15 +236,17 @@ orph_setup_concepts <- function(con, bundle = NULL, actor_id = NULL) {
        WHERE concept_id = ? AND scope = ? ORDER BY version", list(cd$id, scope))
     current <- versions[versions$status == "active", , drop = FALSE]
 
-    if (nrow(current) > 0 && identical(trimws(current$sql_expr[[1]]), trimws(cd$sql_expr))) {
+    if (nrow(current) > 0 && identical(trimws(current$sql_expr[[1]]), trimws(sql_expr))) {
       out[[length(out) + 1L]] <- data.frame(concept_id = cd$id, scope = scope,
                                             version = current$version[[1]], action = "unchanged",
                                             stringsAsFactors = FALSE)
       next
     }
 
-    v <- conceptR::cpt_add_version(ctx, cd$id, scope, cd$sql_expr, status = "draft",
-                                   rationale = cd$rationale %||% NULL)
+    v <- conceptR::cpt_add_version(ctx, cd$id, scope, sql_expr, status = "draft",
+                                   rationale = cd$rationale %||% NULL,
+                                   template_id = cd$template_id %||% NULL,
+                                   parameter_values = cd$parameter_values %||% NULL)
     suppressWarnings(conceptR::cpt_activate(ctx, cd$id, scope, v))
     # A superseded version is deprecated rather than deleted: evaluations made
     # under it keep pointing at a version that still exists.
@@ -92,7 +256,7 @@ orph_setup_concepts <- function(con, bundle = NULL, actor_id = NULL) {
     record_edit(con, "concept_versions", paste0(cd$id, "/", scope, "/", v), NULL,
                 "concept_version_added", previous = NULL,
                 new = list(concept_id = cd$id, scope = scope, version = v,
-                           sql_expr = cd$sql_expr), actor_id = actor_id)
+                           sql_expr = sql_expr), actor_id = actor_id)
     out[[length(out) + 1L]] <- data.frame(concept_id = cd$id, scope = scope, version = v,
                                           action = if (nrow(current) > 0) "new_version" else "created",
                                           stringsAsFactors = FALSE)
@@ -221,6 +385,205 @@ write_concept_evaluation <- function(con, bundle, concept_id, concept_version, c
               list(concept_id = concept_id, kind = kind, scope = scope_level),
               actor_id = actor_id)
   invisible(id)
+}
+
+# ---------------------------------------------------------------------------
+# Composite scores
+# ---------------------------------------------------------------------------
+
+#' Register the bundle's composite scores with conceptR
+#'
+#' Idempotent: a score already defined keeps its components rather than being
+#' redefined, so a score referenced by past evaluations stays intact.
+#'
+#' @param con A writable connection.
+#' @param bundle A bundle. Defaults to the active one.
+#' @param actor_id Actor registering them.
+#' @return A data frame of score ids and how many components each has.
+#' @export
+orph_setup_scores <- function(con, bundle = NULL, actor_id = NULL) {
+  assert_writable(con)
+  bundle <- bundle %||% orph_active_bundle(con)
+  ctx <- orph_concept_context(con, bundle)
+  if (length(bundle$scores %||% list()) == 0) return(data.frame())
+
+  out <- list()
+  for (sc in bundle$scores) {
+    existing <- db_query(con, "SELECT score_id FROM composite_scores WHERE score_id = ?",
+                         list(sc$score_id))
+    if (nrow(existing) == 0) {
+      conceptR::cpt_define_score(ctx, sc$score_id, sc$object_type_id,
+                                 components = list(),
+                                 aggregation = sc$aggregation %||% "weighted_sum",
+                                 thresholds = sc$thresholds %||% NULL,
+                                 description = sc$description %||% "")
+      record_edit(con, "composite_scores", sc$score_id, NULL, "score_defined", NULL,
+                  list(score_id = sc$score_id, thresholds = sc$thresholds), actor_id)
+    }
+    for (comp in sc$components %||% list()) {
+      # conceptR documents version = NULL as "use whichever is active at
+      # evaluation time", but composite_score_components.version is NOT NULL
+      # and part of the primary key, so that path always fails. The active
+      # version is therefore resolved and pinned here.
+      #
+      # That turns out to be the better behaviour anyway: the score records
+      # which concept version it scored against, so a result stays explainable
+      # after a threshold changes. The cost is that components must be re-synced
+      # when a concept gains a version, which is what the delete below does.
+      active <- db_get_one(con,
+        "SELECT version FROM concept_versions
+         WHERE concept_id = ? AND scope = ? AND status = 'active'
+         ORDER BY version DESC LIMIT 1", list(comp$concept_id, comp$scope))
+      if (is.null(active)) {
+        cli::cli_warn(paste0("Score '", sc$score_id, "' references concept '",
+                             comp$concept_id, "' which has no active version; skipping."))
+        next
+      }
+
+      DBI::dbExecute(con,
+        "DELETE FROM composite_score_components
+         WHERE score_id = ? AND concept_id = ? AND scope = ? AND version != ?",
+        params = list(sc$score_id, comp$concept_id, comp$scope, active$version))
+
+      have <- db_query(con,
+        "SELECT 1 FROM composite_score_components
+         WHERE score_id = ? AND concept_id = ? AND scope = ? AND version = ?",
+        list(sc$score_id, comp$concept_id, comp$scope, active$version))
+      if (nrow(have) > 0) next
+
+      conceptR::cpt_add_score_component(ctx, sc$score_id, comp$concept_id, comp$scope,
+                                        version = active$version,
+                                        weight = comp$weight %||% 1)
+    }
+    n <- db_get_one(con, "SELECT COUNT(*) AS n FROM composite_score_components WHERE score_id = ?",
+                    list(sc$score_id))$n
+    out[[length(out) + 1L]] <- data.frame(score_id = sc$score_id,
+                                          n_components = as.integer(n),
+                                          stringsAsFactors = FALSE)
+  }
+  do.call(rbind, out)
+}
+
+#' Evaluate a composite score for a document
+#'
+#' Arithmetic over concepts that have already been evaluated: reproducible,
+#' explainable, and diffable between versions — everything the narrative risk
+#' level is not. The two are meant to coexist. Where they disagree is the
+#' interesting case, and [orph_risk_comparison()] surfaces it.
+#'
+#' @param con A writable connection.
+#' @param document_id Document identifier.
+#' @param score_id Score to evaluate. Defaults to the bundle's first.
+#' @param actor_id Actor triggering it.
+#' @return A list with the score, its tier, and which components fired.
+#' @export
+orph_evaluate_score <- function(con, document_id, score_id = NULL, actor_id = NULL) {
+  assert_writable(con)
+  bundle <- orph_active_bundle(con)
+  scores <- bundle$scores %||% list()
+  if (length(scores) == 0) cli::cli_abort("The active bundle defines no composite scores.")
+
+  score_def <- if (is.null(score_id)) scores[[1]] else {
+    hit <- Filter(function(s) identical(s$score_id, score_id), scores)
+    if (length(hit) == 0) cli::cli_abort("No score {.val {score_id}} in the bundle.")
+    hit[[1]]
+  }
+
+  ctx <- orph_concept_context(con, bundle)
+  ot  <- orph_object_type(bundle, score_def$object_type_id)
+  pk  <- ot$primary_key
+
+  live <- db_query(con, sprintf(
+    "SELECT instance_id FROM %s WHERE document_id = ? AND status != 'rejected'",
+    DBI::dbQuoteIdentifier(con, ot$table_name)), list(document_id))
+  if (nrow(live) == 0) {
+    cli::cli_abort(c("No {.val {score_def$object_type_id}} instance in {.val {document_id}}.",
+                     i = "Run an extraction pass first."))
+  }
+
+  scored <- conceptR::cpt_evaluate_score(ctx, score_def$score_id)
+  scored <- scored[scored[[pk]] %in% live$instance_id, , drop = FALSE]
+  if (nrow(scored) == 0) return(list(score_id = score_def$score_id, results = list()))
+
+  weights <- stats::setNames(
+    vapply(score_def$components, function(c) as.numeric(c$weight %||% 1), numeric(1)),
+    vapply(score_def$components, function(c) c$concept_id, character(1)))
+
+  results <- list()
+  with_tx(con, {
+    for (i in seq_len(nrow(scored))) {
+      row <- scored[i, , drop = FALSE]
+      instance_id <- row[[pk]]
+
+      fired <- names(weights)[vapply(names(weights), function(cid) {
+        isTRUE(as.logical(row[[cid]] %||% FALSE))
+      }, logical(1))]
+
+      result <- list(
+        score_id   = score_def$score_id,
+        instance_id = instance_id,
+        score      = as.numeric(row$score %||% NA),
+        tier       = as.character(row$tier %||% NA),
+        thresholds = score_def$thresholds,
+        # Which concepts contributed, and by how much. A score nobody can
+        # decompose is no better than the model's opinion.
+        contributions = lapply(fired, function(cid)
+          list(concept_id = cid, weight = unname(weights[[cid]]))),
+        max_possible = sum(weights))
+
+      write_concept_evaluation(con, bundle,
+        concept_id = score_def$score_id, concept_version = NA_integer_,
+        concept_scope = NA_character_, kind = "score", scope_level = "document",
+        document_id = document_id, result = result, dependencies = instance_id,
+        source = "ai_local", confidence = unname(ORPH_CONFIDENCE[["explicit"]]),
+        actor_id = actor_id)
+
+      results[[length(results) + 1L]] <- result
+    }
+  })
+
+  list(score_id = score_def$score_id, document_id = document_id, results = results)
+}
+
+#' Compare the deterministic score against the narrative risk level
+#'
+#' Two independent readings of the same document. Agreement is mild evidence
+#' both are working; disagreement is the useful signal, and says nothing about
+#' which one is wrong.
+#'
+#' @param con A connection.
+#' @param document_id Document identifier.
+#' @return A list with both readings and whether they agree.
+#' @export
+orph_risk_comparison <- function(con, document_id) {
+  score <- db_get_one(con,
+    "SELECT result FROM concept_evaluations
+     WHERE target_document_id = ? AND kind = 'score' AND stale = 0
+     ORDER BY generated_at DESC LIMIT 1", list(document_id))
+  narrative <- db_get_one(con,
+    "SELECT result FROM concept_evaluations
+     WHERE target_document_id = ? AND kind = 'narrative' AND stale = 0
+     ORDER BY generated_at DESC LIMIT 1", list(document_id))
+
+  score_tier <- if (is.null(score)) NA_character_ else from_json(score$result)$tier
+  narrative_level <- if (is.null(narrative)) NA_character_ else from_json(narrative$result)$risk_level
+
+  list(
+    document_id       = document_id,
+    score_tier        = score_tier %||% NA_character_,
+    narrative_level   = narrative_level %||% NA_character_,
+    available         = !is.na(score_tier) && !is.na(narrative_level),
+    agree             = if (is.na(score_tier) || is.na(narrative_level)) NA
+                        else identical(tolower(score_tier), tolower(narrative_level)),
+    note = if (is.na(score_tier) || is.na(narrative_level))
+      "Both a score and a narrative analysis are needed before they can be compared."
+    else if (identical(tolower(score_tier), tolower(narrative_level)))
+      "The rule-based score and the model's reading agree."
+    else
+      paste("The rule-based score and the model's reading disagree. Neither is",
+            "authoritative -- the score can only see concepts that were evaluated,",
+            "and the model can only see the facts that were extracted.")
+  )
 }
 
 # ---------------------------------------------------------------------------

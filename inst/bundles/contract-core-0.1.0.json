@@ -3,7 +3,7 @@
   "bundle_name": "Core contract ontology",
   "version": "0.1.0",
   "spec_version": "0.1.0",
-  "created_at": "2026-08-22T00:24:48Z",
+  "created_at": "2026-08-22T00:32:48Z",
   "description": "Hand-seeded starting bundle for Phase 1. Replaceable by dis_to_bundle() output from an ontologyDiscoverR discovery run over a real contract sample.",
   "object_types": [
     {
@@ -1755,6 +1755,56 @@
       }
     }
   ],
+  "concept_templates": [
+    {
+      "template_id": "value_threshold",
+      "object_type_id": "Contract",
+      "description": "Contract value at or above a configurable review threshold.",
+      "base_sql_expr": "value_amount IS NOT NULL AND CAST(value_amount AS REAL) >= {{threshold}}",
+      "parameters": {
+        "threshold": {
+          "type": "double",
+          "default": 1000000,
+          "description": "Value at or above which a contract is treated as high value, in the contract's own currency."
+        }
+      }
+    }
+  ],
+  "scores": [
+    {
+      "score_id": "contract_risk",
+      "object_type_id": "Contract",
+      "aggregation": "weighted_sum",
+      "description": "Weighted count of the risk concepts a contract triggers.",
+      "thresholds": {
+        "low": 0,
+        "medium": 2,
+        "high": 4
+      },
+      "components": [
+        {
+          "concept_id": "missing_signature",
+          "scope": "compliance",
+          "weight": 2
+        },
+        {
+          "concept_id": "direct_award",
+          "scope": "procurement",
+          "weight": 2
+        },
+        {
+          "concept_id": "high_value",
+          "scope": "commercial",
+          "weight": 1
+        },
+        {
+          "concept_id": "open_ended_term",
+          "scope": "commercial",
+          "weight": 1
+        }
+      ]
+    }
+  ],
   "action_types": [],
   "concept_defs": [
     {
@@ -1763,8 +1813,11 @@
       "scope": "commercial",
       "display_name": "High value",
       "description": "Headline value at or above the review threshold.",
-      "sql_expr": "value_amount IS NOT NULL AND CAST(value_amount AS REAL) >= 1000000",
-      "rationale": "Placeholder threshold. Confirm the real review threshold with stakeholders before relying on this."
+      "template_id": "value_threshold",
+      "parameter_values": {
+        "threshold": 1000000
+      },
+      "rationale": "Threshold is a deployment setting, not a fact. Override it with orph_set_concept_parameter()."
     },
     {
       "id": "missing_signature",
@@ -3569,8 +3622,11 @@
       "scope": "commercial",
       "display_name": "High value",
       "description": "Headline value at or above the review threshold.",
-      "sql_expr": "value_amount IS NOT NULL AND CAST(value_amount AS REAL) >= 1000000",
-      "rationale": "Placeholder threshold. Confirm the real review threshold with stakeholders before relying on this."
+      "template_id": "value_threshold",
+      "parameter_values": {
+        "threshold": 1000000
+      },
+      "rationale": "Threshold is a deployment setting, not a fact. Override it with orph_set_concept_parameter()."
     },
     {
       "id": "missing_signature",

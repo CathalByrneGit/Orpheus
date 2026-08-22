@@ -131,6 +131,24 @@ databases:
           GROUP BY flag_type
           ORDER BY dismissed DESC
 
+      risk_score_vs_model:
+        title: Where the rule score and the model's reading disagree
+        sql: |-
+          SELECT s.target_document_id AS document_id,
+                 d.filename,
+                 json_extract(s.result, '$.tier')        AS score_tier,
+                 json_extract(s.result, '$.score')       AS score,
+                 json_extract(n.result, '$.risk_level')  AS model_level
+          FROM concept_evaluations s
+          JOIN concept_evaluations n
+            ON n.target_document_id = s.target_document_id
+           AND n.kind = 'narrative' AND n.stale = 0
+          LEFT JOIN documents d ON d.document_id = s.target_document_id
+          WHERE s.kind = 'score' AND s.stale = 0
+            AND LOWER(json_extract(s.result, '$.tier'))
+                != LOWER(json_extract(n.result, '$.risk_level'))
+          ORDER BY score DESC
+
       amendment_trail:
         title: Every human correction, newest first
         sql: |-

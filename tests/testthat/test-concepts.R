@@ -60,17 +60,20 @@ test_that("changing a concept expression adds a version and deprecates the old o
   orph_setup_concepts(con, actor_id = "act_admin")
 
   bundle <- orph_active_bundle(con)
-  idx <- which(vapply(bundle$concept_defs, function(c) identical(c$id, "high_value"), logical(1)))
-  bundle$concept_defs[[idx]]$sql_expr <- "CAST(value_amount AS REAL) >= 5000000"
+  # direct_award, not high_value: high_value's SQL comes from a template, so
+  # editing sql_expr on it is a bundle error rather than a change. Templated
+  # concepts are changed by their parameters -- see test-templates-scores.R.
+  idx <- which(vapply(bundle$concept_defs, function(c) identical(c$id, "direct_award"), logical(1)))
+  bundle$concept_defs[[idx]]$sql_expr <- "LOWER(COALESCE(procurement_procedure,'')) = 'direct award'"
   bundle$version <- "0.2.0"
   orph_register_bundle(con, bundle, actor_id = "act_admin")
 
   again <- orph_setup_concepts(con, actor_id = "act_admin")
-  expect_equal(again$action[again$concept_id == "high_value"], "new_version")
-  expect_equal(again$action[again$concept_id == "direct_award"], "unchanged")
+  expect_equal(again$action[again$concept_id == "direct_award"], "new_version")
+  expect_equal(again$action[again$concept_id == "missing_signature"], "unchanged")
 
   versions <- DBI::dbGetQuery(con,
-    "SELECT version, status FROM concept_versions WHERE concept_id = 'high_value' ORDER BY version")
+    "SELECT version, status FROM concept_versions WHERE concept_id = 'direct_award' ORDER BY version")
   expect_equal(versions$status, c("deprecated", "active"))
 })
 

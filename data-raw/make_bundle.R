@@ -348,12 +348,52 @@ link_types <- list(
 # Note these expressions are interpolated into SQL by conceptR, so authoring a
 # concept is a privileged operation. The API restricts it to admin actors.
 
+# Templates exist for the concepts whose expression is right but whose numbers
+# are a local policy question. A hardcoded threshold is a guess wearing the
+# authority of code: templating it means a deployment sets its own review
+# threshold without editing the bundle, and every change is a new concept
+# version rather than a silent edit.
+concept_templates <- list(
+  list(
+    template_id    = "value_threshold",
+    object_type_id = "Contract",
+    description    = "Contract value at or above a configurable review threshold.",
+    base_sql_expr  = "value_amount IS NOT NULL AND CAST(value_amount AS REAL) >= {{threshold}}",
+    parameters     = list(
+      threshold = list(type = "double", default = 1000000,
+                       description = "Value at or above which a contract is treated as high value, in the contract's own currency.")
+    )
+  )
+)
+
+# A deterministic counterpart to the narrative risk level. The model's
+# risk_level is interpretation and is not reproducible; this is arithmetic over
+# concepts that have already been evaluated, so it can be explained, diffed
+# between versions, and disagreed with. Where the two diverge is worth a look --
+# which is the point of having both.
+scores <- list(
+  list(
+    score_id       = "contract_risk",
+    object_type_id = "Contract",
+    aggregation    = "weighted_sum",
+    description    = "Weighted count of the risk concepts a contract triggers.",
+    thresholds     = list(low = 0, medium = 2, high = 4),
+    components     = list(
+      list(concept_id = "missing_signature", scope = "compliance",  weight = 2),
+      list(concept_id = "direct_award",      scope = "procurement", weight = 2),
+      list(concept_id = "high_value",        scope = "commercial",  weight = 1),
+      list(concept_id = "open_ended_term",   scope = "commercial",  weight = 1)
+    )
+  )
+)
+
 concept_defs <- list(
   list(id = "high_value", object_type_id = "Contract", scope = "commercial",
        display_name = "High value",
        description = "Headline value at or above the review threshold.",
-       sql_expr = "value_amount IS NOT NULL AND CAST(value_amount AS REAL) >= 1000000",
-       rationale = "Placeholder threshold. Confirm the real review threshold with stakeholders before relying on this."),
+       template_id = "value_threshold",
+       parameter_values = list(threshold = 1000000),
+       rationale = "Threshold is a deployment setting, not a fact. Override it with orph_set_concept_parameter()."),
   list(id = "missing_signature", object_type_id = "Contract", scope = "compliance",
        display_name = "Missing signature block",
        description = "No signature block was found in the document.",
@@ -394,6 +434,8 @@ bundle <- list(
   object_types = object_types,
   interfaces   = interfaces,
   link_types   = link_types,
+  concept_templates = concept_templates,
+  scores       = scores,
   action_types = list(),
   concept_defs = concept_defs
 )
@@ -409,4 +451,5 @@ out <- "inst/bundles/contract-core-0.1.0.json"
 writeLines(jsonlite::toJSON(bundle, auto_unbox = TRUE, pretty = TRUE, null = "null"), out)
 cat("wrote", out, "\n")
 cat("object types:", length(object_types), " interfaces:", length(interfaces),
-    " link types:", length(link_types), " concepts:", length(concept_defs), "\n")
+    " link types:", length(link_types), " concepts:", length(concept_defs),
+    " templates:", length(concept_templates), " scores:", length(scores), "\n")

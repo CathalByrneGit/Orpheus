@@ -77,13 +77,21 @@ substantive input to the decision:
 5. **`conceptR` interpolates `sql_expr` directly into SQL.** Concept authoring is
    therefore a privileged operation; the API restricts it to administrators.
 
+6. **`cpt_add_score_component(version = NULL)` cannot work.** Its own default is
+   documented as "use whichever version is active at evaluation time", but
+   `composite_score_components.version` is `NOT NULL` *and* part of the primary
+   key, so the default always fails on insert. Orpheus resolves and pins the
+   active version instead, and re-syncs components when a concept gains a
+   version. That turned out to be the better behaviour — the score records which
+   concept version produced it — but it is a workaround, not a choice.
+
 ### Why the decision is cheap to reverse
 
 The extraction engine is reached through exactly one file,
 `R/ontology_stack.R`, behind `orph_populate()`, with `orph_set_populator()` as
 the injection point. Everything downstream — persistence, provenance, the
 amendment model, concepts, permissions, the API — works on a normalised shape
-and never sees the stack. The test suite proves this: all 543 tests pass with
+and never sees the stack. The test suite proves this: all 588 tests pass with
 `ontologyDiscoverR` absent, driving a substitute engine through the same
 interface.
 

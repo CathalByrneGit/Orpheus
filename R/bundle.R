@@ -88,6 +88,31 @@ orph_validate_bundle <- function(bundle) {
       problems <- c(problems, sprintf("link type '%s': missing join keys (objectSetsR traversal needs them)", id))
   }
 
+  # A concept whose SQL comes from a template must not also carry a literal
+  # sql_expr. Silently preferring one would mean an edit to the other does
+  # nothing, with no error and no clue why the concept did not change.
+  for (cd in bundle$concept_defs %||% list()) {
+    id <- cd$id %||% "<unnamed>"
+    has_sql <- !is.null(cd$sql_expr) && nzchar(cd$sql_expr)
+    has_tmpl <- !is.null(cd$template_id)
+    if (has_sql && has_tmpl) {
+      problems <- c(problems, sprintf(
+        "concept '%s': has both sql_expr and template_id -- it must have exactly one", id))
+    }
+    if (!has_sql && !has_tmpl) {
+      problems <- c(problems, sprintf(
+        "concept '%s': has neither sql_expr nor template_id", id))
+    }
+    if (has_tmpl) {
+      known <- vapply(bundle$concept_templates %||% list(),
+                      function(x) x$template_id %||% "", character(1))
+      if (!(cd$template_id %in% known)) {
+        problems <- c(problems, sprintf(
+          "concept '%s': names unknown template '%s'", id, cd$template_id))
+      }
+    }
+  }
+
   # Interfaces are a promise that a set of object types can all answer the same
   # question. An unchecked promise is worse than none: a type that declares an
   # interface without carrying its properties makes a cross-type query fail at

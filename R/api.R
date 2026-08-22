@@ -368,6 +368,49 @@ orph_api <- function(db_path = Sys.getenv("ORPHEUS_DB", "data/orpheus.sqlite"),
     })
   })
 
+  # --- scores and concept parameters -----------------------------------------
+  pr <- POST(pr, "/documents/<id>/score", function(req, res, id) {
+    actor <- require_actor(req, res); if (is.null(actor)) return(json_error(res, 401L, "Authentication required."))
+    guard(res, {
+      orph_require(con, actor, id, "edit")
+      orph_evaluate_score(con, id, score_id = param(req, "score_id"),
+                          actor_id = actor$actor_id)
+    })
+  })
+
+  pr <- GET(pr, "/documents/<id>/risk", function(req, res, id) {
+    actor <- require_actor(req, res); if (is.null(actor)) return(json_error(res, 401L, "Authentication required."))
+    guard(res, { orph_require(con, actor, id, "view"); orph_risk_comparison(con, id) })
+  })
+
+  pr <- GET(pr, "/concept-parameters", function(req, res) {
+    actor <- require_actor(req, res); if (is.null(actor)) return(json_error(res, 401L, "Authentication required."))
+    guard(res, orph_concept_parameters(con))
+  })
+
+  pr <- POST(pr, "/admin/concept-parameters", function(req, res) {
+    actor <- require_actor(req, res); if (is.null(actor)) return(json_error(res, 401L, "Authentication required."))
+    # Changing a threshold changes what every document is measured against, so
+    # it is an administrator action even though it looks like a setting.
+    if (!isTRUE(actor$is_admin)) return(json_error(res, 403L, "Administrator only."))
+    guard(res, {
+      template_id <- param(req, "template_id"); parameter <- param(req, "parameter")
+      value <- param(req, "value")
+      if (is.null(template_id) || is.null(parameter) || is.null(value)) {
+        return(json_error(res, 400L, "template_id, parameter and value are all required."))
+      }
+      orph_set_concept_parameter(con, template_id, parameter, value, actor$actor_id)
+      list(template_id = template_id, parameter = parameter, value = value,
+           note = "A new concept version was created; re-evaluate affected documents.")
+    })
+  })
+
+  pr <- POST(pr, "/admin/scores/setup", function(req, res) {
+    actor <- require_actor(req, res); if (is.null(actor)) return(json_error(res, 401L, "Authentication required."))
+    if (!isTRUE(actor$is_admin)) return(json_error(res, 403L, "Administrator only."))
+    guard(res, orph_setup_scores(con, actor_id = actor$actor_id))
+  })
+
   # --- extraction quality ---------------------------------------------------
   pr <- GET(pr, "/quality", function(req, res) {
     actor <- require_actor(req, res); if (is.null(actor)) return(json_error(res, 401L, "Authentication required."))

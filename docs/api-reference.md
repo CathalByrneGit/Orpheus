@@ -170,6 +170,20 @@ separate review from correcting one row.
 | `GET` | `/schema-amendments` | actor (`?status=`) |
 | `POST` | `/schema-amendments/<id>/review` | **administrator** |
 
+### Scores and thresholds
+
+| Method | Path | Permission |
+|---|---|---|
+| `POST` | `/documents/<id>/score` | edit |
+| `GET` | `/documents/<id>/risk` | view — the score beside the model's reading |
+| `GET` | `/concept-parameters` | actor — effective thresholds and where each came from |
+| `POST` | `/admin/concept-parameters` | **administrator** |
+| `POST` | `/admin/scores/setup` | **administrator** |
+
+Changing a threshold changes what every document is measured against, so it is
+an administrator action even though it looks like a setting. The response says a
+new concept version was created and affected documents need re-evaluating.
+
 ### Extraction quality
 
 | Method | Path | Permission | Notes |

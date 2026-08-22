@@ -82,7 +82,9 @@ test_that("a failed migration releases the lock instead of stranding the databas
 
   # A file that is not a database at all fails somewhere inside connect/migrate.
   writeLines("this is not a SQLite database", path)
-  expect_error(orph_connect(path, mode = "write"))
+  # The file is deliberately not a database, so RSQLite's pragma warnings are
+  # expected noise rather than something to surface.
+  suppressWarnings(expect_error(orph_connect(path, mode = "write")))
   # The lock must not survive the failure, or nothing could ever open this path.
   expect_false(file.exists(paste0(path, ".writer.lock")))
 })
