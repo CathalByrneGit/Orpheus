@@ -12,7 +12,14 @@ population_system_prompt <- function(bundle) {
     props <- vapply(ot$properties %||% list(), function(p) {
       if (p$id %in% c("instance_id", "document_id", "source", "confidence",
                       "status", "amended_by", "amended_at", "naive_key")) return("")
-      sprintf("      %s (%s): %s", p$id, p$type %||% "string", p$description %||% "")
+      # Where a codelist governs a property, the model is asked to classify into
+      # it rather than to paraphrase. Without this the model writes "Direct
+      # Award" and every concept written against the codelist misses it.
+      allowed <- unlist(p$values %||% list(), use.names = FALSE)
+      sprintf("      %s (%s): %s%s", p$id, p$type %||% "string", p$description %||% "",
+              if (length(allowed))
+                paste0("\n        MUST be exactly one of: ", paste(allowed, collapse = ", "))
+              else "")
     }, character(1))
     props <- props[nzchar(props)]
     sprintf("  %s -- %s\n%s", ot$id, ot$description %||% "", paste(props, collapse = "\n"))

@@ -38,12 +38,31 @@ provenance_props <- function() list(
   prop("amended_at",  "string",  "When this row was last amended",  nullable = TRUE)
 )
 
-prop <- function(id, type, description, nullable = TRUE, column = NULL) {
+# OCDS codelists, taken from the standard rather than invented.
+#   procurementMethod is CLOSED  -- these four values are the whole vocabulary.
+#   partyRole is OPEN            -- extending it is legitimate, and subcontractor
+#                                   comes from the OCDS subcontracting extension.
+#   contractStatus is CLOSED.
+OCDS_PROCUREMENT_METHOD <- c("open", "selective", "limited", "direct")
+OCDS_PARTY_ROLE <- c("buyer", "procuringEntity", "supplier", "tenderer", "funder",
+                     "enquirer", "payer", "payee", "reviewBody", "interestedParty",
+                     "subcontractor")
+OCDS_CONTRACT_STATUS <- c("pending", "active", "cancelled", "terminated")
+
+prop <- function(id, type, description, nullable = TRUE, column = NULL,
+                 ocds = NULL, values = NULL) {
   list(
     id          = id,
     type        = type,
     nullable    = nullable,
     description = description,
+    # The OCDS path this property corresponds to. Documentation that travels
+    # with the schema, and the basis for an OCDS export later.
+    x_ocds      = ocds,
+    # Allowed values, where a codelist governs them. Not enforced on write --
+    # a value outside the list is reported for review rather than rejected,
+    # the same way an unrecognised property is.
+    values      = if (is.null(values)) NULL else as.list(values),
     # objectSetsR reads property$source$column when mapping a property onto a
     # physical column. Identity mappings are still stated so a later rename of
     # a column does not require a code change, only a bundle edit.
@@ -170,28 +189,50 @@ object_types <- list(
   object_type("Contract", "Contract",
     "An agreement between a public body and one or more other parties.",
     list(
-      prop("name",                   "string", "Title of the agreement", nullable = FALSE),
-      prop("reference",              "string", "Contract or tender reference number"),
-      prop("description",            "string", "Short description of the subject matter"),
-      prop("value_amount",           "double", "Headline contract value"),
-      prop("value_currency",         "string", "ISO currency code of the headline value"),
-      prop("start_date",             "string", "Commencement date (ISO-8601)"),
-      prop("end_date",               "string", "Expiry date (ISO-8601); null if open-ended"),
-      prop("signed_date",            "string", "Date of execution (ISO-8601)"),
-      prop("procurement_procedure",  "string", "e.g. open, restricted, negotiated, direct award"),
-      prop("governing_law",          "string", "Jurisdiction whose law governs the agreement"),
+      prop("name",          "string", "Title of the agreement", nullable = FALSE,
+           ocds = "contracts/title"),
+      prop("reference",     "string", "Contract or tender reference number",
+           ocds = "contracts/id"),
+      prop("description",   "string", "Short description of the subject matter",
+           ocds = "contracts/description"),
+      prop("value_amount",  "double", "Headline contract value",
+           ocds = "contracts/value/amount"),
+      prop("value_currency","string", "ISO 4217 currency code of the headline value",
+           ocds = "contracts/value/currency"),
+      prop("start_date",    "string", "Commencement date (ISO-8601)",
+           ocds = "contracts/period/startDate"),
+      prop("end_date",      "string", "Expiry date (ISO-8601); null if open-ended",
+           ocds = "contracts/period/endDate"),
+      prop("signed_date",   "string", "Date of execution (ISO-8601)",
+           ocds = "contracts/dateSigned"),
+      # Named contract_status, not status: every instance table already has a
+      # `status` column holding the *review* state (unconfirmed/confirmed/
+      # amended/rejected). OCDS calls its field contracts/status, and taking
+      # that name literally would collide with the review vocabulary -- two
+      # different meanings on one column, in the one place where ambiguity is
+      # least affordable.
+      prop("contract_status", "string",
+           "Contract status per the OCDS contractStatus codelist -- distinct from the review status",
+           ocds = "contracts/status", values = OCDS_CONTRACT_STATUS),
+      prop("procurement_procedure", "string",
+           "How the contract was awarded, OCDS procurementMethod codelist (closed)",
+           ocds = "tender/procurementMethod", values = OCDS_PROCUREMENT_METHOD),
+      prop("governing_law", "string", "Jurisdiction whose law governs the agreement"),
       prop("signature_block_present","string", "Whether a signature block was found: yes | no | unclear")
     )),
 
   object_type("Company", "Company",
     "A legal entity party to, or named in, an agreement. Includes public bodies.",
     list(
-      prop("name",             "string", "Name as written in the document", nullable = FALSE),
-      prop("naive_key",        "string", "Normalised name for best-effort cross-document matching"),
-      prop("registration_number", "string", "Company registration number, if stated"),
-      prop("address",          "string", "Registered or stated address"),
-      prop("role",             "string", "e.g. contracting_authority, supplier, subcontractor, guarantor"),
-      prop("entity_kind",      "string", "e.g. private_company, public_body, charity, partnership")
+      prop("name", "string", "Name as written in the document", nullable = FALSE,
+           ocds = "parties/name"),
+      prop("naive_key", "string", "Normalised name for best-effort cross-document matching"),
+      prop("registration_number", "string", "Company registration number, if stated",
+           ocds = "parties/identifier/id"),
+      prop("address", "string", "Registered or stated address", ocds = "parties/address"),
+      prop("role", "string", "Role in the contracting process, OCDS partyRole codelist (open)",
+           ocds = "parties/roles", values = OCDS_PARTY_ROLE),
+      prop("entity_kind", "string", "e.g. private_company, public_body, charity, partnership")
     )),
 
   object_type("Person", "Person",
@@ -407,8 +448,8 @@ concept_defs <- list(
   list(id = "direct_award", object_type_id = "Contract", scope = "procurement",
        display_name = "Direct award",
        description = "Awarded without a competitive procedure.",
-       sql_expr = "LOWER(COALESCE(procurement_procedure,'')) IN ('direct award','direct_award','negotiated without prior publication')",
-       rationale = "Direct awards attract the most procurement scrutiny."),
+       sql_expr = "procurement_procedure = 'direct'",
+       rationale = "Matches the closed OCDS procurementMethod codelist rather than guessing at phrasings. A contract whose procedure is recorded outside the codelist is reported by orph_codelist_violations(), not silently missed here."),
   list(id = "uncapped_liability", object_type_id = "Clause", scope = "risk",
        display_name = "Uncapped liability",
        description = "A liability clause with no cap language.",

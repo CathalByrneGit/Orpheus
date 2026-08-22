@@ -100,7 +100,7 @@ both the audit story and the only way to measure whether extraction is improving
 
 ## Status
 
-588 tests, no skips with `conceptR` installed:
+604 tests, no skips with `conceptR` installed:
 
 ```bash
 Rscript -e 'testthat::test_dir("tests/testthat")'

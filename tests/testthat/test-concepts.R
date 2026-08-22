@@ -1,7 +1,7 @@
 test_that("seed concepts register with conceptR and evaluate over extracted rows", {
   skip_if_no_conceptr()
   con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
-  use_fakes(populator = fake_populator(extra_properties = list(procurement_procedure = "direct award")))
+  use_fakes(populator = fake_populator(extra_properties = list(procurement_procedure = "direct")))
   doc <- seed_document(con, root)
 
   registered <- orph_setup_concepts(con, actor_id = "act_admin")
@@ -64,7 +64,7 @@ test_that("changing a concept expression adds a version and deprecates the old o
   # editing sql_expr on it is a bundle error rather than a change. Templated
   # concepts are changed by their parameters -- see test-templates-scores.R.
   idx <- which(vapply(bundle$concept_defs, function(c) identical(c$id, "direct_award"), logical(1)))
-  bundle$concept_defs[[idx]]$sql_expr <- "LOWER(COALESCE(procurement_procedure,'')) = 'direct award'"
+  bundle$concept_defs[[idx]]$sql_expr <- "procurement_procedure IN ('direct', 'limited')"
   bundle$version <- "0.2.0"
   orph_register_bundle(con, bundle, actor_id = "act_admin")
 

@@ -62,6 +62,15 @@ orph_validate_bundle <- function(bundle) {
     if (is.null(ot$properties) || length(ot$properties) == 0)
       problems <- c(problems, sprintf("object type '%s': has no properties", id))
     prop_ids <- vapply(ot$properties %||% list(), function(p) p$id %||% "", character(1))
+    # A duplicate property id generates a table with two columns of one name,
+    # or silently drops one. It happened once already, adopting OCDS's
+    # contracts/status onto a type that already had a review `status`.
+    dupes <- unique(prop_ids[duplicated(prop_ids)])
+    if (length(dupes) > 0) {
+      problems <- c(problems, sprintf("object type '%s': duplicate propert%s %s",
+                                      id, if (length(dupes) == 1) "y" else "ies",
+                                      paste(sprintf("'%s'", dupes), collapse = ", ")))
+    }
     if (!(ot$primary_key %in% prop_ids))
       problems <- c(problems, sprintf("object type '%s': primary_key '%s' is not a declared property",
                                       id, ot$primary_key))

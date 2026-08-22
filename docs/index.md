@@ -22,6 +22,8 @@ views and the live reading-companion UI are deliberately out of scope — see
 | [Deployment](deployment.md) | Running the API and Datasette together, and the WAL trap that catches people |
 | [Developer guide](developer-guide.md) | Setup, tests, troubleshooting, project structure |
 | [Open decisions](open-decisions.md) | What Phase 1 deliberately did not decide, and what the build corrected |
+| [Prior art](prior-art.md) | Open-source tools that already do parts of this, and what that means |
+| [OCDS alignment](ocds-alignment.md) | Mapping the bundle onto the Open Contracting Data Standard |
 
 ---
 
