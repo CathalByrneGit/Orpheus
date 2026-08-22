@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Documents{% endblock %}
+{% block content %}
+<h1>Documents</h1>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+
+{% if capabilities %}
+<p style="color:#666">
+  Reads: {% if capabilities.text_extraction.pdf_text %}PDF{% else %}<s>PDF</s>{% endif %},
+  docx, text{% if capabilities.text_extraction.ocr %}, scans (OCR){% else %} &mdash; no OCR configured{% endif %}.
+  Cloud analysis: <strong>{{ capabilities.cloud.policy }}</strong>.
+  Bundle: {{ capabilities.bundle.bundle_id }} v{{ capabilities.bundle.version }}.
+</p>
+{% endif %}
+
+<h2>Add a document</h2>
+<form action="{{ urls.path('/-/orpheus/upload') }}" method="post">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <p>
+    <label>Path on the server<br>
+      <input type="text" name="path" style="width:32em" placeholder="/srv/incoming/agreement.pdf">
+    </label>
+  </p>
+  <p>
+    <label>Extraction
+      <select name="tier">
+        <option value="local">local &mdash; nothing leaves this server</option>
+        <option value="cloud">cloud &mdash; sends excerpts off-site</option>
+      </select>
+    </label>
+  </p>
+  <p>
+    <label><input type="checkbox" name="cloud_opt_in"> I am opting this document in to cloud processing</label><br>
+    <span style="color:#666">Required for the cloud tier, and never assumed from the policy.
+    Every cloud call is recorded.</span>
+  </p>
+  <p><button type="submit">Ingest and extract</button></p>
+</form>
+
+<h2>Already ingested</h2>
+{% if documents %}
+<table class="rows-and-columns">
+  <thead><tr><th>Document</th><th>Type</th><th>Review</th><th>Added</th></tr></thead>
+  <tbody>
+  {% for d in documents %}
+    <tr>
+      <td><a href="{{ urls.path('/-/orpheus/document/' + d.document_id) }}">{{ d.filename }}</a></td>
+      <td>{{ d.doc_type or "&mdash;" | safe }}</td>
+      <td>{{ d.review_status }}</td>
+      <td>{{ d.date_added }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>Nothing yet.</p>
+{% endif %}
+{% endblock %}

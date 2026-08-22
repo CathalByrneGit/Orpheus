@@ -110,6 +110,63 @@ The file must be named `orpheus.sqlite`, or the metadata key changed to match.
 
 ---
 
+## The Datasette UI plugin
+
+`plugins/orpheus_datasette.py` adds an upload page and per-row review actions,
+so a person can drop a document in and correct what came out without leaving
+Datasette.
+
+```bash
+datasette serve data/orpheus.sqlite \
+  --plugins-dir plugins --template-dir templates \
+  --metadata datasette.yml --port 8001
+```
+
+```yaml
+# datasette.yml
+plugins:
+  orpheus-datasette:
+    api_url: "http://127.0.0.1:8000"
+    actor_tokens:
+      "nuala@dept.ie": "…"     # per-actor: amendments name the real person
+    # token: "…"               # single shared token: fine for one user, and
+                               # then every amendment is attributed to one id
+```
+
+| Route | What it does |
+|---|---|
+| `/-/orpheus` | Documents, deployment capabilities, and the upload form |
+| `/-/orpheus/upload` | Ingest → classify → extract, via the API |
+| `/-/orpheus/document/<id>` | Extracted facts with their excerpts, editable |
+| `/-/orpheus/review` | Confirm, amend or reject one instance |
+
+### Two constraints it is built around
+
+**It never opens a SQLite connection.** Datasette writing to the store directly
+would make it a second writer and the storage design would stop holding. Verified
+rather than asserted: with the UI running and documents ingested through it, the
+writer lock is held by the API process, and the plugin contains no
+`execute_write` and no `sqlite3` call.
+
+**It never calls a model.** Doing so would bypass the cloud opt-in gate, the org
+policy, the per-request consent and the `llm_calls` audit in one step. Selecting
+the cloud tier in the upload form on a deployment with `cloud_ai_policy =
+disabled` returns the API's own refusal — surfaced verbatim, because the API's
+errors are written for a person — and the cloud audit log stays empty.
+
+Everything the plugin does therefore passes through the API, which applies
+provenance, the confidence rubric, the amendment history and permissions on the
+way in. It is a client, and deliberately a thin one.
+
+### What it is not yet
+
+Upload takes a **server-side path**, not a browser file upload — enough to
+exercise the loop, and it is also how a watched drop-directory would feed the
+same code path. There is no live annotation as you read; that is the reading
+companion, and it is a later phase.
+
+---
+
 ## Backups
 
 Copy **the database and its `-wal` sidecar together**, or checkpoint first.

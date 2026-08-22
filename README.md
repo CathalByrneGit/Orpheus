@@ -82,8 +82,14 @@ Serving it:
 ```bash
 Rscript inst/plumber/plumb.R                                    # writer, :8000
 datasette serve data/orpheus.sqlite \
-  --metadata inst/datasette/metadata.yml --port 8001            # reader, :8001
+  --plugins-dir plugins --template-dir templates \
+  --metadata datasette.yml --port 8001                          # UI + reader, :8001
 ```
+
+The Datasette plugin adds an upload page and per-row confirm/amend/reject. It is
+a thin client over the API — it never opens a SQLite connection and never calls
+a model, so the single-writer guarantee and the cloud opt-in gate both still
+hold when a person is driving. See [deployment](docs/deployment.md#the-datasette-ui-plugin).
 
 ---
 
