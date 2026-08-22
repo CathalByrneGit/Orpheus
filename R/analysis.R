@@ -22,6 +22,83 @@ ORPH_NAIVE_RESOLUTION <- "naive_unresolved"
 #' @keywords internal
 have_objectsets <- function() requireNamespace("objectSetsR", quietly = TRUE)
 
+# ---------------------------------------------------------------------------
+# Interface queries
+# ---------------------------------------------------------------------------
+
+#' Query every object type that implements an interface, as one set
+#'
+#' The ontology's job is to let a question be asked once. "Which named entities
+#' appear in this document" spans Company and Person today and may span more
+#' tomorrow; asking it per type means the list of types lives at the call site,
+#' and a new type silently stops being included in the answer. Asking it by
+#' interface means adding `"Named"` to a new object type is enough.
+#'
+#' Mirrors `objectSetsR::object_set_by_interface()`: the result is projected to
+#' the interface's properties only, so every row has the same shape whichever
+#' type it came from. A `type_id` column says which that was.
+#'
+#' @param con A connection.
+#' @param interface_id Interface identifier, e.g. `"Named"`.
+#' @param bundle A bundle. Defaults to the active one.
+#' @param document_id Restrict to one document, or `NULL` for the corpus.
+#' @param include_rejected Include rows a reviewer rejected.
+#' @param where Optional extra SQL predicate over the interface's properties.
+#' @param params Parameters for `where`.
+#' @return A data frame with the interface's properties plus `type_id`.
+#' @export
+orph_object_set_by_interface <- function(con, interface_id, bundle = NULL,
+                                         document_id = NULL, include_rejected = FALSE,
+                                         where = NULL, params = list()) {
+  bundle <- bundle %||% orph_active_bundle(con)
+  if (is.null(bundle)) cli::cli_abort("No active ontology bundle.")
+
+  iface <- orph_interface(bundle, interface_id)
+  if (is.null(iface)) {
+    known <- vapply(bundle$interfaces %||% list(), function(i) i$id %||% "", character(1))
+    cli::cli_abort(c("No interface {.val {interface_id}} in the bundle.",
+                     i = "Known interfaces: {.val {known}}"))
+  }
+
+  type_ids <- orph_implementing_types(bundle, interface_id)
+  if (length(type_ids) == 0) {
+    cli::cli_abort("No object type implements {.val {interface_id}}.")
+  }
+
+  cols <- orph_interface_property_ids(iface)
+  selects <- character(); all_params <- list()
+
+  for (tid in type_ids) {
+    ot <- orph_object_type(bundle, tid)
+    if (is.null(ot) || !DBI::dbExistsTable(con, ot$table_name)) next
+
+    # Validated at registration, but a table can lag its bundle between an
+    # amendment being accepted and the schema being applied.
+    present <- DBI::dbListFields(con, ot$table_name)
+    if (!all(cols %in% present)) next
+
+    clauses <- character()
+    if (!include_rejected) clauses <- c(clauses, "status != 'rejected'")
+    if (!is.null(document_id)) { clauses <- c(clauses, "document_id = ?"); all_params <- c(all_params, document_id) }
+    if (!is.null(where))       { clauses <- c(clauses, paste0("(", where, ")")); all_params <- c(all_params, params) }
+
+    selects <- c(selects, sprintf(
+      "SELECT %s, %s AS type_id FROM %s%s",
+      paste(DBI::dbQuoteIdentifier(con, cols), collapse = ", "),
+      DBI::dbQuoteString(con, tid),
+      DBI::dbQuoteIdentifier(con, ot$table_name),
+      if (length(clauses)) paste0(" WHERE ", paste(clauses, collapse = " AND ")) else ""))
+  }
+
+  if (length(selects) == 0) {
+    empty <- stats::setNames(
+      lapply(seq_along(c(cols, "type_id")), function(i) character()), c(cols, "type_id"))
+    return(as.data.frame(empty, stringsAsFactors = FALSE))
+  }
+
+  db_query(con, paste(selects, collapse = "\nUNION ALL\n"), all_params)
+}
+
 #' Collect an object type's live rows
 #'
 #' Uses objectSetsR when it is installed, which is what makes this an object-set
@@ -168,6 +245,11 @@ orph_corpus_analysis <- function(con, document_id, actor_id = NULL, narrate = FA
 
 #' @keywords internal
 match_counterparties <- function(con, bundle, document_id, type_id) {
+  # The instances in *this* document still come from one type -- the caller asks
+  # about companies or about people. What changed is the lookup: it now searches
+  # every type implementing `Named`, not just the same type. A name is a name,
+  # and whether the match lands on a Company or a Person is a finding rather
+  # than something to filter out in advance.
   ot <- orph_object_type(bundle, type_id)
   if (is.null(ot) || !DBI::dbExistsTable(con, ot$table_name)) return(list())
 
@@ -177,27 +259,41 @@ match_counterparties <- function(con, bundle, document_id, type_id) {
     DBI::dbQuoteIdentifier(con, ot$table_name)), list(document_id))
   if (nrow(mine) == 0) return(list())
 
-  all_rows <- collect_object_set(con, bundle, type_id, naive_keys = mine$naive_key)
-  if (nrow(all_rows) == 0) return(list())
+  named <- orph_object_set_by_interface(con, "Named", bundle = bundle)
+  if (nrow(named) == 0) return(list())
+  named <- named[!is.na(named$naive_key) & nzchar(named$naive_key), , drop = FALSE]
 
   out <- list()
   for (i in seq_len(nrow(mine))) {
     key <- mine$naive_key[[i]]
-    others <- all_rows[all_rows$naive_key %in% key &
-                       all_rows$document_id != document_id, , drop = FALSE]
+    others <- named[named$naive_key %in% key & named$document_id != document_id, , drop = FALSE]
     if (nrow(others) == 0) next
-    variants <- unique(others$name)
+
+    same_type  <- others[others$type_id == type_id, , drop = FALSE]
+    other_type <- others[others$type_id != type_id, , drop = FALSE]
+    variants   <- unique(others$name)
+
     out[[length(out) + 1L]] <- list(
-      instance_id        = mine$instance_id[[i]],
-      name               = mine$name[[i]],
-      naive_key          = key,
-      appears_in_documents = length(unique(others$document_id)),
-      other_document_ids = unique(others$document_id),
-      other_instance_ids = unique(others$instance_id),
-      name_variants      = variants,
+      instance_id          = mine$instance_id[[i]],
+      name                 = mine$name[[i]],
+      naive_key            = key,
+      appears_in_documents = length(unique(same_type$document_id)),
+      other_document_ids   = unique(same_type$document_id),
+      other_instance_ids   = unique(same_type$instance_id),
+      name_variants        = variants,
       # Surfaced rather than hidden: differing spellings under one key are the
       # clearest signal that this needs real resolution.
-      spelling_varies    = length(setdiff(variants, mine$name[[i]])) > 0
+      spelling_varies      = length(setdiff(variants, mine$name[[i]])) > 0,
+      # A name that is a company here and a person elsewhere is exactly the
+      # shape of thing a reviewer wants to look at, so it is reported rather
+      # than quietly dropped -- and reported separately, because it is a
+      # weaker signal than a same-type match.
+      cross_type_matches   = if (nrow(other_type) == 0) list() else lapply(
+        seq_len(nrow(other_type)), function(k) list(
+          type_id     = other_type$type_id[[k]],
+          name        = other_type$name[[k]],
+          instance_id = other_type$instance_id[[k]],
+          document_id = other_type$document_id[[k]]))
     )
   }
   out

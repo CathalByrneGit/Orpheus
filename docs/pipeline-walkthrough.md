@@ -173,7 +173,10 @@ companies and people here appear in other documents, and how does this contract'
 value sit against others sharing a counterparty.
 
 Matching is on `orph_naive_key()` — lowercase, punctuation stripped, company
-suffixes dropped. **Every result is labelled `resolution_quality =
+suffixes dropped — and the lookup runs across every object type implementing the
+`Named` interface, not just the type being asked about. A name that is a company
+in one document and a person in another comes back as a `cross_type_match`,
+reported separately because it is a weaker signal than a same-type hit. **Every result is labelled `resolution_quality =
 "naive_unresolved"`** and carries a caveat naming the failure modes, because this
 is a stepping stone to Phase 4 resolution rather than a substitute for it. Where
 one key covers several spellings, `spelling_varies` is set: the clearest

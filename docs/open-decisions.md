@@ -83,7 +83,7 @@ The extraction engine is reached through exactly one file,
 `R/ontology_stack.R`, behind `orph_populate()`, with `orph_set_populator()` as
 the injection point. Everything downstream — persistence, provenance, the
 amendment model, concepts, permissions, the API — works on a normalised shape
-and never sees the stack. The test suite proves this: all 506 tests pass with
+and never sees the stack. The test suite proves this: all 543 tests pass with
 `ontologyDiscoverR` absent, driving a substitute engine through the same
 interface.
 

@@ -51,6 +51,39 @@ prop <- function(id, type, description, nullable = TRUE, column = NULL) {
   )
 }
 
+# Interfaces are a contract several object types share, so a question can be
+# asked once across all of them instead of once per type. Taken from
+# ontologySpecR's interface_type / objectSetsR's object_set_by_interface.
+#
+# Same dual-spelling problem as everywhere else in the stack: ontologySpecR
+# emits `requiredProperties`, objectSetsR reads `properties`. Both are written.
+interface_type <- function(id, display_name, description, properties) {
+  list(
+    id                 = id,
+    display_name       = display_name,
+    description        = description,
+    properties         = properties,   # objectSetsR
+    requiredProperties = properties    # ontologySpecR
+  )
+}
+
+# Which interfaces each object type satisfies. Kept as one table rather than an
+# argument at nine call sites: the point of an interface is that the set of
+# types answering a question is visible in one place, and spreading it across
+# the constructors would defeat that.
+IMPLEMENTS <- list(
+  Contract       = c("Reviewable"),
+  Company        = c("Reviewable", "Named"),
+  Person         = c("Reviewable", "Named"),
+  Clause         = c("Reviewable", "PageAnchored"),
+  Obligation     = c("Reviewable"),
+  Flag           = c("Reviewable"),
+  KeyDate        = c("Reviewable", "PageAnchored"),
+  MonetaryAmount = c("Reviewable", "PageAnchored")
+  # Relationship implements nothing: it is an edge, not an extracted instance,
+  # and its primary key is edge_id rather than instance_id.
+)
+
 object_type <- function(id, display_name, description, properties,
                         table_name = NULL, managed = TRUE) {
   table_name <- table_name %||% paste0("instances_", id)
@@ -58,6 +91,7 @@ object_type <- function(id, display_name, description, properties,
     id           = id,
     display_name = display_name,
     description  = description,
+    implements   = as.list(IMPLEMENTS[[id]] %||% character()),
     # conceptR reads these two directly.
     table_name   = table_name,
     primary_key  = "instance_id",
@@ -88,6 +122,45 @@ link_type <- function(id, from, to, from_keys, to_keys, display_name, descriptio
     join         = list(fromKeys = as.list(from_keys), toKeys = as.list(to_keys))
   )
 }
+
+# ---------------------------------------------------------------------------
+# Interfaces
+# ---------------------------------------------------------------------------
+# Each of these exists because a real question spans several object types and
+# would otherwise be asked once per type, in code, with the list of types
+# hard-coded at the call site -- which is how a new object type silently stops
+# being included in an answer.
+
+interfaces <- list(
+  interface_type("Reviewable", "Reviewable",
+    "Anything a person can confirm, amend or reject. Every extracted instance.",
+    list(
+      prop("instance_id", "string", "Instance identifier", nullable = FALSE),
+      prop("document_id", "string", "Document it was extracted from"),
+      prop("source",      "string", "ai_local | ai_cloud | human"),
+      prop("confidence",  "double", "Confidence rubric level"),
+      prop("status",      "string", "unconfirmed | confirmed | amended | rejected")
+    )),
+
+  interface_type("Named", "Named entity",
+    "An instance with a human name that might also appear in another document.",
+    list(
+      prop("instance_id", "string", "Instance identifier", nullable = FALSE),
+      prop("document_id", "string", "Document it was extracted from"),
+      prop("name",        "string", "Name as written in the document", nullable = FALSE),
+      prop("naive_key",   "string", "Normalised name for best-effort matching"),
+      prop("status",      "string", "Review status")
+    )),
+
+  interface_type("PageAnchored", "Page-anchored",
+    "An instance that can be pointed at on a specific page of the document.",
+    list(
+      prop("instance_id", "string", "Instance identifier", nullable = FALSE),
+      prop("document_id", "string", "Document it was extracted from"),
+      prop("page_no",     "integer","Page it appears on"),
+      prop("status",      "string", "Review status")
+    ))
+)
 
 # ---------------------------------------------------------------------------
 # Object types
@@ -319,19 +392,21 @@ bundle <- list(
     "output from an ontologyDiscoverR discovery run over a real contract sample."
   ),
   object_types = object_types,
+  interfaces   = interfaces,
   link_types   = link_types,
   action_types = list(),
   concept_defs = concept_defs
 )
 
 # Aliases so a consumer reading the ontologySpecR spelling finds the same data.
-bundle$objects <- bundle$object_types
-bundle$links   <- bundle$link_types
+bundle$objects        <- bundle$object_types
+bundle$links          <- bundle$link_types
+bundle$interfaceTypes <- bundle$interfaces
 bundle$concepts <- bundle$concept_defs
 
 dir.create("inst/bundles", recursive = TRUE, showWarnings = FALSE)
 out <- "inst/bundles/contract-core-0.1.0.json"
 writeLines(jsonlite::toJSON(bundle, auto_unbox = TRUE, pretty = TRUE, null = "null"), out)
 cat("wrote", out, "\n")
-cat("object types:", length(object_types), " link types:", length(link_types),
-    " concepts:", length(concept_defs), "\n")
+cat("object types:", length(object_types), " interfaces:", length(interfaces),
+    " link types:", length(link_types), " concepts:", length(concept_defs), "\n")

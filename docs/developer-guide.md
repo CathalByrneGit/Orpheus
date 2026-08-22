@@ -42,7 +42,7 @@ errors. That is deliberate: see [Open decisions](open-decisions.md#r-stack-vs-a-
 Rscript -e 'testthat::test_dir("tests/testthat")'
 ```
 
-506 tests, no skips on a machine with `conceptR` installed. Tests that need it
+543 tests, no skips on a machine with `conceptR` installed. Tests that need it
 call `skip_if_no_conceptr()`.
 
 ### How the tests are built
@@ -189,7 +189,7 @@ orpheus/
 │   ├── plumber/plumb.R      # service entry point
 │   └── datasette/metadata.yml
 ├── data-raw/make_bundle.R   # regenerates the bundle
-├── tests/testthat/          # 506 tests
+├── tests/testthat/          # 543 tests
 └── docs/
 ```
 

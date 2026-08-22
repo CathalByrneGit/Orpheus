@@ -88,10 +88,89 @@ orph_validate_bundle <- function(bundle) {
       problems <- c(problems, sprintf("link type '%s': missing join keys (objectSetsR traversal needs them)", id))
   }
 
+  # Interfaces are a promise that a set of object types can all answer the same
+  # question. An unchecked promise is worse than none: a type that declares an
+  # interface without carrying its properties makes a cross-type query fail at
+  # runtime, or -- worse -- silently return fewer rows than it should.
+  interface_ids <- character()
+  for (iface in bundle$interfaces %||% list()) {
+    id <- iface$id %||% "<unnamed>"
+    interface_ids <- c(interface_ids, id)
+    if (is.null(iface$properties) || length(iface$properties) == 0) {
+      problems <- c(problems, sprintf("interface '%s': has no properties", id))
+    }
+    if (!identical(iface$properties, iface$requiredProperties)) {
+      problems <- c(problems, sprintf(
+        "interface '%s': properties and requiredProperties disagree", id))
+    }
+  }
+
+  for (ot in bundle$object_types %||% list()) {
+    declared <- unlist(ot$implements %||% list(), use.names = FALSE)
+    prop_ids <- vapply(ot$properties %||% list(), function(p) p$id %||% "", character(1))
+    for (iface_id in declared) {
+      iface <- NULL
+      for (candidate in bundle$interfaces %||% list()) {
+        if (identical(candidate$id, iface_id)) iface <- candidate
+      }
+      if (is.null(iface)) {
+        problems <- c(problems, sprintf(
+          "object type '%s': implements unknown interface '%s'", ot$id, iface_id))
+        next
+      }
+      required <- vapply(iface$properties %||% list(), function(p) p$id %||% "", character(1))
+      missing <- setdiff(required, prop_ids)
+      if (length(missing) > 0) {
+        problems <- c(problems, sprintf(
+          "object type '%s': implements '%s' but is missing %s",
+          ot$id, iface_id, paste(sprintf("'%s'", missing), collapse = ", ")))
+      }
+    }
+  }
+
   if (length(problems) > 0) {
     cli::cli_abort(c("Bundle is not valid:", stats::setNames(problems, rep("x", length(problems)))))
   }
   invisible(bundle)
+}
+
+# ---------------------------------------------------------------------------
+# Interfaces
+# ---------------------------------------------------------------------------
+
+#' Look up an interface in a bundle
+#' @param bundle A bundle.
+#' @param interface_id Interface identifier.
+#' @return The interface list, or `NULL`.
+#' @export
+orph_interface <- function(bundle, interface_id) {
+  for (iface in bundle$interfaces %||% list()) {
+    if (identical(iface$id, interface_id)) return(iface)
+  }
+  NULL
+}
+
+#' Object types that implement an interface
+#'
+#' @param bundle A bundle.
+#' @param interface_id Interface identifier.
+#' @return Character vector of object type ids.
+#' @export
+orph_implementing_types <- function(bundle, interface_id) {
+  hits <- character()
+  for (ot in bundle$object_types %||% list()) {
+    declared <- unlist(ot$implements %||% list(), use.names = FALSE)
+    if (interface_id %in% declared) hits <- c(hits, ot$id)
+  }
+  hits
+}
+
+#' Property identifiers an interface requires
+#' @param interface An interface list.
+#' @return Character vector.
+#' @export
+orph_interface_property_ids <- function(interface) {
+  vapply(interface$properties %||% list(), function(p) p$id %||% "", character(1))
 }
 
 #' Look up an object type in a bundle

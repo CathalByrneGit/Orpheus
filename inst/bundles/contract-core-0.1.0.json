@@ -3,13 +3,16 @@
   "bundle_name": "Core contract ontology",
   "version": "0.1.0",
   "spec_version": "0.1.0",
-  "created_at": "2026-08-21T19:48:51Z",
+  "created_at": "2026-08-22T00:24:48Z",
   "description": "Hand-seeded starting bundle for Phase 1. Replaceable by dis_to_bundle() output from an ontologyDiscoverR discovery run over a real contract sample.",
   "object_types": [
     {
       "id": "Contract",
       "display_name": "Contract",
       "description": "An agreement between a public body and one or more other parties.",
+      "implements": [
+        "Reviewable"
+      ],
       "table_name": "instances_Contract",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -189,6 +192,10 @@
       "id": "Company",
       "display_name": "Company",
       "description": "A legal entity party to, or named in, an agreement. Includes public bodies.",
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
       "table_name": "instances_Company",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -323,6 +330,10 @@
       "id": "Person",
       "display_name": "Person",
       "description": "A named individual appearing in an agreement.",
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
       "table_name": "instances_Person",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -439,6 +450,10 @@
       "id": "Clause",
       "display_name": "Clause",
       "description": "A numbered or titled provision within an agreement.",
+      "implements": [
+        "Reviewable",
+        "PageAnchored"
+      ],
       "table_name": "instances_Clause",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -573,6 +588,9 @@
       "id": "Obligation",
       "display_name": "Obligation",
       "description": "A duty a clause places on a named party.",
+      "implements": [
+        "Reviewable"
+      ],
       "table_name": "instances_Obligation",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -698,6 +716,9 @@
       "id": "Flag",
       "display_name": "Flag",
       "description": "An issue raised against a document or one of its clauses.",
+      "implements": [
+        "Reviewable"
+      ],
       "table_name": "instances_Flag",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -823,6 +844,10 @@
       "id": "KeyDate",
       "display_name": "Key date",
       "description": "A date found in the document, with the phrase that introduced it.",
+      "implements": [
+        "Reviewable",
+        "PageAnchored"
+      ],
       "table_name": "instances_KeyDate",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -948,6 +973,10 @@
       "id": "MonetaryAmount",
       "display_name": "Monetary amount",
       "description": "A monetary value found in the document.",
+      "implements": [
+        "Reviewable",
+        "PageAnchored"
+      ],
       "table_name": "instances_MonetaryAmount",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -1082,6 +1111,7 @@
       "id": "Relationship",
       "display_name": "Relationship",
       "description": "A link between two instances, as extracted from a document.",
+      "implements": [],
       "table_name": "edges",
       "primary_key": "edge_id",
       "primaryKey": "edge_id",
@@ -1193,6 +1223,287 @@
       "x_orpheus": {
         "managed": false
       }
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "Reviewable",
+      "display_name": "Reviewable",
+      "description": "Anything a person can confirm, amend or reject. Every extracted instance.",
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        }
+      ],
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        }
+      ]
+    },
+    {
+      "id": "Named",
+      "display_name": "Named entity",
+      "description": "An instance with a human name that might also appear in another document.",
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort matching",
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "source": {
+            "column": "status"
+          }
+        }
+      ],
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort matching",
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "source": {
+            "column": "status"
+          }
+        }
+      ]
+    },
+    {
+      "id": "PageAnchored",
+      "display_name": "Page-anchored",
+      "description": "An instance that can be pointed at on a specific page of the document.",
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page it appears on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "source": {
+            "column": "status"
+          }
+        }
+      ],
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page it appears on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "source": {
+            "column": "status"
+          }
+        }
+      ]
     }
   ],
   "link_types": [
@@ -1506,6 +1817,9 @@
       "id": "Contract",
       "display_name": "Contract",
       "description": "An agreement between a public body and one or more other parties.",
+      "implements": [
+        "Reviewable"
+      ],
       "table_name": "instances_Contract",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -1685,6 +1999,10 @@
       "id": "Company",
       "display_name": "Company",
       "description": "A legal entity party to, or named in, an agreement. Includes public bodies.",
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
       "table_name": "instances_Company",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -1819,6 +2137,10 @@
       "id": "Person",
       "display_name": "Person",
       "description": "A named individual appearing in an agreement.",
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
       "table_name": "instances_Person",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -1935,6 +2257,10 @@
       "id": "Clause",
       "display_name": "Clause",
       "description": "A numbered or titled provision within an agreement.",
+      "implements": [
+        "Reviewable",
+        "PageAnchored"
+      ],
       "table_name": "instances_Clause",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -2069,6 +2395,9 @@
       "id": "Obligation",
       "display_name": "Obligation",
       "description": "A duty a clause places on a named party.",
+      "implements": [
+        "Reviewable"
+      ],
       "table_name": "instances_Obligation",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -2194,6 +2523,9 @@
       "id": "Flag",
       "display_name": "Flag",
       "description": "An issue raised against a document or one of its clauses.",
+      "implements": [
+        "Reviewable"
+      ],
       "table_name": "instances_Flag",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -2319,6 +2651,10 @@
       "id": "KeyDate",
       "display_name": "Key date",
       "description": "A date found in the document, with the phrase that introduced it.",
+      "implements": [
+        "Reviewable",
+        "PageAnchored"
+      ],
       "table_name": "instances_KeyDate",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -2444,6 +2780,10 @@
       "id": "MonetaryAmount",
       "display_name": "Monetary amount",
       "description": "A monetary value found in the document.",
+      "implements": [
+        "Reviewable",
+        "PageAnchored"
+      ],
       "table_name": "instances_MonetaryAmount",
       "primary_key": "instance_id",
       "primaryKey": "instance_id",
@@ -2578,6 +2918,7 @@
       "id": "Relationship",
       "display_name": "Relationship",
       "description": "A link between two instances, as extracted from a document.",
+      "implements": [],
       "table_name": "edges",
       "primary_key": "edge_id",
       "primaryKey": "edge_id",
@@ -2938,6 +3279,287 @@
           "instance_id"
         ]
       }
+    }
+  ],
+  "interfaceTypes": [
+    {
+      "id": "Reviewable",
+      "display_name": "Reviewable",
+      "description": "Anything a person can confirm, amend or reject. Every extracted instance.",
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        }
+      ],
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "source": {
+            "column": "status"
+          }
+        }
+      ]
+    },
+    {
+      "id": "Named",
+      "display_name": "Named entity",
+      "description": "An instance with a human name that might also appear in another document.",
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort matching",
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "source": {
+            "column": "status"
+          }
+        }
+      ],
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort matching",
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "source": {
+            "column": "status"
+          }
+        }
+      ]
+    },
+    {
+      "id": "PageAnchored",
+      "display_name": "Page-anchored",
+      "description": "An instance that can be pointed at on a specific page of the document.",
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page it appears on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "source": {
+            "column": "status"
+          }
+        }
+      ],
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page it appears on",
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "source": {
+            "column": "status"
+          }
+        }
+      ]
     }
   ],
   "concepts": [

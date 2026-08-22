@@ -65,6 +65,43 @@ an object type because `objectSetsR` traverses links by joining object tables on
 key columns — a many-to-many link cannot be traversed in one hop, but it can be
 reached in two through the edge itself.
 
+### Interfaces: asking one question across several types
+
+An interface is a contract several object types share, so a question spans them
+without the list of types being written at the call site — which is how a new
+object type silently stops being included in an answer.
+
+| Interface | Implemented by | The question it answers |
+|---|---|---|
+| `Reviewable` | every extracted type | "What has not been checked yet?" |
+| `Named` | `Company`, `Person` | "Does this name appear anywhere else?" |
+| `PageAnchored` | `Clause`, `KeyDate`, `MonetaryAmount` | "What can I point at on this page?" |
+
+```r
+orph_object_set_by_interface(con, "Named")
+#>   instance_id  document_id  name                  naive_key         status       type_id
+#> 1 inst_8e00…   doc_45ee…    Meridian Systems Ltd  meridian systems  unconfirmed  Company
+#> 2 inst_0463…   doc_45ee…    Aoife Nolan           aoife nolan       unconfirmed  Person
+```
+
+Rows are projected to the interface's properties only, so every row has the
+same shape whichever type it came from; `type_id` says which that was.
+Type-specific properties (`role`, `job_title`) are deliberately not projected —
+if a caller needs those it is asking a type question, not an interface one.
+
+`orph_validate_bundle()` refuses a bundle where a type declares an interface it
+cannot satisfy. An unchecked interface is worse than none: the cross-type query
+would fail at runtime, or quietly return fewer rows than it should.
+
+`Relationship` implements nothing — it is an edge, not an extracted instance,
+and its primary key is `edge_id`.
+
+This is `ontologySpecR`'s `interface_type` and `objectSetsR`'s
+`object_set_by_interface()`, carried across. The corpus escalation uses it: a
+name is looked up across every `Named` type, so a name that is a company in one
+document and a person in another is reported as a `cross_type_match` rather than
+filtered out before anyone sees it.
+
 ### Every instance table has the same tail
 
 | Column | Type | Meaning |
