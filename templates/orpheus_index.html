@@ -15,8 +15,15 @@
 {% endif %}
 
 <h2>Add a document</h2>
-<form action="{{ urls.path('/-/orpheus/upload') }}" method="post">
+<form action="{{ urls.path('/-/orpheus/upload') }}" method="post" enctype="multipart/form-data">
   <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <p>
+    <label>Choose a document<br>
+      <input type="file" name="file" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.tif,.tiff">
+    </label>
+  </p>
+  <p style="color:#666">or, for a file already on the server &mdash; how a watched
+  drop-directory would feed the same path:</p>
   <p>
     <label>Path on the server<br>
       <input type="text" name="path" style="width:32em" placeholder="/srv/incoming/agreement.pdf">

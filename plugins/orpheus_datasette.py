@@ -19,6 +19,7 @@ Everything below therefore goes through the API, which enforces provenance, the
 confidence rubric, the amendment history and permissions on the way in.
 """
 
+import hashlib
 import json
 import urllib.error
 import urllib.parse
@@ -26,6 +27,12 @@ import urllib.request
 
 from datasette import hookimpl
 from datasette.utils.asgi import Response
+
+try:  # Datasette 1.0+
+    from datasette.utils.asgi import BadRequest
+except ImportError:  # pragma: no cover - older Datasette has no file uploads
+    class BadRequest(Exception):
+        pass
 
 PLUGIN = "orpheus-datasette"
 DEFAULT_API = "http://127.0.0.1:8000"
@@ -60,11 +67,61 @@ def _token(datasette, actor):
     return config.get("token")
 
 
+def _multipart_body(filename, content_type, data):
+    """Build a multipart/form-data body for one file.
+
+    Hand-built rather than pulled from a library because the plugin has no
+    dependencies beyond Datasette itself, and this is the only multipart it
+    ever needs to produce. The boundary is derived from the payload so it
+    cannot collide with the content.
+    """
+    boundary = "orpheus" + hashlib.sha256(data[:4096] + filename.encode()).hexdigest()[:24]
+    head = (
+        "--{}\r\n"
+        'Content-Disposition: form-data; name="file"; filename="{}"\r\n'
+        "Content-Type: {}\r\n\r\n"
+    ).format(boundary, filename.replace('"', ""), content_type or "application/octet-stream")
+    body = head.encode() + data + "\r\n--{}--\r\n".format(boundary).encode()
+    return body, "multipart/form-data; boundary=" + boundary
+
+
 class ApiError(Exception):
     def __init__(self, status, message):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+def _call_upload(datasette, actor, filename, content_type, data):
+    """Forward an uploaded file to the API as multipart.
+
+    Forwarded rather than written to a shared temp directory, so the plugin
+    keeps working when Datasette and the API are on different hosts -- which is
+    the realistic deployment, not the demo one.
+    """
+    token = _token(datasette, actor)
+    if not token:
+        raise ApiError(500, "No Orpheus API token is configured for this user.")
+
+    body, content_type_header = _multipart_body(filename, content_type, data)
+    request = urllib.request.Request(_api_base(datasette) + "/documents", data=body,
+                                     method="POST")
+    request.add_header("Authorization", "Bearer " + token)
+    request.add_header("Content-Type", content_type_header)
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            raw = response.read().decode()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode()
+        message = raw
+        try:
+            message = json.loads(raw)["error"]["message"]
+        except Exception:
+            pass
+        raise ApiError(exc.code, message)
+    except urllib.error.URLError as exc:
+        raise ApiError(503, "Could not reach the Orpheus API: {}".format(exc.reason))
 
 
 def _call(datasette, actor, method, path, payload=None):
@@ -178,18 +235,51 @@ async def upload(datasette, request):
     if request.method != "POST":
         return Response.redirect(datasette.urls.path("/-/orpheus"))
 
-    post = await request.post_vars()
-    path = (post.get("path") or "").strip()
-    tier = post.get("tier") or "local"
-    cloud_opt_in = post.get("cloud_opt_in") == "on"
+    if hasattr(request, "form"):  # Datasette 1.0+
+        max_bytes = int(_config(datasette).get("max_file_size", 50 * 1024 * 1024))
+        try:
+            # Datasette parses the multipart itself, with limits on file size,
+            # request size and free disk. Reimplementing that would mean
+            # reimplementing its guards too, badly.
+            form = await request.form(files=True, max_file_size=max_bytes)
+        except BadRequest as exc:
+            # Request.form() turns every parse and limit failure - file too
+            # large, request too large, disk too full - into BadRequest, which
+            # Datasette would otherwise render as a bare 400 page. Say it on
+            # the form instead.
+            return Response.redirect(
+                datasette.urls.path("/-/orpheus") + "?error=" + urllib.parse.quote(
+                    "Upload rejected: {}".format(exc)))
+        uploaded = form.get("file")
+    else:
+        # An older Datasette has no multipart parser. The path field still
+        # works, so the page degrades rather than breaking.
+        form = await request.post_vars()
+        uploaded = None
 
-    if not path:
+    path = (form.get("path") or "").strip()
+    tier = form.get("tier") or "local"
+    cloud_opt_in = form.get("cloud_opt_in") == "on"
+
+    has_file = uploaded is not None and getattr(uploaded, "filename", "")
+    if not has_file and not path:
         return Response.redirect(
             datasette.urls.path("/-/orpheus") + "?error=" + urllib.parse.quote(
-                "Give the server-side path of a document to ingest."))
+                "Choose a file, or give a path already on the server."
+                if hasattr(request, "form") else
+                "Give the server-side path of a document to ingest; "
+                "file upload needs Datasette 1.0 or newer."))
 
     try:
-        document = _call(datasette, actor, "POST", "/documents", {"path": path})
+        if has_file:
+            data = await uploaded.read()
+            await uploaded.close()
+            document = _call_upload(datasette, actor, uploaded.filename,
+                                    uploaded.content_type, data)
+        else:
+            # Still supported: a watched drop-directory hands the API a path
+            # rather than pushing bytes through a browser.
+            document = _call(datasette, actor, "POST", "/documents", {"path": path})
     except ApiError as exc:
         return Response.redirect(
             datasette.urls.path("/-/orpheus") + "?error=" + urllib.parse.quote(

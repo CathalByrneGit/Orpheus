@@ -127,11 +127,16 @@ datasette serve data/orpheus.sqlite \
 plugins:
   orpheus-datasette:
     api_url: "http://127.0.0.1:8000"
+    max_file_size: 52428800    # per-file ceiling on browser uploads (50MB default)
     actor_tokens:
       "nuala@dept.ie": "…"     # per-actor: amendments name the real person
     # token: "…"               # single shared token: fine for one user, and
                                # then every amendment is attributed to one id
 ```
+
+Browser file upload needs **Datasette 1.0a32 or newer** — `Request.form(files=True)`
+does not exist before it. On an older Datasette the rest of the plugin still
+works and the file input reports that it needs a newer server.
 
 | Route | What it does |
 |---|---|
@@ -158,12 +163,25 @@ Everything the plugin does therefore passes through the API, which applies
 provenance, the confidence rubric, the amendment history and permissions on the
 way in. It is a client, and deliberately a thin one.
 
+### Upload takes a file or a path
+
+The form accepts a **file chosen in the browser** and, separately, a
+**server-side path** — the latter kept because it is how a watched
+drop-directory would feed the same code path.
+
+The browser file is not written to a temp file and handed over as a path;
+Datasette and the API need not share a filesystem, so the bytes are forwarded to
+the API as multipart. Parsing is Datasette's own `request.form(files=True)`
+rather than a hand-rolled parser, which is what gives the upload its ceilings on
+file size, request size and free disk. Those raise `BadRequest`, so the limit
+shows up on the form as *"Upload rejected: File too large"* rather than as a bare
+400 page. Verified in both directions: a 270KB file against `max_file_size: 2048`
+is refused, a 195-byte one goes through.
+
 ### What it is not yet
 
-Upload takes a **server-side path**, not a browser file upload — enough to
-exercise the loop, and it is also how a watched drop-directory would feed the
-same code path. There is no live annotation as you read; that is the reading
-companion, and it is a later phase.
+There is no live annotation as you read; that is the reading companion, and it
+is a later phase.
 
 ---
 
