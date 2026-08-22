@@ -20,11 +20,26 @@ comment_block <- function(text) paste0("# ", gsub("\n", "\n# ", text))
 #'
 #' @param path Where to write the YAML.
 #' @param database_name The name Datasette will serve the database under.
+#' @param bundle The bundle whose instance tables the generated queries span.
+#'   Defaults to the shipped one.
 #' @return Invisibly, `path`.
 #' @export
 orph_write_datasette_metadata <- function(path = "inst/datasette/metadata.yml",
-                                          database_name = "orpheus") {
+                                          database_name = "orpheus",
+                                          bundle = orph_load_bundle()) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+
+  # Built from the bundle, not written out by hand. A canned query naming the
+  # instance tables of one domain would quietly return partial answers the
+  # moment a bundle added or renamed a type -- and the query it feeds is the
+  # one reporting whether extraction is any good.
+  instance_tables <- vapply(managed_object_types(bundle),
+                            function(ot) ot$table_name, character(1))
+  instance_union <- paste(
+    sprintf("            %sSELECT instance_id, status FROM %s",
+            c("", rep("UNION ALL ", max(0, length(instance_tables) - 1))),
+            instance_tables),
+    collapse = "\n")
 
   yaml <- paste0(
 'title: Orpheus contract intelligence
@@ -126,6 +141,10 @@ databases:
       extraction_accuracy_by_confidence:
         title: Does the confidence rubric actually rank reliability?
         sql: |-
+          -- Joins through provenance, which is what keeps rule-raised flags out:
+          -- a concept flag has no provenance row, because it is not an
+          -- extraction. Give concept flags provenance and this query starts
+          -- reporting rule precision as extraction accuracy.
           SELECT p.confidence,
                  COUNT(*) AS reviewed,
                  SUM(CASE WHEN x.status = \'confirmed\' THEN 1 ELSE 0 END) AS confirmed,
@@ -135,13 +154,7 @@ databases:
                        / COUNT(*), 3) AS accuracy
           FROM provenance p
           JOIN (
-            SELECT instance_id, status FROM instances_Contract
-            UNION ALL SELECT instance_id, status FROM instances_Company
-            UNION ALL SELECT instance_id, status FROM instances_Person
-            UNION ALL SELECT instance_id, status FROM instances_Clause
-            UNION ALL SELECT instance_id, status FROM instances_Obligation
-            UNION ALL SELECT instance_id, status FROM instances_KeyDate
-            UNION ALL SELECT instance_id, status FROM instances_MonetaryAmount
+', instance_union, '
           ) x ON x.instance_id = p.instance_id
           WHERE x.status IN (\'confirmed\', \'amended\', \'rejected\')
           GROUP BY p.confidence

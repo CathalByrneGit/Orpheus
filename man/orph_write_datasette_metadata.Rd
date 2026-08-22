@@ -6,13 +6,17 @@
 \usage{
 orph_write_datasette_metadata(
   path = "inst/datasette/metadata.yml",
-  database_name = "orpheus"
+  database_name = "orpheus",
+  bundle = orph_load_bundle()
 )
 }
 \arguments{
 \item{path}{Where to write the YAML.}
 
 \item{database_name}{The name Datasette will serve the database under.}
+
+\item{bundle}{The bundle whose instance tables the generated queries span.
+Defaults to the shipped one.}
 }
 \value{
 Invisibly, \code{path}.

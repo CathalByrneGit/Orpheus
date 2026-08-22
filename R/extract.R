@@ -327,7 +327,7 @@ persist_population <- function(con, document_id, bundle, pop, source_label, acto
 
     # Backfill the containment key on deterministic findings now that a
     # Contract exists for this document.
-    link_deterministic_to_contract(con, document_id)
+    link_deterministic_to_primary(con, bundle, document_id)
   })
 
   n_amend <- db_get_one(con,
@@ -339,20 +339,38 @@ persist_population <- function(con, document_id, bundle, pop, source_label, acto
        dropped_edges = pop$dropped_edges %||% 0L)
 }
 
+#' Attach deterministic findings to the document's primary instance
+#'
+#' Which type is "primary" and which property points at it come from the
+#' bundle's domain block, not from this function. A bundle for a different
+#' domain names a different type and the same code links to that instead.
+#'
 #' @keywords internal
-link_deterministic_to_contract <- function(con, document_id) {
-  contract <- db_get_one(con,
-    "SELECT instance_id FROM instances_Contract
+link_deterministic_to_primary <- function(con, bundle, document_id) {
+  domain <- orph_domain(bundle)
+  if (is.null(domain$primary_object_type) || is.null(domain$container_property)) {
+    return(invisible(FALSE))
+  }
+  primary <- orph_object_type(bundle, domain$primary_object_type)
+  if (is.null(primary) || !DBI::dbExistsTable(con, primary$table_name)) return(invisible(FALSE))
+
+  anchor <- db_get_one(con, sprintf(
+    "SELECT instance_id FROM %s
      WHERE document_id = ? AND status != 'rejected' ORDER BY confidence DESC LIMIT 1",
-    list(document_id))
-  if (is.null(contract)) return(invisible(FALSE))
-  for (tbl in c("instances_KeyDate", "instances_MonetaryAmount", "instances_Clause")) {
-    if (!DBI::dbExistsTable(con, tbl)) next
+    DBI::dbQuoteIdentifier(con, primary$table_name)), list(document_id))
+  if (is.null(anchor)) return(invisible(FALSE))
+
+  key <- domain$container_property
+  for (ot in managed_object_types(bundle)) {
+    if (identical(ot$id, domain$primary_object_type)) next
+    if (!DBI::dbExistsTable(con, ot$table_name)) next
+    if (!(key %in% DBI::dbListFields(con, ot$table_name))) next
     DBI::dbExecute(con, sprintf(
-      "UPDATE %s SET contract_instance_id = ?
-       WHERE document_id = ? AND (contract_instance_id IS NULL OR contract_instance_id = '')",
-      DBI::dbQuoteIdentifier(con, tbl)),
-      params = list(contract$instance_id, document_id))
+      "UPDATE %s SET %s = ?
+       WHERE document_id = ? AND (%s IS NULL OR %s = '')",
+      DBI::dbQuoteIdentifier(con, ot$table_name), DBI::dbQuoteIdentifier(con, key),
+      DBI::dbQuoteIdentifier(con, key), DBI::dbQuoteIdentifier(con, key)),
+      params = list(anchor$instance_id, document_id))
   }
   invisible(TRUE)
 }

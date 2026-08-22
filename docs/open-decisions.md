@@ -91,7 +91,7 @@ The extraction engine is reached through exactly one file,
 `R/ontology_stack.R`, behind `orph_populate()`, with `orph_set_populator()` as
 the injection point. Everything downstream — persistence, provenance, the
 amendment model, concepts, permissions, the API — works on a normalised shape
-and never sees the stack. The test suite proves this: all 604 tests pass with
+and never sees the stack. The test suite proves this: all 653 tests pass with
 `ontologyDiscoverR` absent, driving a substitute engine through the same
 interface.
 
@@ -116,6 +116,41 @@ extraction quality and the friction of `dis_review()`. That is the test the stac
 has not had, and it is the only evidence that matters. Until then, note that
 `conceptR` — the one package that could be exercised — did not cause a single
 problem.
+
+---
+
+## Scope: a document platform, with contracts as the worked example
+
+**Settled: the engine is domain-neutral and the bundle carries the domain.**
+
+Phase 1 was specified around contracts and the code drifted into assuming them —
+`compare_contract_values()` selected from `instances_Contract` by name,
+deterministic findings were linked by a hardcoded `contract_instance_id`, the
+classifier's vocabulary was a constant, and a Datasette canned query listed the
+instance tables of one domain.
+
+None of that was necessary. The pipeline needs to know *which type plays which
+role*, not what the types mean, so a `x_orpheus` block on the bundle now says
+so and the four sites read it. See
+[the domain block](data-model.md#the-domain-block).
+
+Contracts remain the shipped bundle and the example throughout the docs: it is
+the driving use case, and a general platform documented only in the abstract is
+harder to understand than one with a worked example. But
+`inst/bundles/contract-core-0.1.0.json` is data, and replacing it replaces the
+domain.
+
+**Kept honest by a test.** `test-domain-neutrality.R` defines a planning-
+application bundle — Application, Applicant, Condition, its own decision
+codelist, its own comparable value (floor area in square metres) — and runs
+ingest, extraction, deterministic linking, amendment and codelist reporting
+against it with no code changes. A claim of generality that nothing exercises
+tends to stop being true quietly.
+
+**What is still contract-flavoured, deliberately:** the seed concepts
+(`high_value`, `direct_award`, `uncapped_liability`), the OCDS codelists, and
+the CUAD benchmark mapping. Those are bundle content and benchmark
+configuration, which is exactly where domain knowledge belongs.
 
 ---
 

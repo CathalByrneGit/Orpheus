@@ -97,6 +97,10 @@ databases:
       extraction_accuracy_by_confidence:
         title: Does the confidence rubric actually rank reliability?
         sql: |-
+          -- Joins through provenance, which is what keeps rule-raised flags out:
+          -- a concept flag has no provenance row, because it is not an
+          -- extraction. Give concept flags provenance and this query starts
+          -- reporting rule precision as extraction accuracy.
           SELECT p.confidence,
                  COUNT(*) AS reviewed,
                  SUM(CASE WHEN x.status = 'confirmed' THEN 1 ELSE 0 END) AS confirmed,
@@ -111,6 +115,7 @@ databases:
             UNION ALL SELECT instance_id, status FROM instances_Person
             UNION ALL SELECT instance_id, status FROM instances_Clause
             UNION ALL SELECT instance_id, status FROM instances_Obligation
+            UNION ALL SELECT instance_id, status FROM instances_Flag
             UNION ALL SELECT instance_id, status FROM instances_KeyDate
             UNION ALL SELECT instance_id, status FROM instances_MonetaryAmount
           ) x ON x.instance_id = p.instance_id

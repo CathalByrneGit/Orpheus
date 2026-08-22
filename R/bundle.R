@@ -97,6 +97,33 @@ orph_validate_bundle <- function(bundle) {
       problems <- c(problems, sprintf("link type '%s': missing join keys (objectSetsR traversal needs them)", id))
   }
 
+  # The domain block names object types and properties. A typo here disables a
+  # whole pipeline stage silently -- deterministic findings simply stop being
+  # linked, corpus comparison simply reports itself unavailable -- so it is
+  # checked rather than trusted.
+  d <- bundle$x_orpheus %||% list()
+  if (!is.null(d$primary_object_type)) {
+    primary <- NULL
+    for (ot in bundle$object_types %||% list()) {
+      if (identical(ot$id, d$primary_object_type)) primary <- ot
+    }
+    if (is.null(primary)) {
+      problems <- c(problems, sprintf(
+        "x_orpheus: primary_object_type '%s' is not an object type in this bundle",
+        d$primary_object_type))
+    } else {
+      primary_props <- vapply(primary$properties %||% list(),
+                              function(p) p$id %||% "", character(1))
+      for (field in c("value_property", "currency_property")) {
+        if (!is.null(d[[field]]) && !(d[[field]] %in% primary_props)) {
+          problems <- c(problems, sprintf(
+            "x_orpheus: %s '%s' is not a property of '%s'",
+            field, d[[field]], d$primary_object_type))
+        }
+      }
+    }
+  }
+
   # A concept whose SQL comes from a template must not also carry a literal
   # sql_expr. Silently preferring one would mean an edit to the other does
   # nothing, with no error and no clue why the concept did not change.
@@ -166,6 +193,41 @@ orph_validate_bundle <- function(bundle) {
     cli::cli_abort(c("Bundle is not valid:", stats::setNames(problems, rep("x", length(problems)))))
   }
   invisible(bundle)
+}
+
+# ---------------------------------------------------------------------------
+# The domain block
+# ---------------------------------------------------------------------------
+
+#' Domain roles declared by a bundle
+#'
+#' The pipeline is domain-neutral. These declarations are how a bundle tells it
+#' which object type plays which role, so that swapping the bundle swaps the
+#' domain without touching any code.
+#'
+#' @param bundle A bundle.
+#' @return A list with `primary_object_type`, `container_property`,
+#'   `value_property`, `currency_property` and `document_types`; any may be
+#'   `NULL` when the domain has no such notion.
+#' @export
+orph_domain <- function(bundle) {
+  d <- bundle$x_orpheus %||% list()
+  list(
+    primary_object_type = d$primary_object_type %||% NULL,
+    container_property  = d$container_property  %||% NULL,
+    value_property      = d$value_property      %||% NULL,
+    currency_property   = d$currency_property   %||% NULL,
+    document_types      = unlist(d$document_types %||% list(), use.names = FALSE)
+  )
+}
+
+#' Document types a bundle's classifier chooses between
+#' @param bundle A bundle, or `NULL` for the shipped default vocabulary.
+#' @return Character vector.
+#' @export
+orph_document_types <- function(bundle = NULL) {
+  types <- if (is.null(bundle)) character() else orph_domain(bundle)$document_types
+  if (length(types) == 0) ORPH_DOC_TYPES else types
 }
 
 # ---------------------------------------------------------------------------

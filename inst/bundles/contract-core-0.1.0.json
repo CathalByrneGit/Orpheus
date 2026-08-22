@@ -3,8 +3,15 @@
   "bundle_name": "Core contract ontology",
   "version": "0.1.0",
   "spec_version": "0.1.0",
-  "created_at": "2026-08-22T01:49:26Z",
+  "created_at": "2026-08-22T14:49:51Z",
   "description": "Hand-seeded starting bundle for Phase 1. Replaceable by dis_to_bundle() output from an ontologyDiscoverR discovery run over a real contract sample.",
+  "x_orpheus": {
+    "primary_object_type": "Contract",
+    "container_property": "contract_instance_id",
+    "value_property": "value_amount",
+    "currency_property": "value_currency",
+    "document_types": ["contract", "amendment", "tender", "correspondence", "other"]
+  },
   "object_types": [
     {
       "id": "Contract",
@@ -627,9 +634,24 @@
           "id": "clause_type",
           "type": "string",
           "nullable": true,
-          "description": "e.g. indemnity, liability, termination, confidentiality, payment, renewal",
+          "description": "What the clause is about",
           "x_ocds": null,
-          "values": null,
+          "values": [
+            "indemnity",
+            "liability",
+            "termination",
+            "confidentiality",
+            "payment",
+            "renewal",
+            "term",
+            "governing_law",
+            "warranty",
+            "restriction",
+            "assignment",
+            "audit",
+            "dispute",
+            "other"
+          ],
           "source": {
             "column": "clause_type"
           }
@@ -2806,9 +2828,24 @@
           "id": "clause_type",
           "type": "string",
           "nullable": true,
-          "description": "e.g. indemnity, liability, termination, confidentiality, payment, renewal",
+          "description": "What the clause is about",
           "x_ocds": null,
-          "values": null,
+          "values": [
+            "indemnity",
+            "liability",
+            "termination",
+            "confidentiality",
+            "payment",
+            "renewal",
+            "term",
+            "governing_law",
+            "warranty",
+            "restriction",
+            "assignment",
+            "audit",
+            "dispute",
+            "other"
+          ],
           "source": {
             "column": "clause_type"
           }

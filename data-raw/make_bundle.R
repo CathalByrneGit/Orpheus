@@ -49,6 +49,15 @@ OCDS_PARTY_ROLE <- c("buyer", "procuringEntity", "supplier", "tenderer", "funder
                      "subcontractor")
 OCDS_CONTRACT_STATUS <- c("pending", "active", "cancelled", "terminated")
 
+# Clause types. Not an OCDS codelist -- OCDS describes what was procured, not
+# the text of the agreement -- but a codelist all the same, so that the
+# extraction prompt, the concepts and the CUAD benchmark mapping all speak one
+# vocabulary. Drawn from the categories CUAD labels, collapsed to the
+# granularity a reviewer actually works at.
+CLAUSE_TYPE <- c("indemnity", "liability", "termination", "confidentiality",
+                 "payment", "renewal", "term", "governing_law", "warranty",
+                 "restriction", "assignment", "audit", "dispute", "other")
+
 prop <- function(id, type, description, nullable = TRUE, column = NULL,
                  ocds = NULL, values = NULL) {
   list(
@@ -250,7 +259,7 @@ object_types <- list(
       prop("contract_instance_id", "string", "Contract this clause belongs to"),
       prop("clause_number",  "string", "Clause number as printed"),
       prop("heading",        "string", "Clause heading"),
-      prop("clause_type",    "string", "e.g. indemnity, liability, termination, confidentiality, payment, renewal"),
+      prop("clause_type", "string", "What the clause is about", values = CLAUSE_TYPE),
       prop("text",           "string", "Clause text as extracted"),
       prop("page_no",        "integer","Page the clause starts on")
     )),
@@ -462,6 +471,29 @@ concept_defs <- list(
        rationale = "Auto-renewal is a common source of unintended spend.")
 )
 
+# The engine is domain-neutral: ingest, classify, extract against a bundle,
+# review, evaluate concepts, compare across a corpus. None of that is about
+# contracts. What makes this deployment about contracts is this bundle, and
+# these few declarations are the places the pipeline needs to be told which
+# type plays which role -- rather than the pipeline hardcoding "Contract" and
+# quietly becoming a contracts-only tool.
+#
+# A different domain ships a different bundle: object types, links, concepts,
+# and this block. Nothing in R/ changes.
+domain <- list(
+  # The type a document is fundamentally *about*. Deterministic findings are
+  # attached to it, and corpus comparison is anchored on it.
+  primary_object_type = "Contract",
+  # The property on child types pointing back at that primary instance.
+  container_property  = "contract_instance_id",
+  # An optional comparable magnitude, used by the corpus escalation. Omit both
+  # and the comparison simply reports that it is unavailable.
+  value_property      = "value_amount",
+  currency_property   = "value_currency",
+  # What the classifier chooses between.
+  document_types      = c("contract", "amendment", "tender", "correspondence", "other")
+)
+
 bundle <- list(
   bundle_id    = "contract-core",
   bundle_name  = "Core contract ontology",
@@ -472,6 +504,7 @@ bundle <- list(
     "Hand-seeded starting bundle for Phase 1. Replaceable by dis_to_bundle()",
     "output from an ontologyDiscoverR discovery run over a real contract sample."
   ),
+  x_orpheus    = domain,
   object_types = object_types,
   interfaces   = interfaces,
   link_types   = link_types,

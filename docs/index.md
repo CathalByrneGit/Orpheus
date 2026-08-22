@@ -1,8 +1,15 @@
 # Orpheus — Phase 1 documentation
 
-Orpheus turns a contract document into structured, human-reviewable facts in an
-ontology store, with enough provenance on every fact to know where it came from
-and whether a person has checked it.
+Orpheus turns a document into structured, human-reviewable facts in an ontology
+store, with enough provenance on every fact to know where it came from and
+whether a person has checked it.
+
+**The domain is the bundle.** The engine — ingest, classify, extract, review,
+evaluate, compare — knows nothing about contracts. It is told which object type
+a document is fundamentally about, and which property holds a comparable value,
+by the bundle's `x_orpheus` block. The bundle shipped here describes
+public-sector contracts because that is the driving use case and it makes the
+documentation concrete; swapping it swaps the domain.
 
 This documentation covers **Phase 1 only**: ingest and extraction quality.
 Entity resolution, the cross-document relationship graph, conflict-of-interest
