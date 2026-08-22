@@ -81,10 +81,14 @@ Serving it:
 
 ```bash
 Rscript inst/plumber/plumb.R                                    # writer, :8000
-datasette serve data/orpheus.sqlite \
-  --plugins-dir plugins --template-dir templates \
-  --metadata datasette.yml --port 8001                          # UI + reader, :8001
+
+ORPHEUS_API_TOKEN=$TOKEN datasette serve data/orpheus.sqlite \
+  --metadata inst/datasette/metadata.yml \
+  --config   inst/datasette/datasette.yml \
+  --plugins-dir plugins --template-dir templates --port 8001    # UI + reader, :8001
 ```
+
+Or `cd deploy && docker compose up -d`, which runs both plus Ollama.
 
 The Datasette plugin adds an upload page and per-row confirm/amend/reject. It is
 a thin client over the API — it never opens a SQLite connection and never calls
@@ -112,7 +116,7 @@ both the audit story and the only way to measure whether extraction is improving
 
 ## Status
 
-653 tests, no skips with `conceptR` installed:
+687 tests, no skips with `conceptR` installed:
 
 ```bash
 Rscript -e 'testthat::test_dir("tests/testthat")'

@@ -91,7 +91,7 @@ The extraction engine is reached through exactly one file,
 `R/ontology_stack.R`, behind `orph_populate()`, with `orph_set_populator()` as
 the injection point. Everything downstream — persistence, provenance, the
 amendment model, concepts, permissions, the API — works on a normalised shape
-and never sees the stack. The test suite proves this: all 653 tests pass with
+and never sees the stack. The test suite proves this: all 687 tests pass with
 `ontologyDiscoverR` absent, driving a substitute engine through the same
 interface.
 
@@ -154,71 +154,37 @@ configuration, which is exactly where domain knowledge belongs.
 
 ---
 
-## Direction: Datasette as the primary surface
+## Datasette as the primary surface
 
-**Status: a direction, not a decision. Nothing here is built, and Phase 1 does
-not depend on it.**
+**Status: taken, and partly built.** The decision was to lean into the Datasette
+ecosystem rather than build a bespoke UI, keep the R stack reachable over HTTP,
+and make the central interaction a person and a model working through a document
+together.
 
-The intended shape is to lean into the Datasette ecosystem rather than build a
-bespoke UI, keep the R stack reachable over HTTP, and make the central
-interaction a **person and a model classifying a document together as they read
-it** — annotation as a conversation in the Datasette UI, not a batch job whose
-output is inspected afterwards.
+**Built:** `plugins/orpheus_datasette.py` — upload a file in the browser, watch
+it ingest, classify and extract, then confirm, amend or reject each fact. The
+two constraints it must not break (never a second writer, never a model caller)
+and how each was verified are in
+[Deployment](deployment.md#the-datasette-ui-plugin).
 
-### What already points this way
-
-More of this exists than it might look:
-
-| Already true | Why it matters here |
-|---|---|
-| The Plumber API is the single writer, over HTTP | "R reached via an API" is the current architecture, not a change to it |
-| Datasette already reads the store, with permissions emitted from one place | The read surface is in place and cannot drift from the API's rules |
-| Every AI-sourced row lands `unconfirmed` with provenance | This *is* the co-classification loop: the model proposes, the person disposes |
-| `orph_classify()` already writes `classification_status = 'unconfirmed'` | Classification is already a proposal awaiting a human, not a verdict |
-| `datasette-paper` is already the model for per-document sharing | The same project is prior art for the UI |
-
-So the gap is a write path from the Datasette UI, and incremental
-rather than whole-document classification.
-
-### The one thing that must not be got wrong
-
-**A Datasette plugin must call the Plumber API, never write SQLite directly and
-never call a model itself.**
-
-Both shortcuts are tempting and both silently dismantle guarantees Phase 1
-enforces:
-
-- Writing SQLite directly from a plugin makes Datasette a second writer. The
-  advisory lock refuses a second *Orpheus* writer, but it cannot stop a plugin
-  opening its own connection — and the WAL/single-writer reasoning stops holding
-  the moment it does.
-- Calling a model directly from a plugin bypasses the cloud gate, the org
-  policy, the per-request opt-in and the `llm_calls` audit log in one step. The
-  gate is enforced in the API. A plugin that reaches around it means a document
-  can go to a cloud model with no record that it did, which is the specific
-  failure the opt-in exists to prevent.
-
-Routed through the API, both problems disappear and the plugin stays thin.
-
-### What would need designing
+**Not built: the reading companion.** The plugin reviews a document after
+extraction has run over the whole of it. Annotation *as you read* is a different
+thing, and three problems stand between here and there:
 
 - **Incremental classification.** `orph_classify()` is one-shot over the whole
-  document. Reading-companion behaviour wants per-page or per-passage proposals
-  as the reader moves, which is a different call shape and a different unit of
-  provenance.
-- **Write-back from a read-only surface.** Datasette is deliberately read-only
-  here. The plugin becomes the only writing client, and its auth has to resolve
-  to the same actor the API knows — see the identity-provider decision above,
-  which this makes more pressing rather than less.
+  document. Per-page or per-passage proposals are a different call shape and a
+  different unit of provenance.
 - **Latency.** A batch pass can take seconds; a companion reacting to scrolling
   cannot. That is what the local tier is for, with the cloud tier reserved for
   on-demand questions.
+- **Identity.** The plugin resolves an actor from configured tokens. A real
+  deployment needs it to resolve to the same actor the API knows, which makes
+  the identity-provider decision above more pressing rather than less.
 
-This overlaps heavily with what agents.md scopes as Phase 3, and with
-`ontologyMCP`. The difference worth noting is the surface: agents.md imagines a
-bespoke split-view reading pane, and this direction puts the same interaction
-inside Datasette instead. Deciding between them is the actual open question, and
-it does not need answering yet.
+This overlaps with what agents.md scopes as Phase 3 and with `ontologyMCP`. The
+difference is the surface: agents.md imagines a bespoke split-view reading pane,
+and this puts the same interaction inside Datasette. That choice is now made;
+what remains is the three problems above.
 
 ---
 

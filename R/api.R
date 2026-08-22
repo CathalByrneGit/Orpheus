@@ -112,8 +112,7 @@ orph_api <- function(db_path = Sys.getenv("ORPHEUS_DB", "data/orpheus.sqlite"),
          bundle = list(bundle_id = bundle$bundle_id, version = bundle$version,
                        object_types = length(bundle$object_types %||% list()),
                        link_types = length(bundle$link_types %||% list())),
-         confidence_rubric = as.list(ORPH_CONFIDENCE),
-         corpus_engine = if (have_objectsets()) "objectSetsR" else "sql_fallback")
+         confidence_rubric = as.list(ORPH_CONFIDENCE))
   })
 
   pr <- GET(pr, "/bundle", function(req, res) {

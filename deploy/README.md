@@ -20,6 +20,14 @@ That bootstrap step needs the API stopped, or it will be refused by the
 single-writer lock — which is the lock doing its job. Stop the API first
 (`docker compose stop api`), create the actor, then start it again.
 
+Put the printed token in the environment so the UI can reach the API as that
+actor, and every amendment made through the browser is attributed to them:
+
+```bash
+echo "ORPHEUS_API_TOKEN=<token>" >> .env
+docker compose up -d datasette
+```
+
 Neither port is published beyond `127.0.0.1`. Put a TLS-terminating reverse
 proxy in front of both before anyone outside the host uses this. See
 [../docs/deployment.md](../docs/deployment.md).

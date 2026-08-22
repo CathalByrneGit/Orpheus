@@ -8,10 +8,16 @@ caller — see [../docs/deployment.md](../docs/deployment.md#the-datasette-ui-pl
 for why that matters and how it is verified.
 
 ```bash
-datasette serve data/orpheus.sqlite \
-  --plugins-dir plugins --template-dir templates \
-  --metadata datasette.yml --port 8001
+ORPHEUS_API_TOKEN=$TOKEN datasette serve data/orpheus.sqlite \
+  --metadata inst/datasette/metadata.yml \
+  --config   inst/datasette/datasette.yml \
+  --plugins-dir plugins --template-dir templates --port 8001
 ```
 
-Templates live in `../templates/`. The only configuration is the API URL and a
-token — per actor where possible, so amendments name the real person.
+Templates live in `../templates/`. Its settings are the `plugins` block of the
+generated `datasette.yml` — an API URL (overridable with `ORPHEUS_API_URL`), an
+upload size ceiling, and a token, per actor where possible so amendments name
+the real person.
+
+Browser file upload needs **Datasette 1.0a32 or newer**; on an older server the
+page degrades to the server-side path field.

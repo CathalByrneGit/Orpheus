@@ -9,7 +9,7 @@ eTenders and EU TED data speak.
 
 This page is the mapping and the proposed change. **The change is deliberately
 additive** — no table is renamed and no test breaks. Renaming `Contract` to
-`contracts` across nine object types, thirteen link types and 653 tests would be
+`contracts` across nine object types, thirteen link types and 687 tests would be
 a large change justified by nothing more than tidiness; carrying the mapping as
 metadata gets the interoperability without the churn.
 

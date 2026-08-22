@@ -2,8 +2,9 @@
 # Datasette configuration.
 #
 # Datasette is a read-only client here. It never writes: the Plumber API is the
-# single writer, and running Datasette with --immutable makes that a property
-# of the process rather than a rule people have to remember.
+# single writer. Note that --immutable does NOT enforce that -- it makes SQLite
+# skip the WAL, so a live store reads as empty. Read-only is enforced by mounting
+# the file read-only, not by a Datasette flag. See docs/deployment.md.
 #
 # Row-level, per-document permissions are not something Datasette core can do
 # from a metadata `allow` block -- those gate a whole table or database. The
@@ -16,18 +17,38 @@
 #' @keywords internal
 comment_block <- function(text) paste0("# ", gsub("\n", "\n# ", text))
 
-#' Write a Datasette metadata file for the store
+#' Write the Datasette configuration file for the store
 #'
-#' @param path Where to write the YAML.
+#' One file rather than several: Datasette takes a single `--config`, and the
+#' table descriptions, the `allow` blocks, the canned queries and the UI
+#' plugin's settings all have to agree with the bundle and the permission model.
+#' Generating them together is what stops them drifting apart.
+#'
+#' The API token is not written here. The file names the environment variable
+#' Datasette should read it from, so regenerating never commits a secret.
+#'
+#' @param path Where to write the config YAML. The metadata file is written
+#'   beside it as `metadata.yml` unless `metadata_path` says otherwise.
 #' @param database_name The name Datasette will serve the database under.
 #' @param bundle The bundle whose instance tables the generated queries span.
 #'   Defaults to the shipped one.
-#' @return Invisibly, `path`.
+#' @param api_url Base URL of the Plumber API the UI plugin should call.
+#' @param max_file_size Per-file ceiling on browser uploads, in bytes.
+#' @param metadata_path Where to write the descriptive metadata YAML.
+#' @return Invisibly, a named character vector of both paths.
 #' @export
-orph_write_datasette_metadata <- function(path = "inst/datasette/metadata.yml",
-                                          database_name = "orpheus",
-                                          bundle = orph_load_bundle()) {
+orph_write_datasette_config <- function(path = "inst/datasette/datasette.yml",
+                                        database_name = "orpheus",
+                                        bundle = orph_load_bundle(),
+                                        api_url = "http://127.0.0.1:8000",
+                                        max_file_size = 50 * 1024 * 1024,
+                                        metadata_path = file.path(dirname(path),
+                                                                  "metadata.yml")) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  dir.create(dirname(metadata_path), recursive = TRUE, showWarnings = FALSE)
+  db_hint <- paste0("data/", database_name, ".sqlite")
+  basename_hint <- basename(path)
+  metadata_basename <- basename(metadata_path)
 
   # Built from the bundle, not written out by hand. A canned query naming the
   # instance tables of one domain would quietly return partial answers the
@@ -41,35 +62,36 @@ orph_write_datasette_metadata <- function(path = "inst/datasette/metadata.yml",
             instance_tables),
     collapse = "\n")
 
-  yaml <- paste0(
-'title: Orpheus contract intelligence
+  # Quoted, and quotes stripped from the name: the YAML here is built by
+  # concatenation, and a bundle called "Contracts: core" would otherwise emit a
+  # file Datasette cannot parse.
+  title <- gsub('"', "", paste("Orpheus:", bundle$bundle_name %||% "document intelligence"))
+
+  # Two files, because Datasette reads them through two different paths.
+  # `--metadata` is descriptive text and is the only one that reaches the
+  # rendered pages; `--config` is anything that changes behaviour. Putting a
+  # canned query in the metadata file makes Datasette 1.0 fail at startup with
+  # a KeyError on `sql`, and putting a description in the config file renders
+  # nothing at all. Both are generated here so they cannot disagree.
+  metadata_yaml <- paste0(
+'# Descriptive metadata for the Orpheus store. Generated -- regenerate with
+# orph_write_datasette_config() rather than editing.
+
+title: "', title, '"
 description_html: |-
   <p>Read-only view of the Orpheus store. Every write -- extraction, amendment,
   concept evaluation -- goes through the Plumber API, which is the single
-  writer. This instance runs with <code>--immutable</code> and cannot change
-  anything.</p>
+  writer. This process only reads.</p>
   <p>AI-sourced rows carry <code>source</code>, <code>confidence</code> and
   <code>status</code>. A row with <code>status = unconfirmed</code> has not been
   checked by a person. <code>confidence</code> is one of five rubric levels, not
   an arbitrary score: 1.0 explicit, 0.9 clearly named, 0.7 implied, 0.5
   inferred, 0.2 speculative.</p>
 
-# No anonymous access. Contract documents have no public audience, so an actor
-# is required before any resource-level rule is even consulted.
-allow:
-  id: "*"
-
 databases:
   ', database_name, ':
     tables:
-      actor_tokens:
-        allow: false
-      actors:
-        allow:
-          is_admin: 1
       llm_calls:
-        allow:
-          is_admin: 1
         description: Audit log of every model call, local and cloud.
       documents:
         description: >-
@@ -79,7 +101,6 @@ databases:
         description: >-
           Append-only audit trail. Ordered by seq rather than timestamp --
           changes made in one transaction share a timestamp to the second.
-        sort: seq
       schema_amendments:
         description: >-
           Properties and types seen during population but not declared in the
@@ -95,6 +116,45 @@ databases:
         description: >-
           Where each instance came from -- source label, page, and the excerpt
           supporting it.
+')
+
+  yaml <- paste0(
+'# Datasette configuration for the Orpheus store. Generated -- regenerate with
+# orph_write_datasette_config() rather than editing.
+#
+#   ORPHEUS_API_TOKEN=... datasette serve ', db_hint, ' \\
+#     --metadata ', metadata_basename, ' --config ', basename_hint, ' \\
+#     --plugins-dir plugins --template-dir templates --port 8001
+
+# No anonymous access. The documents this store holds have no public audience,
+# so an actor is required before any resource-level rule is even consulted.
+allow:
+  id: "*"
+
+# The UI plugin. It is a client over the HTTP API -- it opens no SQLite
+# connection and calls no model, so the single-writer lock and the cloud opt-in
+# gate both still hold when a person is driving. The token is read from the
+# environment so that regenerating this file never commits a secret.
+plugins:
+  orpheus-datasette:
+    api_url: "', api_url, '"
+    max_file_size: ', format(max_file_size, scientific = FALSE), '
+    token:
+      $env: ORPHEUS_API_TOKEN
+
+databases:
+  ', database_name, ':
+    tables:
+      actor_tokens:
+        allow: false
+      actors:
+        allow:
+          is_admin: 1
+      llm_calls:
+        allow:
+          is_admin: 1
+      edit_history:
+        sort: seq
 
     queries:
       needs_review:
@@ -208,7 +268,7 @@ databases:
 # generated from orph_permission_sql(), so they cannot drift from what the API
 # enforces. Bind :actor_id to the authenticated actor.
 #
-# Regenerate this file with orph_write_datasette_metadata() after any change to
+# Regenerate this file with orph_write_datasette_config() after any change to
 # the permission model.
 # ---------------------------------------------------------------------------
 ', comment_block(orph_permission_sql("view")), '
@@ -216,8 +276,9 @@ databases:
 ', comment_block(orph_permission_sql("edit")), '
 ')
 
+  writeLines(metadata_yaml, metadata_path)
   writeLines(yaml, path)
-  invisible(path)
+  invisible(c(config = path, metadata = metadata_path))
 }
 
 #' The command to serve the store to readers
@@ -238,8 +299,10 @@ databases:
 #' flag.
 #'
 #' @param db_path Path to the SQLite file.
-#' @param metadata_path Path to the metadata YAML.
+#' @param metadata_path Path to the descriptive metadata YAML.
+#' @param config_path Path to the configuration YAML.
 #' @param port Port to bind.
+#' @param ui Include the UI plugin's flags.
 #' @param immutable Use `--immutable` anyway. Only correct for a snapshot that
 #'   has been checkpointed and is no longer being written to -- see
 #'   [orph_checkpoint()].
@@ -247,27 +310,12 @@ databases:
 #' @export
 orph_datasette_command <- function(db_path = "data/orpheus.sqlite",
                                    metadata_path = "inst/datasette/metadata.yml",
-                                   port = 8001, immutable = FALSE) {
-  sprintf(paste("datasette serve%s %s --metadata %s --port %d",
+                                   config_path = "inst/datasette/datasette.yml",
+                                   port = 8001, ui = TRUE, immutable = FALSE) {
+  sprintf(paste("datasette serve%s %s --metadata %s --config %s%s --port %d",
                 "--setting sql_time_limit_ms 3000 --setting max_returned_rows 2000"),
-          if (immutable) " --immutable" else "", db_path, metadata_path, port)
-}
-
-#' Note explaining the database-name requirement
-#'
-#' Datasette names a database after its filename stem, and metadata keys are
-#' matched against that name. Serving `contracts.sqlite` against metadata
-#' declaring a database called `orpheus` silently drops every canned query and
-#' table description -- the pages still load, they just lose their
-#' configuration. The file must be named to match.
-#'
-#' @param database_name The name used in the metadata file.
-#' @return A character scalar.
-#' @export
-orph_datasette_naming_note <- function(database_name = "orpheus") {
-  sprintf(paste0(
-    "The SQLite file must be named %s.sqlite: Datasette derives the database ",
-    "name from the filename stem and matches metadata keys against it. A ",
-    "mismatch drops the canned queries and table descriptions without an error."),
-    database_name)
+          if (immutable) " --immutable" else "", db_path, metadata_path,
+          config_path,
+          if (ui) " --plugins-dir plugins --template-dir templates" else "",
+          port)
 }

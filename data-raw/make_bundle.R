@@ -2,6 +2,9 @@
 #
 # Run:  Rscript data-raw/make_bundle.R
 #
+# Loads the package because it shares sync_bundle_aliases() with it -- the
+# alias spellings below are then written in one place, not two.
+#
 # The output is inst/bundles/contract-core-0.1.0.json. It is a normal data
 # artifact: `dis_to_bundle()` output from a real ontologyDiscoverR discovery
 # run over a sample of contracts can replace it wholesale, and this script
@@ -22,6 +25,8 @@
 # Anything reading this bundle therefore works unmodified. The alternative --
 # picking one convention and shimming the other two -- puts a translation step
 # on every path instead of a few redundant keys in one file.
+
+pkgload::load_all(".", quiet = TRUE)
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
@@ -510,15 +515,12 @@ bundle <- list(
   link_types   = link_types,
   concept_templates = concept_templates,
   scores       = scores,
-  action_types = list(),
   concept_defs = concept_defs
 )
 
-# Aliases so a consumer reading the ontologySpecR spelling finds the same data.
-bundle$objects        <- bundle$object_types
-bundle$links          <- bundle$link_types
-bundle$interfaceTypes <- bundle$interfaces
-bundle$concepts <- bundle$concept_defs
+# One helper writes every alias, so the file cannot ship with `objects` and
+# `object_types` disagreeing. See sync_bundle_aliases() in R/bundle.R.
+bundle <- sync_bundle_aliases(bundle)
 
 dir.create("inst/bundles", recursive = TRUE, showWarnings = FALSE)
 out <- "inst/bundles/contract-core-0.1.0.json"

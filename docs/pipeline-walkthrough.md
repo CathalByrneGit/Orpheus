@@ -211,8 +211,8 @@ available signal that real resolution is needed.
 Values are compared only within a single currency. Converting them would need a
 rate for the right date, which is not something to invent.
 
-Uses `objectSetsR` when installed and falls back to direct SQL otherwise; the
-result reports which via `engine`.
+The corpus lookup runs through `orph_object_set_by_interface()`, so a match can
+land on any type implementing `Named` rather than only on the type asked about.
 
 ---
 

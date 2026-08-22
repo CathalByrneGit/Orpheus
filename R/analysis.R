@@ -19,9 +19,6 @@
 #' @export
 ORPH_NAIVE_RESOLUTION <- "naive_unresolved"
 
-#' @keywords internal
-have_objectsets <- function() requireNamespace("objectSetsR", quietly = TRUE)
-
 # ---------------------------------------------------------------------------
 # Interface queries
 # ---------------------------------------------------------------------------
@@ -97,58 +94,6 @@ orph_object_set_by_interface <- function(con, interface_id, bundle = NULL,
   }
 
   db_query(con, paste(selects, collapse = "\nUNION ALL\n"), all_params)
-}
-
-#' Collect an object type's live rows
-#'
-#' Uses objectSetsR when it is installed, which is what makes this an object-set
-#' query over the populated ontology rather than a bespoke one. The direct SQL
-#' path is a fallback so a deployment without the package still gets the
-#' escalation, and both paths are held to the same projection: declared
-#' properties only, rejected rows excluded.
-#'
-#' @param con A connection.
-#' @param bundle A bundle.
-#' @param type_id Object type identifier.
-#' @param naive_keys Restrict to these naive keys, or `NULL` for all rows.
-#' @return A data frame.
-#' @keywords internal
-collect_object_set <- function(con, bundle, type_id, naive_keys = NULL) {
-  ot <- orph_object_type(bundle, type_id)
-  if (is.null(ot) || !DBI::dbExistsTable(con, ot$table_name)) return(data.frame())
-
-  if (have_objectsets()) {
-    result <- tryCatch({
-      b <- bundle; class(b) <- c("ontology_bundle", "list")
-      ctx <- objectSetsR::ontology_context(b, con, check_interfaces = FALSE)
-      os  <- objectSetsR::object_set(ctx, type_id)
-      os  <- objectSetsR::os_filter(os, .data$status != "rejected")
-      if (!is.null(naive_keys)) {
-        keys <- unique(naive_keys)
-        os <- objectSetsR::os_filter(os, .data$naive_key %in% !!keys)
-      }
-      as.data.frame(objectSetsR::os_collect(os))
-    }, error = function(e) {
-      cli::cli_warn(c("objectSetsR query failed; falling back to direct SQL.",
-                      x = conditionMessage(e)))
-      NULL
-    })
-    if (!is.null(result)) return(result)
-  }
-
-  cols <- intersect(orph_property_ids(ot), DBI::dbListFields(con, ot$table_name))
-  sql <- sprintf("SELECT %s FROM %s WHERE status != 'rejected'",
-                 paste(DBI::dbQuoteIdentifier(con, cols), collapse = ", "),
-                 DBI::dbQuoteIdentifier(con, ot$table_name))
-  params <- list()
-  if (!is.null(naive_keys)) {
-    keys <- unique(naive_keys)
-    if (length(keys) == 0) return(data.frame())
-    sql <- paste0(sql, sprintf(" AND naive_key IN (%s)",
-                               paste(rep("?", length(keys)), collapse = ", ")))
-    params <- as.list(keys)
-  }
-  db_query(con, sql, params)
 }
 
 #' Run the database-wide analysis for a document
@@ -243,8 +188,7 @@ orph_corpus_analysis <- function(con, document_id, actor_id = NULL, narrate = FA
       resolution_quality = ORPH_NAIVE_RESOLUTION)
   })
 
-  c(result, list(evaluation_id = eval_id, resolution_quality = ORPH_NAIVE_RESOLUTION,
-                 engine = if (have_objectsets()) "objectSetsR" else "sql_fallback"))
+  c(result, list(evaluation_id = eval_id, resolution_quality = ORPH_NAIVE_RESOLUTION))
 }
 
 #' @keywords internal

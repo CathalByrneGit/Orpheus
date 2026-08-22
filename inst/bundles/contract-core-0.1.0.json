@@ -3,7 +3,7 @@
   "bundle_name": "Core contract ontology",
   "version": "0.1.0",
   "spec_version": "0.1.0",
-  "created_at": "2026-08-22T14:49:51Z",
+  "created_at": "2026-08-22T19:06:23Z",
   "description": "Hand-seeded starting bundle for Phase 1. Replaceable by dis_to_bundle() output from an ontologyDiscoverR discovery run over a real contract sample.",
   "x_orpheus": {
     "primary_object_type": "Contract",
@@ -2146,7 +2146,6 @@
       ]
     }
   ],
-  "action_types": [],
   "concept_defs": [
     {
       "id": "high_value",
@@ -3704,255 +3703,6 @@
       }
     }
   ],
-  "links": [
-    {
-      "id": "contains_clause",
-      "display_name": "contains clause",
-      "description": "Clause belongs to this contract",
-      "from": "Contract",
-      "to": "Clause",
-      "from_type_id": "Contract",
-      "to_type_id": "Clause",
-      "cardinality": "one-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "contract_instance_id"
-        ]
-      }
-    },
-    {
-      "id": "imposes",
-      "display_name": "imposes",
-      "description": "Obligation arises from this clause",
-      "from": "Clause",
-      "to": "Obligation",
-      "from_type_id": "Clause",
-      "to_type_id": "Obligation",
-      "cardinality": "one-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "clause_instance_id"
-        ]
-      }
-    },
-    {
-      "id": "dated_by",
-      "display_name": "has key date",
-      "description": "Date found in this contract",
-      "from": "Contract",
-      "to": "KeyDate",
-      "from_type_id": "Contract",
-      "to_type_id": "KeyDate",
-      "cardinality": "one-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "contract_instance_id"
-        ]
-      }
-    },
-    {
-      "id": "valued_at",
-      "display_name": "has amount",
-      "description": "Monetary amount found in this contract",
-      "from": "Contract",
-      "to": "MonetaryAmount",
-      "from_type_id": "Contract",
-      "to_type_id": "MonetaryAmount",
-      "cardinality": "one-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "contract_instance_id"
-        ]
-      }
-    },
-    {
-      "id": "edge_from",
-      "display_name": "edge source",
-      "description": "Instance an edge starts at",
-      "from": "Relationship",
-      "to": "Contract",
-      "from_type_id": "Relationship",
-      "to_type_id": "Contract",
-      "cardinality": "many-to-one",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "from_instance_id"
-        ],
-        "toKeys": [
-          "instance_id"
-        ]
-      }
-    },
-    {
-      "id": "edge_to",
-      "display_name": "edge target",
-      "description": "Instance an edge points to",
-      "from": "Relationship",
-      "to": "Company",
-      "from_type_id": "Relationship",
-      "to_type_id": "Company",
-      "cardinality": "many-to-one",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "to_instance_id"
-        ],
-        "toKeys": [
-          "instance_id"
-        ]
-      }
-    },
-    {
-      "id": "party_to",
-      "display_name": "party to",
-      "description": "Company is a party to this contract",
-      "from": "Company",
-      "to": "Contract",
-      "from_type_id": "Company",
-      "to_type_id": "Contract",
-      "cardinality": "many-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "instance_id"
-        ]
-      }
-    },
-    {
-      "id": "signed_by",
-      "display_name": "signed",
-      "description": "Person signed this contract",
-      "from": "Person",
-      "to": "Contract",
-      "from_type_id": "Person",
-      "to_type_id": "Contract",
-      "cardinality": "many-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "instance_id"
-        ]
-      }
-    },
-    {
-      "id": "subcontracts_to",
-      "display_name": "subcontracts to",
-      "description": "Company subcontracts work to another company",
-      "from": "Company",
-      "to": "Company",
-      "from_type_id": "Company",
-      "to_type_id": "Company",
-      "cardinality": "many-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "instance_id"
-        ]
-      }
-    },
-    {
-      "id": "references",
-      "display_name": "references",
-      "description": "Contract refers to another agreement",
-      "from": "Contract",
-      "to": "Contract",
-      "from_type_id": "Contract",
-      "to_type_id": "Contract",
-      "cardinality": "many-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "instance_id"
-        ]
-      }
-    },
-    {
-      "id": "mentions",
-      "display_name": "mentions",
-      "description": "Clause names a company",
-      "from": "Clause",
-      "to": "Company",
-      "from_type_id": "Clause",
-      "to_type_id": "Company",
-      "cardinality": "many-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "instance_id"
-        ]
-      }
-    },
-    {
-      "id": "employed_by",
-      "display_name": "employed by",
-      "description": "Person acts for this company",
-      "from": "Person",
-      "to": "Company",
-      "from_type_id": "Person",
-      "to_type_id": "Company",
-      "cardinality": "many-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "instance_id"
-        ]
-      }
-    },
-    {
-      "id": "raised_against",
-      "display_name": "raised against",
-      "description": "Flag concerns this clause",
-      "from": "Flag",
-      "to": "Clause",
-      "from_type_id": "Flag",
-      "to_type_id": "Clause",
-      "cardinality": "many-to-many",
-      "directed": true,
-      "join": {
-        "fromKeys": [
-          "instance_id"
-        ],
-        "toKeys": [
-          "instance_id"
-        ]
-      }
-    }
-  ],
   "interfaceTypes": [
     {
       "id": "Reviewable",
@@ -4288,6 +4038,255 @@
           }
         }
       ]
+    }
+  ],
+  "links": [
+    {
+      "id": "contains_clause",
+      "display_name": "contains clause",
+      "description": "Clause belongs to this contract",
+      "from": "Contract",
+      "to": "Clause",
+      "from_type_id": "Contract",
+      "to_type_id": "Clause",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "contract_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "imposes",
+      "display_name": "imposes",
+      "description": "Obligation arises from this clause",
+      "from": "Clause",
+      "to": "Obligation",
+      "from_type_id": "Clause",
+      "to_type_id": "Obligation",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "clause_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "dated_by",
+      "display_name": "has key date",
+      "description": "Date found in this contract",
+      "from": "Contract",
+      "to": "KeyDate",
+      "from_type_id": "Contract",
+      "to_type_id": "KeyDate",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "contract_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "valued_at",
+      "display_name": "has amount",
+      "description": "Monetary amount found in this contract",
+      "from": "Contract",
+      "to": "MonetaryAmount",
+      "from_type_id": "Contract",
+      "to_type_id": "MonetaryAmount",
+      "cardinality": "one-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "contract_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "edge_from",
+      "display_name": "edge source",
+      "description": "Instance an edge starts at",
+      "from": "Relationship",
+      "to": "Contract",
+      "from_type_id": "Relationship",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-one",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "from_instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "edge_to",
+      "display_name": "edge target",
+      "description": "Instance an edge points to",
+      "from": "Relationship",
+      "to": "Company",
+      "from_type_id": "Relationship",
+      "to_type_id": "Company",
+      "cardinality": "many-to-one",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "to_instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "party_to",
+      "display_name": "party to",
+      "description": "Company is a party to this contract",
+      "from": "Company",
+      "to": "Contract",
+      "from_type_id": "Company",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "signed_by",
+      "display_name": "signed",
+      "description": "Person signed this contract",
+      "from": "Person",
+      "to": "Contract",
+      "from_type_id": "Person",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "subcontracts_to",
+      "display_name": "subcontracts to",
+      "description": "Company subcontracts work to another company",
+      "from": "Company",
+      "to": "Company",
+      "from_type_id": "Company",
+      "to_type_id": "Company",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "references",
+      "display_name": "references",
+      "description": "Contract refers to another agreement",
+      "from": "Contract",
+      "to": "Contract",
+      "from_type_id": "Contract",
+      "to_type_id": "Contract",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "mentions",
+      "display_name": "mentions",
+      "description": "Clause names a company",
+      "from": "Clause",
+      "to": "Company",
+      "from_type_id": "Clause",
+      "to_type_id": "Company",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "employed_by",
+      "display_name": "employed by",
+      "description": "Person acts for this company",
+      "from": "Person",
+      "to": "Company",
+      "from_type_id": "Person",
+      "to_type_id": "Company",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
+    },
+    {
+      "id": "raised_against",
+      "display_name": "raised against",
+      "description": "Flag concerns this clause",
+      "from": "Flag",
+      "to": "Clause",
+      "from_type_id": "Flag",
+      "to_type_id": "Clause",
+      "cardinality": "many-to-many",
+      "directed": true,
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "instance_id"
+        ]
+      }
     }
   ],
   "concepts": [

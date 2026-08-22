@@ -21,6 +21,7 @@ confidence rubric, the amendment history and permissions on the way in.
 
 import hashlib
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -48,7 +49,15 @@ def _config(datasette):
 
 
 def _api_base(datasette):
-    return _config(datasette).get("api_url", DEFAULT_API).rstrip("/")
+    """Where the API lives, environment first.
+
+    The config file is generated and committed, so it cannot name a host that
+    is only right in one deployment. Under compose the API is reachable as
+    `http://api:8000` and locally as `http://127.0.0.1:8000`; the environment
+    settles which without a second copy of the file.
+    """
+    url = os.environ.get("ORPHEUS_API_URL") or _config(datasette).get("api_url")
+    return (url or DEFAULT_API).rstrip("/")
 
 
 def _token(datasette, actor):

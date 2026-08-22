@@ -29,6 +29,29 @@ orph_load_bundle <- function(path = orph_default_bundle_path()) {
   bundle
 }
 
+#' Mirror the bundle's alias keys
+#'
+#' The three consumer packages read different keys for the same lists:
+#' `ontologyDiscoverR` reads `object_types`, `objectSetsR` reads `objects`, and
+#' so on for interfaces, links and concepts. Carrying both spellings is the
+#' price of one bundle serving all three.
+#'
+#' It is applied in one place rather than at each call site, because the mirrors
+#' were previously hand-maintained and a schema amendment updated `objects`
+#' while leaving `interfaceTypes`, `links` and `concepts` behind.
+#'
+#' @param bundle A bundle list.
+#' @return The bundle, with every alias matching its primary key.
+#' @keywords internal
+sync_bundle_aliases <- function(bundle) {
+  aliases <- c(object_types = "objects", interfaces = "interfaceTypes",
+               link_types = "links", concept_defs = "concepts")
+  for (primary in names(aliases)) {
+    if (!is.null(bundle[[primary]])) bundle[[aliases[[primary]]]] <- bundle[[primary]]
+  }
+  bundle
+}
+
 #' Validate that a bundle carries what its three consumers read
 #'
 #' `ontologyDiscoverR`, `conceptR` and `objectSetsR` each read different keys
@@ -392,6 +415,7 @@ orph_register_bundle <- function(con, bundle, actor_id = NULL, activate = TRUE,
                                  stage = c("production", "staging")) {
   assert_writable(con)
   stage <- match.arg(stage)
+  bundle <- sync_bundle_aliases(bundle)
   orph_validate_bundle(bundle)
   if (stage == "staging" && activate) {
     cli::cli_abort("A staging bundle cannot be activated. Promote it to production first.")

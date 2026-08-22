@@ -95,15 +95,6 @@ test_that("a rejected counterparty drops out of the corpus match", {
   expect_equal(result$matched_companies, 0)
 })
 
-test_that("the engine used is reported so results can be traced to their query path", {
-  con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
-  docs <- seed_corpus(con, root, list(
-    list(name = "A", supplier = "Meridian Systems Limited", value = 2400000),
-    list(name = "B", supplier = "Meridian Systems Limited", value = 900000)))
-  result <- orph_corpus_analysis(con, docs[[1]], actor_id = "act_test")
-  expect_true(result$engine %in% c("objectSetsR", "sql_fallback"))
-})
-
 test_that("companies are matched across documents by stated registration number", {
   con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
 
