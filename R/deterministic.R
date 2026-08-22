@@ -14,7 +14,6 @@ MONTHS <- c(january=1, february=2, march=3, april=4, may=5, june=6, july=7,
             jan=1, feb=2, mar=3, apr=4, jun=6, jul=7, aug=8, sep=9, sept=9,
             oct=10, nov=11, dec=12)
 
-#' @keywords internal
 #' Build a currency symbol from its UTF-8 bytes
 #'
 #' Currency symbols cannot be written literally: R source must be ASCII to be

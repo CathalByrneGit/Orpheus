@@ -3,8 +3,15 @@
   "bundle_name": "Core contract ontology",
   "version": "0.1.0",
   "spec_version": "0.1.0",
-  "created_at": "2026-08-22T00:32:48Z",
+  "created_at": "2026-08-22T19:06:23Z",
   "description": "Hand-seeded starting bundle for Phase 1. Replaceable by dis_to_bundle() output from an ontologyDiscoverR discovery run over a real contract sample.",
+  "x_orpheus": {
+    "primary_object_type": "Contract",
+    "container_property": "contract_instance_id",
+    "value_property": "value_amount",
+    "currency_property": "value_currency",
+    "document_types": ["contract", "amendment", "tender", "correspondence", "other"]
+  },
   "object_types": [
     {
       "id": "Contract",
@@ -26,6 +33,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -35,6 +44,8 @@
           "type": "string",
           "nullable": false,
           "description": "Title of the agreement",
+          "x_ocds": "contracts/title",
+          "values": null,
           "source": {
             "column": "name"
           }
@@ -44,6 +55,8 @@
           "type": "string",
           "nullable": true,
           "description": "Contract or tender reference number",
+          "x_ocds": "contracts/id",
+          "values": null,
           "source": {
             "column": "reference"
           }
@@ -53,6 +66,8 @@
           "type": "string",
           "nullable": true,
           "description": "Short description of the subject matter",
+          "x_ocds": "contracts/description",
+          "values": null,
           "source": {
             "column": "description"
           }
@@ -62,6 +77,8 @@
           "type": "double",
           "nullable": true,
           "description": "Headline contract value",
+          "x_ocds": "contracts/value/amount",
+          "values": null,
           "source": {
             "column": "value_amount"
           }
@@ -70,7 +87,9 @@
           "id": "value_currency",
           "type": "string",
           "nullable": true,
-          "description": "ISO currency code of the headline value",
+          "description": "ISO 4217 currency code of the headline value",
+          "x_ocds": "contracts/value/currency",
+          "values": null,
           "source": {
             "column": "value_currency"
           }
@@ -80,6 +99,8 @@
           "type": "string",
           "nullable": true,
           "description": "Commencement date (ISO-8601)",
+          "x_ocds": "contracts/period/startDate",
+          "values": null,
           "source": {
             "column": "start_date"
           }
@@ -89,6 +110,8 @@
           "type": "string",
           "nullable": true,
           "description": "Expiry date (ISO-8601); null if open-ended",
+          "x_ocds": "contracts/period/endDate",
+          "values": null,
           "source": {
             "column": "end_date"
           }
@@ -98,15 +121,40 @@
           "type": "string",
           "nullable": true,
           "description": "Date of execution (ISO-8601)",
+          "x_ocds": "contracts/dateSigned",
+          "values": null,
           "source": {
             "column": "signed_date"
+          }
+        },
+        {
+          "id": "contract_status",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract status per the OCDS contractStatus codelist -- distinct from the review status",
+          "x_ocds": "contracts/status",
+          "values": [
+            "pending",
+            "active",
+            "cancelled",
+            "terminated"
+          ],
+          "source": {
+            "column": "contract_status"
           }
         },
         {
           "id": "procurement_procedure",
           "type": "string",
           "nullable": true,
-          "description": "e.g. open, restricted, negotiated, direct award",
+          "description": "How the contract was awarded, OCDS procurementMethod codelist (closed)",
+          "x_ocds": "tender/procurementMethod",
+          "values": [
+            "open",
+            "selective",
+            "limited",
+            "direct"
+          ],
           "source": {
             "column": "procurement_procedure"
           }
@@ -116,6 +164,8 @@
           "type": "string",
           "nullable": true,
           "description": "Jurisdiction whose law governs the agreement",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "governing_law"
           }
@@ -125,6 +175,8 @@
           "type": "string",
           "nullable": true,
           "description": "Whether a signature block was found: yes | no | unclear",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "signature_block_present"
           }
@@ -134,6 +186,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -143,6 +197,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -152,6 +208,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -161,6 +219,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -170,6 +230,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -179,6 +241,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -209,6 +273,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -218,6 +284,8 @@
           "type": "string",
           "nullable": false,
           "description": "Name as written in the document",
+          "x_ocds": "parties/name",
+          "values": null,
           "source": {
             "column": "name"
           }
@@ -227,6 +295,8 @@
           "type": "string",
           "nullable": true,
           "description": "Normalised name for best-effort cross-document matching",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "naive_key"
           }
@@ -236,6 +306,8 @@
           "type": "string",
           "nullable": true,
           "description": "Company registration number, if stated",
+          "x_ocds": "parties/identifier/id",
+          "values": null,
           "source": {
             "column": "registration_number"
           }
@@ -245,6 +317,8 @@
           "type": "string",
           "nullable": true,
           "description": "Registered or stated address",
+          "x_ocds": "parties/address",
+          "values": null,
           "source": {
             "column": "address"
           }
@@ -253,7 +327,21 @@
           "id": "role",
           "type": "string",
           "nullable": true,
-          "description": "e.g. contracting_authority, supplier, subcontractor, guarantor",
+          "description": "Role in the contracting process, OCDS partyRole codelist (open)",
+          "x_ocds": "parties/roles",
+          "values": [
+            "buyer",
+            "procuringEntity",
+            "supplier",
+            "tenderer",
+            "funder",
+            "enquirer",
+            "payer",
+            "payee",
+            "reviewBody",
+            "interestedParty",
+            "subcontractor"
+          ],
           "source": {
             "column": "role"
           }
@@ -263,6 +351,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. private_company, public_body, charity, partnership",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "entity_kind"
           }
@@ -272,6 +362,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -281,6 +373,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -290,6 +384,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -299,6 +395,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -308,6 +406,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -317,6 +417,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -347,6 +449,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -356,6 +460,8 @@
           "type": "string",
           "nullable": false,
           "description": "Name as written in the document",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "name"
           }
@@ -365,6 +471,8 @@
           "type": "string",
           "nullable": true,
           "description": "Normalised name for best-effort cross-document matching",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "naive_key"
           }
@@ -374,6 +482,8 @@
           "type": "string",
           "nullable": true,
           "description": "Stated role or title",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "job_title"
           }
@@ -383,6 +493,8 @@
           "type": "string",
           "nullable": true,
           "description": "Organisation the person is stated to act for",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "acting_for"
           }
@@ -392,6 +504,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -401,6 +515,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -410,6 +526,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -419,6 +537,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -428,6 +548,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -437,6 +559,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -467,6 +591,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -476,6 +602,8 @@
           "type": "string",
           "nullable": true,
           "description": "Contract this clause belongs to",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "contract_instance_id"
           }
@@ -485,6 +613,8 @@
           "type": "string",
           "nullable": true,
           "description": "Clause number as printed",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "clause_number"
           }
@@ -494,6 +624,8 @@
           "type": "string",
           "nullable": true,
           "description": "Clause heading",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "heading"
           }
@@ -502,7 +634,24 @@
           "id": "clause_type",
           "type": "string",
           "nullable": true,
-          "description": "e.g. indemnity, liability, termination, confidentiality, payment, renewal",
+          "description": "What the clause is about",
+          "x_ocds": null,
+          "values": [
+            "indemnity",
+            "liability",
+            "termination",
+            "confidentiality",
+            "payment",
+            "renewal",
+            "term",
+            "governing_law",
+            "warranty",
+            "restriction",
+            "assignment",
+            "audit",
+            "dispute",
+            "other"
+          ],
           "source": {
             "column": "clause_type"
           }
@@ -512,6 +661,8 @@
           "type": "string",
           "nullable": true,
           "description": "Clause text as extracted",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "text"
           }
@@ -521,6 +672,8 @@
           "type": "integer",
           "nullable": true,
           "description": "Page the clause starts on",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "page_no"
           }
@@ -530,6 +683,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -539,6 +694,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -548,6 +705,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -557,6 +716,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -566,6 +727,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -575,6 +738,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -604,6 +769,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -613,6 +780,8 @@
           "type": "string",
           "nullable": true,
           "description": "Clause imposing this obligation",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "clause_instance_id"
           }
@@ -622,6 +791,8 @@
           "type": "string",
           "nullable": true,
           "description": "Party bound, as named in the text",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "obligated_party"
           }
@@ -631,6 +802,8 @@
           "type": "string",
           "nullable": true,
           "description": "What must be done",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "summary"
           }
@@ -640,6 +813,8 @@
           "type": "string",
           "nullable": true,
           "description": "Deadline, if stated (ISO-8601)",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "due_date"
           }
@@ -649,6 +824,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. one_off, monthly, quarterly, annual",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "recurrence"
           }
@@ -658,6 +835,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -667,6 +846,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -676,6 +857,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -685,6 +868,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -694,6 +879,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -703,6 +890,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -732,6 +921,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -741,6 +932,8 @@
           "type": "string",
           "nullable": true,
           "description": "Instance the flag is raised against",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "target_instance_id"
           }
@@ -750,6 +943,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. unusual_indemnity, missing_signature, ambiguous_term, uncapped_liability",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "flag_type"
           }
@@ -759,6 +954,8 @@
           "type": "string",
           "nullable": true,
           "description": "low | medium | high",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "severity"
           }
@@ -768,6 +965,8 @@
           "type": "string",
           "nullable": true,
           "description": "Why this was flagged",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "rationale"
           }
@@ -777,6 +976,8 @@
           "type": "string",
           "nullable": true,
           "description": "Which pass raised it: local | cloud | concept | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "raised_by_pass"
           }
@@ -786,6 +987,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -795,6 +998,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -804,6 +1009,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -813,6 +1020,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -822,6 +1031,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -831,6 +1042,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -861,6 +1074,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -870,6 +1085,8 @@
           "type": "string",
           "nullable": true,
           "description": "Contract this date was found in",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "contract_instance_id"
           }
@@ -879,6 +1096,8 @@
           "type": "string",
           "nullable": true,
           "description": "Normalised date (ISO-8601)",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "value"
           }
@@ -888,6 +1107,8 @@
           "type": "string",
           "nullable": true,
           "description": "Date exactly as printed",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "raw_text"
           }
@@ -897,6 +1118,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. start, end, signature, milestone, unknown",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "date_role"
           }
@@ -906,6 +1129,8 @@
           "type": "integer",
           "nullable": true,
           "description": "Page the date appears on",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "page_no"
           }
@@ -915,6 +1140,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -924,6 +1151,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -933,6 +1162,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -942,6 +1173,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -951,6 +1184,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -960,6 +1195,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -990,6 +1227,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -999,6 +1238,8 @@
           "type": "string",
           "nullable": true,
           "description": "Contract this amount was found in",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "contract_instance_id"
           }
@@ -1008,6 +1249,8 @@
           "type": "double",
           "nullable": true,
           "description": "Numeric value",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amount"
           }
@@ -1017,6 +1260,8 @@
           "type": "string",
           "nullable": true,
           "description": "ISO currency code",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "currency"
           }
@@ -1026,6 +1271,8 @@
           "type": "string",
           "nullable": true,
           "description": "Amount exactly as printed",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "raw_text"
           }
@@ -1035,6 +1282,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. contract_value, cap, penalty, rate, unknown",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "role"
           }
@@ -1044,6 +1293,8 @@
           "type": "integer",
           "nullable": true,
           "description": "Page the amount appears on",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "page_no"
           }
@@ -1053,6 +1304,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -1062,6 +1315,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -1071,6 +1326,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -1080,6 +1337,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -1089,6 +1348,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -1098,6 +1359,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -1125,6 +1388,8 @@
           "type": "string",
           "nullable": false,
           "description": "Edge identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "edge_id"
           }
@@ -1134,6 +1399,8 @@
           "type": "string",
           "nullable": false,
           "description": "Source instance",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "from_instance_id"
           }
@@ -1143,6 +1410,8 @@
           "type": "string",
           "nullable": false,
           "description": "Target instance",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "to_instance_id"
           }
@@ -1152,6 +1421,8 @@
           "type": "string",
           "nullable": false,
           "description": "Which link type this edge instantiates",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "link_type_id"
           }
@@ -1161,6 +1432,8 @@
           "type": "string",
           "nullable": true,
           "description": "Text supporting the link",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "evidence"
           }
@@ -1170,6 +1443,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -1179,6 +1454,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -1188,6 +1465,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -1197,6 +1476,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -1206,6 +1487,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -1215,6 +1498,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -1236,6 +1521,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -1245,6 +1532,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -1254,6 +1543,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -1263,6 +1554,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -1272,6 +1565,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -1283,6 +1578,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -1292,6 +1589,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -1301,6 +1600,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -1310,6 +1611,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -1319,6 +1622,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -1335,6 +1640,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -1344,6 +1651,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -1353,6 +1662,8 @@
           "type": "string",
           "nullable": false,
           "description": "Name as written in the document",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "name"
           }
@@ -1362,6 +1673,8 @@
           "type": "string",
           "nullable": true,
           "description": "Normalised name for best-effort matching",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "naive_key"
           }
@@ -1371,6 +1684,8 @@
           "type": "string",
           "nullable": true,
           "description": "Review status",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -1382,6 +1697,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -1391,6 +1708,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -1400,6 +1719,8 @@
           "type": "string",
           "nullable": false,
           "description": "Name as written in the document",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "name"
           }
@@ -1409,6 +1730,8 @@
           "type": "string",
           "nullable": true,
           "description": "Normalised name for best-effort matching",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "naive_key"
           }
@@ -1418,6 +1741,8 @@
           "type": "string",
           "nullable": true,
           "description": "Review status",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -1434,6 +1759,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -1443,6 +1770,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -1452,6 +1781,8 @@
           "type": "integer",
           "nullable": true,
           "description": "Page it appears on",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "page_no"
           }
@@ -1461,6 +1792,8 @@
           "type": "string",
           "nullable": true,
           "description": "Review status",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -1472,6 +1805,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -1481,6 +1816,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -1490,6 +1827,8 @@
           "type": "integer",
           "nullable": true,
           "description": "Page it appears on",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "page_no"
           }
@@ -1499,6 +1838,8 @@
           "type": "string",
           "nullable": true,
           "description": "Review status",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -1805,7 +2146,6 @@
       ]
     }
   ],
-  "action_types": [],
   "concept_defs": [
     {
       "id": "high_value",
@@ -1843,8 +2183,8 @@
       "scope": "procurement",
       "display_name": "Direct award",
       "description": "Awarded without a competitive procedure.",
-      "sql_expr": "LOWER(COALESCE(procurement_procedure,'')) IN ('direct award','direct_award','negotiated without prior publication')",
-      "rationale": "Direct awards attract the most procurement scrutiny."
+      "sql_expr": "procurement_procedure = 'direct'",
+      "rationale": "Matches the closed OCDS procurementMethod codelist rather than guessing at phrasings. A contract whose procedure is recorded outside the codelist is reported by orph_codelist_violations(), not silently missed here."
     },
     {
       "id": "uncapped_liability",
@@ -1886,6 +2226,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -1895,6 +2237,8 @@
           "type": "string",
           "nullable": false,
           "description": "Title of the agreement",
+          "x_ocds": "contracts/title",
+          "values": null,
           "source": {
             "column": "name"
           }
@@ -1904,6 +2248,8 @@
           "type": "string",
           "nullable": true,
           "description": "Contract or tender reference number",
+          "x_ocds": "contracts/id",
+          "values": null,
           "source": {
             "column": "reference"
           }
@@ -1913,6 +2259,8 @@
           "type": "string",
           "nullable": true,
           "description": "Short description of the subject matter",
+          "x_ocds": "contracts/description",
+          "values": null,
           "source": {
             "column": "description"
           }
@@ -1922,6 +2270,8 @@
           "type": "double",
           "nullable": true,
           "description": "Headline contract value",
+          "x_ocds": "contracts/value/amount",
+          "values": null,
           "source": {
             "column": "value_amount"
           }
@@ -1930,7 +2280,9 @@
           "id": "value_currency",
           "type": "string",
           "nullable": true,
-          "description": "ISO currency code of the headline value",
+          "description": "ISO 4217 currency code of the headline value",
+          "x_ocds": "contracts/value/currency",
+          "values": null,
           "source": {
             "column": "value_currency"
           }
@@ -1940,6 +2292,8 @@
           "type": "string",
           "nullable": true,
           "description": "Commencement date (ISO-8601)",
+          "x_ocds": "contracts/period/startDate",
+          "values": null,
           "source": {
             "column": "start_date"
           }
@@ -1949,6 +2303,8 @@
           "type": "string",
           "nullable": true,
           "description": "Expiry date (ISO-8601); null if open-ended",
+          "x_ocds": "contracts/period/endDate",
+          "values": null,
           "source": {
             "column": "end_date"
           }
@@ -1958,15 +2314,40 @@
           "type": "string",
           "nullable": true,
           "description": "Date of execution (ISO-8601)",
+          "x_ocds": "contracts/dateSigned",
+          "values": null,
           "source": {
             "column": "signed_date"
+          }
+        },
+        {
+          "id": "contract_status",
+          "type": "string",
+          "nullable": true,
+          "description": "Contract status per the OCDS contractStatus codelist -- distinct from the review status",
+          "x_ocds": "contracts/status",
+          "values": [
+            "pending",
+            "active",
+            "cancelled",
+            "terminated"
+          ],
+          "source": {
+            "column": "contract_status"
           }
         },
         {
           "id": "procurement_procedure",
           "type": "string",
           "nullable": true,
-          "description": "e.g. open, restricted, negotiated, direct award",
+          "description": "How the contract was awarded, OCDS procurementMethod codelist (closed)",
+          "x_ocds": "tender/procurementMethod",
+          "values": [
+            "open",
+            "selective",
+            "limited",
+            "direct"
+          ],
           "source": {
             "column": "procurement_procedure"
           }
@@ -1976,6 +2357,8 @@
           "type": "string",
           "nullable": true,
           "description": "Jurisdiction whose law governs the agreement",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "governing_law"
           }
@@ -1985,6 +2368,8 @@
           "type": "string",
           "nullable": true,
           "description": "Whether a signature block was found: yes | no | unclear",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "signature_block_present"
           }
@@ -1994,6 +2379,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -2003,6 +2390,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -2012,6 +2401,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -2021,6 +2412,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -2030,6 +2423,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -2039,6 +2434,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -2069,6 +2466,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -2078,6 +2477,8 @@
           "type": "string",
           "nullable": false,
           "description": "Name as written in the document",
+          "x_ocds": "parties/name",
+          "values": null,
           "source": {
             "column": "name"
           }
@@ -2087,6 +2488,8 @@
           "type": "string",
           "nullable": true,
           "description": "Normalised name for best-effort cross-document matching",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "naive_key"
           }
@@ -2096,6 +2499,8 @@
           "type": "string",
           "nullable": true,
           "description": "Company registration number, if stated",
+          "x_ocds": "parties/identifier/id",
+          "values": null,
           "source": {
             "column": "registration_number"
           }
@@ -2105,6 +2510,8 @@
           "type": "string",
           "nullable": true,
           "description": "Registered or stated address",
+          "x_ocds": "parties/address",
+          "values": null,
           "source": {
             "column": "address"
           }
@@ -2113,7 +2520,21 @@
           "id": "role",
           "type": "string",
           "nullable": true,
-          "description": "e.g. contracting_authority, supplier, subcontractor, guarantor",
+          "description": "Role in the contracting process, OCDS partyRole codelist (open)",
+          "x_ocds": "parties/roles",
+          "values": [
+            "buyer",
+            "procuringEntity",
+            "supplier",
+            "tenderer",
+            "funder",
+            "enquirer",
+            "payer",
+            "payee",
+            "reviewBody",
+            "interestedParty",
+            "subcontractor"
+          ],
           "source": {
             "column": "role"
           }
@@ -2123,6 +2544,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. private_company, public_body, charity, partnership",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "entity_kind"
           }
@@ -2132,6 +2555,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -2141,6 +2566,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -2150,6 +2577,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -2159,6 +2588,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -2168,6 +2599,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -2177,6 +2610,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -2207,6 +2642,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -2216,6 +2653,8 @@
           "type": "string",
           "nullable": false,
           "description": "Name as written in the document",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "name"
           }
@@ -2225,6 +2664,8 @@
           "type": "string",
           "nullable": true,
           "description": "Normalised name for best-effort cross-document matching",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "naive_key"
           }
@@ -2234,6 +2675,8 @@
           "type": "string",
           "nullable": true,
           "description": "Stated role or title",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "job_title"
           }
@@ -2243,6 +2686,8 @@
           "type": "string",
           "nullable": true,
           "description": "Organisation the person is stated to act for",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "acting_for"
           }
@@ -2252,6 +2697,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -2261,6 +2708,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -2270,6 +2719,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -2279,6 +2730,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -2288,6 +2741,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -2297,6 +2752,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -2327,6 +2784,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -2336,6 +2795,8 @@
           "type": "string",
           "nullable": true,
           "description": "Contract this clause belongs to",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "contract_instance_id"
           }
@@ -2345,6 +2806,8 @@
           "type": "string",
           "nullable": true,
           "description": "Clause number as printed",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "clause_number"
           }
@@ -2354,6 +2817,8 @@
           "type": "string",
           "nullable": true,
           "description": "Clause heading",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "heading"
           }
@@ -2362,7 +2827,24 @@
           "id": "clause_type",
           "type": "string",
           "nullable": true,
-          "description": "e.g. indemnity, liability, termination, confidentiality, payment, renewal",
+          "description": "What the clause is about",
+          "x_ocds": null,
+          "values": [
+            "indemnity",
+            "liability",
+            "termination",
+            "confidentiality",
+            "payment",
+            "renewal",
+            "term",
+            "governing_law",
+            "warranty",
+            "restriction",
+            "assignment",
+            "audit",
+            "dispute",
+            "other"
+          ],
           "source": {
             "column": "clause_type"
           }
@@ -2372,6 +2854,8 @@
           "type": "string",
           "nullable": true,
           "description": "Clause text as extracted",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "text"
           }
@@ -2381,6 +2865,8 @@
           "type": "integer",
           "nullable": true,
           "description": "Page the clause starts on",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "page_no"
           }
@@ -2390,6 +2876,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -2399,6 +2887,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -2408,6 +2898,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -2417,6 +2909,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -2426,6 +2920,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -2435,6 +2931,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -2464,6 +2962,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -2473,6 +2973,8 @@
           "type": "string",
           "nullable": true,
           "description": "Clause imposing this obligation",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "clause_instance_id"
           }
@@ -2482,6 +2984,8 @@
           "type": "string",
           "nullable": true,
           "description": "Party bound, as named in the text",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "obligated_party"
           }
@@ -2491,6 +2995,8 @@
           "type": "string",
           "nullable": true,
           "description": "What must be done",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "summary"
           }
@@ -2500,6 +3006,8 @@
           "type": "string",
           "nullable": true,
           "description": "Deadline, if stated (ISO-8601)",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "due_date"
           }
@@ -2509,6 +3017,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. one_off, monthly, quarterly, annual",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "recurrence"
           }
@@ -2518,6 +3028,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -2527,6 +3039,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -2536,6 +3050,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -2545,6 +3061,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -2554,6 +3072,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -2563,6 +3083,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -2592,6 +3114,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -2601,6 +3125,8 @@
           "type": "string",
           "nullable": true,
           "description": "Instance the flag is raised against",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "target_instance_id"
           }
@@ -2610,6 +3136,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. unusual_indemnity, missing_signature, ambiguous_term, uncapped_liability",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "flag_type"
           }
@@ -2619,6 +3147,8 @@
           "type": "string",
           "nullable": true,
           "description": "low | medium | high",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "severity"
           }
@@ -2628,6 +3158,8 @@
           "type": "string",
           "nullable": true,
           "description": "Why this was flagged",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "rationale"
           }
@@ -2637,6 +3169,8 @@
           "type": "string",
           "nullable": true,
           "description": "Which pass raised it: local | cloud | concept | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "raised_by_pass"
           }
@@ -2646,6 +3180,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -2655,6 +3191,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -2664,6 +3202,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -2673,6 +3213,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -2682,6 +3224,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -2691,6 +3235,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -2721,6 +3267,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -2730,6 +3278,8 @@
           "type": "string",
           "nullable": true,
           "description": "Contract this date was found in",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "contract_instance_id"
           }
@@ -2739,6 +3289,8 @@
           "type": "string",
           "nullable": true,
           "description": "Normalised date (ISO-8601)",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "value"
           }
@@ -2748,6 +3300,8 @@
           "type": "string",
           "nullable": true,
           "description": "Date exactly as printed",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "raw_text"
           }
@@ -2757,6 +3311,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. start, end, signature, milestone, unknown",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "date_role"
           }
@@ -2766,6 +3322,8 @@
           "type": "integer",
           "nullable": true,
           "description": "Page the date appears on",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "page_no"
           }
@@ -2775,6 +3333,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -2784,6 +3344,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -2793,6 +3355,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -2802,6 +3366,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -2811,6 +3377,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -2820,6 +3388,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -2850,6 +3420,8 @@
           "type": "string",
           "nullable": false,
           "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "instance_id"
           }
@@ -2859,6 +3431,8 @@
           "type": "string",
           "nullable": true,
           "description": "Contract this amount was found in",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "contract_instance_id"
           }
@@ -2868,6 +3442,8 @@
           "type": "double",
           "nullable": true,
           "description": "Numeric value",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amount"
           }
@@ -2877,6 +3453,8 @@
           "type": "string",
           "nullable": true,
           "description": "ISO currency code",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "currency"
           }
@@ -2886,6 +3464,8 @@
           "type": "string",
           "nullable": true,
           "description": "Amount exactly as printed",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "raw_text"
           }
@@ -2895,6 +3475,8 @@
           "type": "string",
           "nullable": true,
           "description": "e.g. contract_value, cap, penalty, rate, unknown",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "role"
           }
@@ -2904,6 +3486,8 @@
           "type": "integer",
           "nullable": true,
           "description": "Page the amount appears on",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "page_no"
           }
@@ -2913,6 +3497,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -2922,6 +3508,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -2931,6 +3519,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -2940,6 +3530,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -2949,6 +3541,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -2958,6 +3552,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -2985,6 +3581,8 @@
           "type": "string",
           "nullable": false,
           "description": "Edge identifier",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "edge_id"
           }
@@ -2994,6 +3592,8 @@
           "type": "string",
           "nullable": false,
           "description": "Source instance",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "from_instance_id"
           }
@@ -3003,6 +3603,8 @@
           "type": "string",
           "nullable": false,
           "description": "Target instance",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "to_instance_id"
           }
@@ -3012,6 +3614,8 @@
           "type": "string",
           "nullable": false,
           "description": "Which link type this edge instantiates",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "link_type_id"
           }
@@ -3021,6 +3625,8 @@
           "type": "string",
           "nullable": true,
           "description": "Text supporting the link",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "evidence"
           }
@@ -3030,6 +3636,8 @@
           "type": "string",
           "nullable": true,
           "description": "Document this instance was extracted from",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "document_id"
           }
@@ -3039,6 +3647,8 @@
           "type": "string",
           "nullable": true,
           "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "source"
           }
@@ -3048,6 +3658,8 @@
           "type": "double",
           "nullable": true,
           "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "confidence"
           }
@@ -3057,6 +3669,8 @@
           "type": "string",
           "nullable": true,
           "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "status"
           }
@@ -3066,6 +3680,8 @@
           "type": "string",
           "nullable": true,
           "description": "Actor who last amended this row",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_by"
           }
@@ -3075,6 +3691,8 @@
           "type": "string",
           "nullable": true,
           "description": "When this row was last amended",
+          "x_ocds": null,
+          "values": null,
           "source": {
             "column": "amended_at"
           }
@@ -3083,6 +3701,343 @@
       "x_orpheus": {
         "managed": false
       }
+    }
+  ],
+  "interfaceTypes": [
+    {
+      "id": "Reviewable",
+      "display_name": "Reviewable",
+      "description": "Anything a person can confirm, amend or reject. Every extracted instance.",
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "status"
+          }
+        }
+      ],
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "description": "ai_local | ai_cloud | human",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "double",
+          "nullable": true,
+          "description": "Confidence rubric level",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "unconfirmed | confirmed | amended | rejected",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "status"
+          }
+        }
+      ]
+    },
+    {
+      "id": "Named",
+      "display_name": "Named entity",
+      "description": "An instance with a human name that might also appear in another document.",
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort matching",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "status"
+          }
+        }
+      ],
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": false,
+          "description": "Name as written in the document",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "description": "Normalised name for best-effort matching",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "status"
+          }
+        }
+      ]
+    },
+    {
+      "id": "PageAnchored",
+      "display_name": "Page-anchored",
+      "description": "An instance that can be pointed at on a specific page of the document.",
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page it appears on",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "status"
+          }
+        }
+      ],
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "description": "Instance identifier",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "description": "Document it was extracted from",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "page_no",
+          "type": "integer",
+          "nullable": true,
+          "description": "Page it appears on",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "page_no"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "description": "Review status",
+          "x_ocds": null,
+          "values": null,
+          "source": {
+            "column": "status"
+          }
+        }
+      ]
     }
   ],
   "links": [
@@ -3334,287 +4289,6 @@
       }
     }
   ],
-  "interfaceTypes": [
-    {
-      "id": "Reviewable",
-      "display_name": "Reviewable",
-      "description": "Anything a person can confirm, amend or reject. Every extracted instance.",
-      "properties": [
-        {
-          "id": "instance_id",
-          "type": "string",
-          "nullable": false,
-          "description": "Instance identifier",
-          "source": {
-            "column": "instance_id"
-          }
-        },
-        {
-          "id": "document_id",
-          "type": "string",
-          "nullable": true,
-          "description": "Document it was extracted from",
-          "source": {
-            "column": "document_id"
-          }
-        },
-        {
-          "id": "source",
-          "type": "string",
-          "nullable": true,
-          "description": "ai_local | ai_cloud | human",
-          "source": {
-            "column": "source"
-          }
-        },
-        {
-          "id": "confidence",
-          "type": "double",
-          "nullable": true,
-          "description": "Confidence rubric level",
-          "source": {
-            "column": "confidence"
-          }
-        },
-        {
-          "id": "status",
-          "type": "string",
-          "nullable": true,
-          "description": "unconfirmed | confirmed | amended | rejected",
-          "source": {
-            "column": "status"
-          }
-        }
-      ],
-      "requiredProperties": [
-        {
-          "id": "instance_id",
-          "type": "string",
-          "nullable": false,
-          "description": "Instance identifier",
-          "source": {
-            "column": "instance_id"
-          }
-        },
-        {
-          "id": "document_id",
-          "type": "string",
-          "nullable": true,
-          "description": "Document it was extracted from",
-          "source": {
-            "column": "document_id"
-          }
-        },
-        {
-          "id": "source",
-          "type": "string",
-          "nullable": true,
-          "description": "ai_local | ai_cloud | human",
-          "source": {
-            "column": "source"
-          }
-        },
-        {
-          "id": "confidence",
-          "type": "double",
-          "nullable": true,
-          "description": "Confidence rubric level",
-          "source": {
-            "column": "confidence"
-          }
-        },
-        {
-          "id": "status",
-          "type": "string",
-          "nullable": true,
-          "description": "unconfirmed | confirmed | amended | rejected",
-          "source": {
-            "column": "status"
-          }
-        }
-      ]
-    },
-    {
-      "id": "Named",
-      "display_name": "Named entity",
-      "description": "An instance with a human name that might also appear in another document.",
-      "properties": [
-        {
-          "id": "instance_id",
-          "type": "string",
-          "nullable": false,
-          "description": "Instance identifier",
-          "source": {
-            "column": "instance_id"
-          }
-        },
-        {
-          "id": "document_id",
-          "type": "string",
-          "nullable": true,
-          "description": "Document it was extracted from",
-          "source": {
-            "column": "document_id"
-          }
-        },
-        {
-          "id": "name",
-          "type": "string",
-          "nullable": false,
-          "description": "Name as written in the document",
-          "source": {
-            "column": "name"
-          }
-        },
-        {
-          "id": "naive_key",
-          "type": "string",
-          "nullable": true,
-          "description": "Normalised name for best-effort matching",
-          "source": {
-            "column": "naive_key"
-          }
-        },
-        {
-          "id": "status",
-          "type": "string",
-          "nullable": true,
-          "description": "Review status",
-          "source": {
-            "column": "status"
-          }
-        }
-      ],
-      "requiredProperties": [
-        {
-          "id": "instance_id",
-          "type": "string",
-          "nullable": false,
-          "description": "Instance identifier",
-          "source": {
-            "column": "instance_id"
-          }
-        },
-        {
-          "id": "document_id",
-          "type": "string",
-          "nullable": true,
-          "description": "Document it was extracted from",
-          "source": {
-            "column": "document_id"
-          }
-        },
-        {
-          "id": "name",
-          "type": "string",
-          "nullable": false,
-          "description": "Name as written in the document",
-          "source": {
-            "column": "name"
-          }
-        },
-        {
-          "id": "naive_key",
-          "type": "string",
-          "nullable": true,
-          "description": "Normalised name for best-effort matching",
-          "source": {
-            "column": "naive_key"
-          }
-        },
-        {
-          "id": "status",
-          "type": "string",
-          "nullable": true,
-          "description": "Review status",
-          "source": {
-            "column": "status"
-          }
-        }
-      ]
-    },
-    {
-      "id": "PageAnchored",
-      "display_name": "Page-anchored",
-      "description": "An instance that can be pointed at on a specific page of the document.",
-      "properties": [
-        {
-          "id": "instance_id",
-          "type": "string",
-          "nullable": false,
-          "description": "Instance identifier",
-          "source": {
-            "column": "instance_id"
-          }
-        },
-        {
-          "id": "document_id",
-          "type": "string",
-          "nullable": true,
-          "description": "Document it was extracted from",
-          "source": {
-            "column": "document_id"
-          }
-        },
-        {
-          "id": "page_no",
-          "type": "integer",
-          "nullable": true,
-          "description": "Page it appears on",
-          "source": {
-            "column": "page_no"
-          }
-        },
-        {
-          "id": "status",
-          "type": "string",
-          "nullable": true,
-          "description": "Review status",
-          "source": {
-            "column": "status"
-          }
-        }
-      ],
-      "requiredProperties": [
-        {
-          "id": "instance_id",
-          "type": "string",
-          "nullable": false,
-          "description": "Instance identifier",
-          "source": {
-            "column": "instance_id"
-          }
-        },
-        {
-          "id": "document_id",
-          "type": "string",
-          "nullable": true,
-          "description": "Document it was extracted from",
-          "source": {
-            "column": "document_id"
-          }
-        },
-        {
-          "id": "page_no",
-          "type": "integer",
-          "nullable": true,
-          "description": "Page it appears on",
-          "source": {
-            "column": "page_no"
-          }
-        },
-        {
-          "id": "status",
-          "type": "string",
-          "nullable": true,
-          "description": "Review status",
-          "source": {
-            "column": "status"
-          }
-        }
-      ]
-    }
-  ],
   "concepts": [
     {
       "id": "high_value",
@@ -3652,8 +4326,8 @@
       "scope": "procurement",
       "display_name": "Direct award",
       "description": "Awarded without a competitive procedure.",
-      "sql_expr": "LOWER(COALESCE(procurement_procedure,'')) IN ('direct award','direct_award','negotiated without prior publication')",
-      "rationale": "Direct awards attract the most procurement scrutiny."
+      "sql_expr": "procurement_procedure = 'direct'",
+      "rationale": "Matches the closed OCDS procurementMethod codelist rather than guessing at phrasings. A contract whose procedure is recorded outside the codelist is reported by orph_codelist_violations(), not silently missed here."
     },
     {
       "id": "uncapped_liability",

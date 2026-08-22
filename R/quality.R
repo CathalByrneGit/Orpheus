@@ -357,3 +357,72 @@ orph_quality_report <- function(con, document_id = NULL, min_reviewed = 5L) {
       "not the extraction, and are reported under concept_precision instead.")
   )
 }
+
+# ---------------------------------------------------------------------------
+# Codelist conformance
+# ---------------------------------------------------------------------------
+
+#' Values recorded outside the codelist that governs them
+#'
+#' Some properties are governed by an OCDS codelist -- `procurement_procedure`
+#' by the closed `procurementMethod` list, `role` by the open `partyRole` one.
+#' A value outside the list is **reported, not rejected**, for the same reason an
+#' unrecognised property becomes a schema amendment rather than being dropped:
+#' the mismatch is the signal. A model returning "Direct Award" instead of
+#' `direct` means the prompt needs work; a genuine role the codelist lacks means
+#' the codelist needs extending.
+#'
+#' Concepts written against a codelist -- `direct_award` is `procurement_procedure
+#' = 'direct'` -- silently miss every row listed here, which is what makes this
+#' worth checking rather than assuming.
+#'
+#' @param con A connection.
+#' @param bundle A bundle. Defaults to the active one.
+#' @param document_id Restrict to one document, or `NULL` for the corpus.
+#' @return A data frame of type, property, offending value and how often it occurs.
+#' @export
+orph_codelist_violations <- function(con, bundle = NULL, document_id = NULL) {
+  bundle <- bundle %||% orph_active_bundle(con)
+  if (is.null(bundle)) cli::cli_abort("No active ontology bundle.")
+  scope <- quality_scope_clause(document_id)
+
+  rows <- list()
+  for (ot in managed_object_types(bundle)) {
+    if (!DBI::dbExistsTable(con, ot$table_name)) next
+    present <- DBI::dbListFields(con, ot$table_name)
+
+    for (prop in ot$properties %||% list()) {
+      allowed <- unlist(prop$values %||% list(), use.names = FALSE)
+      if (length(allowed) == 0) next
+      if (!(prop$id %in% present)) next
+
+      found <- db_query(con, sprintf(
+        "SELECT %s AS value, COUNT(*) AS n FROM %s
+         WHERE %s IS NOT NULL AND %s != ''%s
+         GROUP BY %s",
+        DBI::dbQuoteIdentifier(con, prop$id), DBI::dbQuoteIdentifier(con, ot$table_name),
+        DBI::dbQuoteIdentifier(con, prop$id), DBI::dbQuoteIdentifier(con, prop$id),
+        scope$sql, DBI::dbQuoteIdentifier(con, prop$id)), scope$params)
+      if (nrow(found) == 0) next
+
+      offending <- found[!(found$value %in% allowed), , drop = FALSE]
+      for (i in seq_len(nrow(offending))) {
+        rows[[length(rows) + 1L]] <- data.frame(
+          type_id  = ot$id,
+          property = prop$id,
+          value    = offending$value[[i]],
+          n        = as.integer(offending$n[[i]]),
+          codelist = paste(allowed, collapse = " | "),
+          x_ocds   = prop$x_ocds %||% NA_character_,
+          stringsAsFactors = FALSE)
+      }
+    }
+  }
+  if (length(rows) == 0) {
+    return(data.frame(type_id = character(), property = character(), value = character(),
+                      n = integer(), codelist = character(), x_ocds = character(),
+                      stringsAsFactors = FALSE))
+  }
+  res <- do.call(rbind, rows)
+  res[order(-res$n), , drop = FALSE]
+}

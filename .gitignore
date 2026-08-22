@@ -8,3 +8,7 @@
 data/
 storage/
 .env
+
+# Python bytecode from the Datasette plugin
+__pycache__/
+*.pyc

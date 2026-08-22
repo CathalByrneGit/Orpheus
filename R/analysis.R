@@ -19,9 +19,6 @@
 #' @export
 ORPH_NAIVE_RESOLUTION <- "naive_unresolved"
 
-#' @keywords internal
-have_objectsets <- function() requireNamespace("objectSetsR", quietly = TRUE)
-
 # ---------------------------------------------------------------------------
 # Interface queries
 # ---------------------------------------------------------------------------
@@ -99,58 +96,6 @@ orph_object_set_by_interface <- function(con, interface_id, bundle = NULL,
   db_query(con, paste(selects, collapse = "\nUNION ALL\n"), all_params)
 }
 
-#' Collect an object type's live rows
-#'
-#' Uses objectSetsR when it is installed, which is what makes this an object-set
-#' query over the populated ontology rather than a bespoke one. The direct SQL
-#' path is a fallback so a deployment without the package still gets the
-#' escalation, and both paths are held to the same projection: declared
-#' properties only, rejected rows excluded.
-#'
-#' @param con A connection.
-#' @param bundle A bundle.
-#' @param type_id Object type identifier.
-#' @param naive_keys Restrict to these naive keys, or `NULL` for all rows.
-#' @return A data frame.
-#' @keywords internal
-collect_object_set <- function(con, bundle, type_id, naive_keys = NULL) {
-  ot <- orph_object_type(bundle, type_id)
-  if (is.null(ot) || !DBI::dbExistsTable(con, ot$table_name)) return(data.frame())
-
-  if (have_objectsets()) {
-    result <- tryCatch({
-      b <- bundle; class(b) <- c("ontology_bundle", "list")
-      ctx <- objectSetsR::ontology_context(b, con, check_interfaces = FALSE)
-      os  <- objectSetsR::object_set(ctx, type_id)
-      os  <- objectSetsR::os_filter(os, .data$status != "rejected")
-      if (!is.null(naive_keys)) {
-        keys <- unique(naive_keys)
-        os <- objectSetsR::os_filter(os, .data$naive_key %in% !!keys)
-      }
-      as.data.frame(objectSetsR::os_collect(os))
-    }, error = function(e) {
-      cli::cli_warn(c("objectSetsR query failed; falling back to direct SQL.",
-                      x = conditionMessage(e)))
-      NULL
-    })
-    if (!is.null(result)) return(result)
-  }
-
-  cols <- intersect(orph_property_ids(ot), DBI::dbListFields(con, ot$table_name))
-  sql <- sprintf("SELECT %s FROM %s WHERE status != 'rejected'",
-                 paste(DBI::dbQuoteIdentifier(con, cols), collapse = ", "),
-                 DBI::dbQuoteIdentifier(con, ot$table_name))
-  params <- list()
-  if (!is.null(naive_keys)) {
-    keys <- unique(naive_keys)
-    if (length(keys) == 0) return(data.frame())
-    sql <- paste0(sql, sprintf(" AND naive_key IN (%s)",
-                               paste(rep("?", length(keys)), collapse = ", ")))
-    params <- as.list(keys)
-  }
-  db_query(con, sql, params)
-}
-
 #' Run the database-wide analysis for a document
 #'
 #' Answers the questions the architecture names for this step: do the companies
@@ -185,8 +130,8 @@ orph_corpus_analysis <- function(con, document_id, actor_id = NULL, narrate = FA
     counterparties = match_counterparties(con, bundle, document_id, "Company"),
     people         = match_counterparties(con, bundle, document_id, "Person")
   )
-  findings$value_comparison <- compare_contract_values(con, bundle, document_id,
-                                                       findings$counterparties)
+  findings$value_comparison <- compare_primary_values(con, bundle, document_id,
+                                                      findings$counterparties)
 
   context_ids <- unique(c(
     unlist(lapply(findings$counterparties, function(f) f$other_instance_ids)),
@@ -202,8 +147,12 @@ orph_corpus_analysis <- function(con, document_id, actor_id = NULL, narrate = FA
     counterparties  = findings$counterparties,
     people          = findings$people,
     value_comparison = findings$value_comparison,
+    identifier_matched = sum(vapply(findings$counterparties,
+                                    function(f) length(f$identifier_matches) > 0, logical(1))),
     caveat = paste(
-      "Matching is on normalised raw name text, not resolved entities.",
+      "Name matching is on normalised raw text, not resolved entities.",
+      "Matches listed under identifier_matches rest on a stated registration",
+      "number instead and are exact.",
       "Two different organisations sharing a name will be merged, and one",
       "organisation written two ways will not be. Treat these as leads to check,",
       "not as findings.")
@@ -239,8 +188,7 @@ orph_corpus_analysis <- function(con, document_id, actor_id = NULL, narrate = FA
       resolution_quality = ORPH_NAIVE_RESOLUTION)
   })
 
-  c(result, list(evaluation_id = eval_id, resolution_quality = ORPH_NAIVE_RESOLUTION,
-                 engine = if (have_objectsets()) "objectSetsR" else "sql_fallback"))
+  c(result, list(evaluation_id = eval_id, resolution_quality = ORPH_NAIVE_RESOLUTION))
 }
 
 #' @keywords internal
@@ -263,15 +211,30 @@ match_counterparties <- function(con, bundle, document_id, type_id) {
   if (nrow(named) == 0) return(list())
   named <- named[!is.na(named$naive_key) & nzchar(named$naive_key), , drop = FALSE]
 
+  # A registration number is an identity claim; a normalised name is a guess.
+  # Where both documents state one, matching on it is exact -- it neither
+  # over-merges two companies that share a name nor under-merges one company
+  # written two ways, which are the two failure modes the naive key has. It is
+  # gathered separately and reported separately, because a match backed by an
+  # identifier is much stronger evidence than a match backed by a name.
+  registered <- identifier_matches(con, document_id)
+
   out <- list()
   for (i in seq_len(nrow(mine))) {
     key <- mine$naive_key[[i]]
     others <- named[named$naive_key %in% key & named$document_id != document_id, , drop = FALSE]
-    if (nrow(others) == 0) next
+    by_identifier <- registered[[mine$instance_id[[i]]]] %||% list()
+
+    # Either kind of match is worth reporting. Requiring a name match first
+    # would have made the identifier useless: it exists precisely to catch the
+    # entities normalisation misses -- "Meridian Systems Limited" and "Meridian
+    # Sys. Ltd" share a registration number and nothing else.
+    if (nrow(others) == 0 && length(by_identifier) == 0) next
 
     same_type  <- others[others$type_id == type_id, , drop = FALSE]
     other_type <- others[others$type_id != type_id, , drop = FALSE]
-    variants   <- unique(others$name)
+    variants   <- unique(c(others$name,
+                           vapply(by_identifier, function(m) m$name, character(1))))
 
     out[[length(out) + 1L]] <- list(
       instance_id          = mine$instance_id[[i]],
@@ -284,6 +247,9 @@ match_counterparties <- function(con, bundle, document_id, type_id) {
       # Surfaced rather than hidden: differing spellings under one key are the
       # clearest signal that this needs real resolution.
       spelling_varies      = length(setdiff(variants, mine$name[[i]])) > 0,
+      # Matched on a stated registration number rather than on a name. Where
+      # this is non-empty the match does not rest on normalisation at all.
+      identifier_matches   = by_identifier,
       # A name that is a company here and a person elsewhere is exactly the
       # shape of thing a reviewer wants to look at, so it is reported rather
       # than quietly dropped -- and reported separately, because it is a
@@ -299,15 +265,78 @@ match_counterparties <- function(con, bundle, document_id, type_id) {
   out
 }
 
+#' Match this document's companies to others by stated registration number
+#'
+#' Exact rather than heuristic. Returns a list keyed by this document's
+#' instance id, so a caller can attach the matches to the entity they belong to.
+#'
 #' @keywords internal
-compare_contract_values <- function(con, bundle, document_id, counterparties) {
-  this <- db_get_one(con,
-    "SELECT instance_id, name, value_amount, value_currency FROM instances_Contract
-     WHERE document_id = ? AND status != 'rejected' ORDER BY confidence DESC LIMIT 1",
+identifier_matches <- function(con, document_id) {
+  if (!DBI::dbExistsTable(con, "instances_Company")) return(list())
+  cols <- DBI::dbListFields(con, "instances_Company")
+  if (!("registration_number" %in% cols)) return(list())
+
+  mine <- db_query(con,
+    "SELECT instance_id, name, registration_number FROM instances_Company
+     WHERE document_id = ? AND status != 'rejected'
+       AND registration_number IS NOT NULL AND registration_number != ''",
     list(document_id))
-  if (is.null(this) || is.na(this$value_amount)) {
+  if (nrow(mine) == 0) return(list())
+
+  out <- list()
+  for (i in seq_len(nrow(mine))) {
+    others <- db_query(con,
+      "SELECT instance_id, document_id, name, registration_number
+       FROM instances_Company
+       WHERE registration_number = ? AND document_id != ? AND status != 'rejected'",
+      list(mine$registration_number[[i]], document_id))
+    if (nrow(others) == 0) next
+    out[[mine$instance_id[[i]]]] <- lapply(seq_len(nrow(others)), function(k) list(
+      instance_id         = others$instance_id[[k]],
+      document_id         = others$document_id[[k]],
+      name                = others$name[[k]],
+      registration_number = others$registration_number[[k]],
+      # Recorded because it is the interesting case: the same registered entity
+      # written two different ways is precisely what entity resolution is for,
+      # and here it is proven rather than guessed.
+      name_differs        = !identical(others$name[[k]], mine$name[[i]])))
+  }
+  out
+}
+
+#' Compare this document's headline value against related documents
+#'
+#' The type and the properties come from the bundle's domain block. A domain
+#' with no comparable magnitude declares none, and this reports itself
+#' unavailable rather than being absent.
+#'
+#' @keywords internal
+compare_primary_values <- function(con, bundle, document_id, counterparties) {
+  domain <- orph_domain(bundle)
+  if (is.null(domain$primary_object_type) || is.null(domain$value_property)) {
     return(list(available = FALSE,
-                reason = "No contract value has been extracted for this document."))
+                reason = "This bundle declares no comparable value for its primary object type."))
+  }
+  primary <- orph_object_type(bundle, domain$primary_object_type)
+  if (is.null(primary) || !DBI::dbExistsTable(con, primary$table_name)) {
+    return(list(available = FALSE, reason = "No instances of the primary object type exist."))
+  }
+
+  tbl <- DBI::dbQuoteIdentifier(con, primary$table_name)
+  val <- DBI::dbQuoteIdentifier(con, domain$value_property)
+  has_ccy <- !is.null(domain$currency_property)
+  ccy <- if (has_ccy) DBI::dbQuoteIdentifier(con, domain$currency_property) else NULL
+
+  select_cols <- paste(c("instance_id", "document_id", as.character(val),
+                         if (has_ccy) as.character(ccy)), collapse = ", ")
+
+  this <- db_get_one(con, sprintf(
+    "SELECT %s FROM %s WHERE document_id = ? AND status != 'rejected'
+     ORDER BY confidence DESC LIMIT 1", select_cols, tbl), list(document_id))
+  if (is.null(this) || is.na(this[[domain$value_property]])) {
+    return(list(available = FALSE,
+                reason = sprintf("No %s has been extracted for this document.",
+                                 domain$value_property)))
   }
 
   other_docs <- unique(unlist(lapply(counterparties, function(f) f$other_document_ids)))
@@ -317,37 +346,45 @@ compare_contract_values <- function(con, bundle, document_id, counterparties) {
   }
 
   peers <- db_query(con, sprintf(
-    "SELECT document_id, name, value_amount, value_currency FROM instances_Contract
-     WHERE status != 'rejected' AND value_amount IS NOT NULL AND document_id IN (%s)",
-    paste(rep("?", length(other_docs)), collapse = ", ")), as.list(other_docs))
+    "SELECT %s FROM %s
+     WHERE status != 'rejected' AND %s IS NOT NULL AND document_id IN (%s)",
+    select_cols, tbl, val, paste(rep("?", length(other_docs)), collapse = ", ")),
+    as.list(other_docs))
   if (nrow(peers) == 0) {
     return(list(available = FALSE,
-                reason = "Related documents have no extracted contract value to compare."))
+                reason = "Related documents have no extracted value to compare."))
   }
 
-  # Currencies are compared only within a currency: converting them would need
-  # a rate for the right date, which is not something to invent here.
-  same_ccy <- peers[!is.na(peers$value_currency) &
-                    peers$value_currency == (this$value_currency %||% ""), , drop = FALSE]
-  mixed <- nrow(same_ccy) < nrow(peers)
-  values <- suppressWarnings(as.numeric(same_ccy$value_amount))
-  values <- values[!is.na(values)]
-  mine   <- suppressWarnings(as.numeric(this$value_amount))
+  mixed <- FALSE
+  if (has_ccy) {
+    # Values are compared only within a currency: converting them would need a
+    # rate for the right date, which is not something to invent here.
+    same <- peers[!is.na(peers[[domain$currency_property]]) &
+                  peers[[domain$currency_property]] ==
+                    (this[[domain$currency_property]] %||% ""), , drop = FALSE]
+    mixed <- nrow(same) < nrow(peers)
+    peers <- same
+  }
 
+  values <- suppressWarnings(as.numeric(peers[[domain$value_property]]))
+  values <- values[!is.na(values)]
+  mine   <- suppressWarnings(as.numeric(this[[domain$value_property]]))
   if (length(values) == 0) {
     return(list(available = FALSE,
-                reason = "Related contracts are in other currencies; no conversion is applied."))
+                reason = "Related documents are in other currencies; no conversion is applied."))
   }
 
   list(
-    available          = TRUE,
-    this_value         = mine,
-    currency           = this$value_currency,
-    peer_count         = length(values),
-    peer_median        = stats::median(values),
-    peer_max           = max(values),
-    peer_min           = min(values),
-    ratio_to_median    = if (stats::median(values) > 0) round(mine / stats::median(values), 2) else NA,
+    available       = TRUE,
+    object_type     = domain$primary_object_type,
+    value_property  = domain$value_property,
+    this_value      = mine,
+    currency        = if (has_ccy) this[[domain$currency_property]] else NA_character_,
+    peer_count      = length(values),
+    peer_median     = stats::median(values),
+    peer_max        = max(values),
+    peer_min        = min(values),
+    ratio_to_median = if (stats::median(values) > 0) round(mine / stats::median(values), 2) else NA,
     mixed_currencies_excluded = mixed
   )
 }

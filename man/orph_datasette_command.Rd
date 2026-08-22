@@ -7,16 +7,22 @@
 orph_datasette_command(
   db_path = "data/orpheus.sqlite",
   metadata_path = "inst/datasette/metadata.yml",
+  config_path = "inst/datasette/datasette.yml",
   port = 8001,
+  ui = TRUE,
   immutable = FALSE
 )
 }
 \arguments{
 \item{db_path}{Path to the SQLite file.}
 
-\item{metadata_path}{Path to the metadata YAML.}
+\item{metadata_path}{Path to the descriptive metadata YAML.}
+
+\item{config_path}{Path to the configuration YAML.}
 
 \item{port}{Port to bind.}
+
+\item{ui}{Include the UI plugin's flags.}
 
 \item{immutable}{Use \code{--immutable} anyway. Only correct for a snapshot that
 has been checkpointed and is no longer being written to -- see

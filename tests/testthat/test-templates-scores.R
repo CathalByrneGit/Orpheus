@@ -70,7 +70,7 @@ seed_risky_contract <- function(con, root, ...) {
       source_refs = list(list(source_label = "d", excerpt = "AGREEMENT")),
       properties = list(name = "Services Agreement", value_amount = 2400000,
                         value_currency = "EUR", signature_block_present = "no",
-                        procurement_procedure = "direct award"))),
+                        procurement_procedure = "direct"))),
     relationships = list(), amendments = list()))
   path <- write_contract_file(...)
   doc <- orph_ingest(con, path, actor_id = "act_test", storage_root = root)$document_id
@@ -191,4 +191,82 @@ test_that("a concept cannot draw its SQL from two places at once", {
   unknown <- bundle
   unknown$concept_defs[[idx]]$template_id <- "imaginary"
   expect_error(orph_validate_bundle(unknown), "unknown template")
+})
+
+test_that("a value outside its codelist is reported rather than rejected or coerced", {
+  con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
+
+  # A model that paraphrases instead of classifying: "Direct Award" is not in
+  # the closed OCDS procurementMethod codelist, and direct_award -- written as
+  # procurement_procedure = 'direct' -- will silently miss it. That silence is
+  # the reason this check exists.
+  use_fakes(populator = function(bundle, source, llm_fn, tier) list(
+    entities = list(
+      list(instance_id = "a", type_id = "Contract", confidence = 0.9,
+           source_refs = list(list(source_label = "d", excerpt = "e")),
+           properties = list(name = "A", procurement_procedure = "Direct Award")),
+      list(instance_id = "b", type_id = "Company", confidence = 0.9,
+           source_refs = list(list(source_label = "d", excerpt = "e")),
+           properties = list(name = "Acme", role = "contracting_authority"))),
+    relationships = list(), amendments = list()))
+  seed_document(con, root)
+
+  violations <- orph_codelist_violations(con)
+  expect_setequal(violations$value, c("Direct Award", "contracting_authority"))
+
+  procurement <- violations[violations$property == "procurement_procedure", ]
+  expect_equal(procurement$type_id, "Contract")
+  expect_match(procurement$codelist, "direct", fixed = TRUE)
+  expect_equal(procurement$x_ocds, "tender/procurementMethod")
+
+  # The value is stored, not dropped -- the mismatch is the signal, and the row
+  # is still evidence about what the document said.
+  stored <- DBI::dbGetQuery(con, "SELECT procurement_procedure FROM instances_Contract")
+  expect_equal(stored$procurement_procedure, "Direct Award")
+})
+
+test_that("codelist-conforming values raise nothing", {
+  con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
+  use_fakes(populator = function(bundle, source, llm_fn, tier) list(
+    entities = list(
+      list(instance_id = "a", type_id = "Contract", confidence = 0.9,
+           source_refs = list(list(source_label = "d", excerpt = "e")),
+           properties = list(name = "A", procurement_procedure = "direct",
+                             contract_status = "active")),
+      list(instance_id = "b", type_id = "Company", confidence = 0.9,
+           source_refs = list(list(source_label = "d", excerpt = "e")),
+           properties = list(name = "Acme", role = "buyer"))),
+    relationships = list(), amendments = list()))
+  seed_document(con, root)
+  expect_equal(nrow(orph_codelist_violations(con)), 0)
+})
+
+test_that("the extraction prompt tells the model each codelist", {
+  bundle <- orph_load_bundle()
+  prompt <- orpheus:::population_system_prompt(bundle)
+  expect_match(prompt, "MUST be exactly one of: open, selective, limited, direct", fixed = TRUE)
+  expect_match(prompt, "MUST be exactly one of: pending, active, cancelled, terminated", fixed = TRUE)
+})
+
+test_that("OCDS mappings are recorded on the properties that have them", {
+  bundle <- orph_load_bundle()
+  contract <- orph_object_type(bundle, "Contract")
+  paths <- stats::setNames(
+    lapply(contract$properties, function(p) p$x_ocds),
+    vapply(contract$properties, function(p) p$id, character(1)))
+
+  expect_equal(paths$start_date, "contracts/period/startDate")
+  expect_equal(paths$value_amount, "contracts/value/amount")
+  expect_equal(paths$signed_date, "contracts/dateSigned")
+  expect_equal(paths$procurement_procedure, "tender/procurementMethod")
+  # An extraction artefact, not contract data -- deliberately unmapped.
+  expect_null(paths$signature_block_present)
+})
+
+test_that("the OCDS contract status does not collide with the review status", {
+  bundle <- orph_load_bundle()
+  ids <- orph_property_ids(orph_object_type(bundle, "Contract"))
+  expect_true("status" %in% ids)            # review state
+  expect_true("contract_status" %in% ids)   # OCDS contractStatus
+  expect_equal(sum(ids == "status"), 1)
 })

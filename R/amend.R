@@ -364,7 +364,6 @@ orph_review_schema_amendment <- function(con, amendment_id,
                       nullable = TRUE,
                       description = paste("Accepted schema amendment:", am$rationale %||% ""),
                       source = list(column = am$property_id))))
-          bundle$objects <- bundle$object_types
           new_version <- bump_patch(bundle$version)
           bundle$version <- new_version
           orph_register_bundle(con, bundle, actor_id = actor_id, activate = TRUE)

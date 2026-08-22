@@ -29,6 +29,29 @@ orph_load_bundle <- function(path = orph_default_bundle_path()) {
   bundle
 }
 
+#' Mirror the bundle's alias keys
+#'
+#' The three consumer packages read different keys for the same lists:
+#' `ontologyDiscoverR` reads `object_types`, `objectSetsR` reads `objects`, and
+#' so on for interfaces, links and concepts. Carrying both spellings is the
+#' price of one bundle serving all three.
+#'
+#' It is applied in one place rather than at each call site, because the mirrors
+#' were previously hand-maintained and a schema amendment updated `objects`
+#' while leaving `interfaceTypes`, `links` and `concepts` behind.
+#'
+#' @param bundle A bundle list.
+#' @return The bundle, with every alias matching its primary key.
+#' @keywords internal
+sync_bundle_aliases <- function(bundle) {
+  aliases <- c(object_types = "objects", interfaces = "interfaceTypes",
+               link_types = "links", concept_defs = "concepts")
+  for (primary in names(aliases)) {
+    if (!is.null(bundle[[primary]])) bundle[[aliases[[primary]]]] <- bundle[[primary]]
+  }
+  bundle
+}
+
 #' Validate that a bundle carries what its three consumers read
 #'
 #' `ontologyDiscoverR`, `conceptR` and `objectSetsR` each read different keys
@@ -62,6 +85,15 @@ orph_validate_bundle <- function(bundle) {
     if (is.null(ot$properties) || length(ot$properties) == 0)
       problems <- c(problems, sprintf("object type '%s': has no properties", id))
     prop_ids <- vapply(ot$properties %||% list(), function(p) p$id %||% "", character(1))
+    # A duplicate property id generates a table with two columns of one name,
+    # or silently drops one. It happened once already, adopting OCDS's
+    # contracts/status onto a type that already had a review `status`.
+    dupes <- unique(prop_ids[duplicated(prop_ids)])
+    if (length(dupes) > 0) {
+      problems <- c(problems, sprintf("object type '%s': duplicate propert%s %s",
+                                      id, if (length(dupes) == 1) "y" else "ies",
+                                      paste(sprintf("'%s'", dupes), collapse = ", ")))
+    }
     if (!(ot$primary_key %in% prop_ids))
       problems <- c(problems, sprintf("object type '%s': primary_key '%s' is not a declared property",
                                       id, ot$primary_key))
@@ -86,6 +118,33 @@ orph_validate_bundle <- function(bundle) {
     }
     if (is.null(lt$join$fromKeys) || is.null(lt$join$toKeys))
       problems <- c(problems, sprintf("link type '%s': missing join keys (objectSetsR traversal needs them)", id))
+  }
+
+  # The domain block names object types and properties. A typo here disables a
+  # whole pipeline stage silently -- deterministic findings simply stop being
+  # linked, corpus comparison simply reports itself unavailable -- so it is
+  # checked rather than trusted.
+  d <- bundle$x_orpheus %||% list()
+  if (!is.null(d$primary_object_type)) {
+    primary <- NULL
+    for (ot in bundle$object_types %||% list()) {
+      if (identical(ot$id, d$primary_object_type)) primary <- ot
+    }
+    if (is.null(primary)) {
+      problems <- c(problems, sprintf(
+        "x_orpheus: primary_object_type '%s' is not an object type in this bundle",
+        d$primary_object_type))
+    } else {
+      primary_props <- vapply(primary$properties %||% list(),
+                              function(p) p$id %||% "", character(1))
+      for (field in c("value_property", "currency_property")) {
+        if (!is.null(d[[field]]) && !(d[[field]] %in% primary_props)) {
+          problems <- c(problems, sprintf(
+            "x_orpheus: %s '%s' is not a property of '%s'",
+            field, d[[field]], d$primary_object_type))
+        }
+      }
+    }
   }
 
   # A concept whose SQL comes from a template must not also carry a literal
@@ -157,6 +216,41 @@ orph_validate_bundle <- function(bundle) {
     cli::cli_abort(c("Bundle is not valid:", stats::setNames(problems, rep("x", length(problems)))))
   }
   invisible(bundle)
+}
+
+# ---------------------------------------------------------------------------
+# The domain block
+# ---------------------------------------------------------------------------
+
+#' Domain roles declared by a bundle
+#'
+#' The pipeline is domain-neutral. These declarations are how a bundle tells it
+#' which object type plays which role, so that swapping the bundle swaps the
+#' domain without touching any code.
+#'
+#' @param bundle A bundle.
+#' @return A list with `primary_object_type`, `container_property`,
+#'   `value_property`, `currency_property` and `document_types`; any may be
+#'   `NULL` when the domain has no such notion.
+#' @export
+orph_domain <- function(bundle) {
+  d <- bundle$x_orpheus %||% list()
+  list(
+    primary_object_type = d$primary_object_type %||% NULL,
+    container_property  = d$container_property  %||% NULL,
+    value_property      = d$value_property      %||% NULL,
+    currency_property   = d$currency_property   %||% NULL,
+    document_types      = unlist(d$document_types %||% list(), use.names = FALSE)
+  )
+}
+
+#' Document types a bundle's classifier chooses between
+#' @param bundle A bundle, or `NULL` for the shipped default vocabulary.
+#' @return Character vector.
+#' @export
+orph_document_types <- function(bundle = NULL) {
+  types <- if (is.null(bundle)) character() else orph_domain(bundle)$document_types
+  if (length(types) == 0) ORPH_DOC_TYPES else types
 }
 
 # ---------------------------------------------------------------------------
@@ -321,6 +415,7 @@ orph_register_bundle <- function(con, bundle, actor_id = NULL, activate = TRUE,
                                  stage = c("production", "staging")) {
   assert_writable(con)
   stage <- match.arg(stage)
+  bundle <- sync_bundle_aliases(bundle)
   orph_validate_bundle(bundle)
   if (stage == "staging" && activate) {
     cli::cli_abort("A staging bundle cannot be activated. Promote it to production first.")

@@ -1,11 +1,17 @@
 # Orpheus
 
-A contract intelligence platform for public servants. **Phase 1: ingest and
+A document intelligence platform for public servants. **Phase 1: ingest and
 extraction quality.**
 
-Orpheus takes a contract document and turns it into structured, human-reviewable
-facts in an ontology store, with enough provenance on every fact to know where it
-came from and whether a person has checked it.
+Orpheus takes a document and turns it into structured, human-reviewable facts in
+an ontology store, with enough provenance on every fact to know where it came
+from and whether a person has checked it.
+
+**The domain lives in the ontology bundle, not in the code.** The bundle shipped
+here describes public-sector contracts — that is the worked example, and the one
+the documentation uses throughout. A bundle describing planning applications,
+inspection reports or grant awards runs the same pipeline with no code changes;
+the test suite includes one, to keep that honest rather than aspirational.
 
 Nothing downstream — entity resolution, the relationship graph, conflict-of-interest
 views, the reading companion — is built here, because all of it depends on
@@ -16,10 +22,10 @@ extraction being trustworthy first.
 ## What it does
 
 ```
-contract.pdf
+document.pdf
   → ingest        hash, page text, OCR fallback for scans
   → classify      local model: doc type, sector, jurisdiction
-  → populate      dates and money by pattern; entities and clauses by model
+  → populate      dates and amounts by pattern; entities by model, against the bundle
   → review        confirm / amend / reject, nothing overwritten
   → analyse       versioned rule concepts + optional narrative reading
   → escalate      opt-in comparison against the rest of the corpus
@@ -75,9 +81,19 @@ Serving it:
 
 ```bash
 Rscript inst/plumber/plumb.R                                    # writer, :8000
-datasette serve data/orpheus.sqlite \
-  --metadata inst/datasette/metadata.yml --port 8001            # reader, :8001
+
+ORPHEUS_API_TOKEN=$TOKEN datasette serve data/orpheus.sqlite \
+  --metadata inst/datasette/metadata.yml \
+  --config   inst/datasette/datasette.yml \
+  --plugins-dir plugins --template-dir templates --port 8001    # UI + reader, :8001
 ```
+
+Or `cd deploy && docker compose up -d`, which runs both plus Ollama.
+
+The Datasette plugin adds an upload page and per-row confirm/amend/reject. It is
+a thin client over the API — it never opens a SQLite connection and never calls
+a model, so the single-writer guarantee and the cloud opt-in gate both still
+hold when a person is driving. See [deployment](docs/deployment.md#the-datasette-ui-plugin).
 
 ---
 
@@ -100,7 +116,7 @@ both the audit story and the only way to measure whether extraction is improving
 
 ## Status
 
-588 tests, no skips with `conceptR` installed:
+687 tests, no skips with `conceptR` installed:
 
 ```bash
 Rscript -e 'testthat::test_dir("tests/testthat")'

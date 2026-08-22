@@ -1,31 +1,21 @@
-title: Orpheus contract intelligence
+# Descriptive metadata for the Orpheus store. Generated -- regenerate with
+# orph_write_datasette_config() rather than editing.
+
+title: "Orpheus: Core contract ontology"
 description_html: |-
   <p>Read-only view of the Orpheus store. Every write -- extraction, amendment,
   concept evaluation -- goes through the Plumber API, which is the single
-  writer. This instance runs with <code>--immutable</code> and cannot change
-  anything.</p>
+  writer. This process only reads.</p>
   <p>AI-sourced rows carry <code>source</code>, <code>confidence</code> and
   <code>status</code>. A row with <code>status = unconfirmed</code> has not been
   checked by a person. <code>confidence</code> is one of five rubric levels, not
   an arbitrary score: 1.0 explicit, 0.9 clearly named, 0.7 implied, 0.5
   inferred, 0.2 speculative.</p>
 
-# No anonymous access. Contract documents have no public audience, so an actor
-# is required before any resource-level rule is even consulted.
-allow:
-  id: "*"
-
 databases:
   orpheus:
     tables:
-      actor_tokens:
-        allow: false
-      actors:
-        allow:
-          is_admin: 1
       llm_calls:
-        allow:
-          is_admin: 1
         description: Audit log of every model call, local and cloud.
       documents:
         description: >-
@@ -35,7 +25,6 @@ databases:
         description: >-
           Append-only audit trail. Ordered by seq rather than timestamp --
           changes made in one transaction share a timestamp to the second.
-        sort: seq
       schema_amendments:
         description: >-
           Properties and types seen during population but not declared in the
@@ -51,151 +40,4 @@ databases:
         description: >-
           Where each instance came from -- source label, page, and the excerpt
           supporting it.
-
-    queries:
-      needs_review:
-        title: Documents still needing review
-        sql: |-
-          SELECT d.document_id, d.filename, d.doc_type, d.review_status,
-                 COUNT(ii.instance_id) AS instances
-          FROM documents d
-          LEFT JOIN instance_index ii ON ii.document_id = d.document_id
-          WHERE d.review_status = 'unreviewed'
-          GROUP BY d.document_id
-          ORDER BY d.date_added DESC
-
-      low_confidence_unconfirmed:
-        title: Unconfirmed findings at or below the inferred rubric level
-        sql: |-
-          SELECT i.type_id, i.instance_id, i.document_id, p.excerpt, p.confidence
-          FROM instance_index i
-          JOIN provenance p ON p.instance_id = i.instance_id
-          WHERE p.confidence <= 0.5
-          ORDER BY p.confidence ASC, i.created_at DESC
-
-      stale_evaluations:
-        title: Analyses invalidated by a later amendment
-        sql: |-
-          SELECT evaluation_id, concept_id, kind, target_document_id,
-                 stale_reason, generated_at
-          FROM concept_evaluations
-          WHERE stale = 1
-          ORDER BY generated_at DESC
-
-      cloud_calls:
-        title: What has been sent to the cloud model
-        sql: |-
-          SELECT c.created_at, c.purpose, c.document_id, d.filename,
-                 c.actor_id, c.prompt_chars, c.excerpt_only, c.model
-          FROM llm_calls c
-          LEFT JOIN documents d ON d.document_id = c.document_id
-          WHERE c.tier = 'cloud'
-          ORDER BY c.created_at DESC
-        allow:
-          is_admin: 1
-
-      extraction_accuracy_by_confidence:
-        title: Does the confidence rubric actually rank reliability?
-        sql: |-
-          SELECT p.confidence,
-                 COUNT(*) AS reviewed,
-                 SUM(CASE WHEN x.status = 'confirmed' THEN 1 ELSE 0 END) AS confirmed,
-                 SUM(CASE WHEN x.status = 'amended'   THEN 1 ELSE 0 END) AS amended,
-                 SUM(CASE WHEN x.status = 'rejected'  THEN 1 ELSE 0 END) AS rejected,
-                 ROUND(1.0 * SUM(CASE WHEN x.status = 'confirmed' THEN 1 ELSE 0 END)
-                       / COUNT(*), 3) AS accuracy
-          FROM provenance p
-          JOIN (
-            SELECT instance_id, status FROM instances_Contract
-            UNION ALL SELECT instance_id, status FROM instances_Company
-            UNION ALL SELECT instance_id, status FROM instances_Person
-            UNION ALL SELECT instance_id, status FROM instances_Clause
-            UNION ALL SELECT instance_id, status FROM instances_Obligation
-            UNION ALL SELECT instance_id, status FROM instances_KeyDate
-            UNION ALL SELECT instance_id, status FROM instances_MonetaryAmount
-          ) x ON x.instance_id = p.instance_id
-          WHERE x.status IN ('confirmed', 'amended', 'rejected')
-          GROUP BY p.confidence
-          ORDER BY p.confidence DESC
-
-      rule_concept_precision:
-        title: How often does each rule concept point at something real?
-        sql: |-
-          SELECT flag_type AS concept_id,
-                 COUNT(*) AS raised,
-                 SUM(CASE WHEN status IN ('confirmed', 'amended') THEN 1 ELSE 0 END) AS upheld,
-                 SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS dismissed,
-                 SUM(CASE WHEN status = 'unconfirmed' THEN 1 ELSE 0 END) AS unreviewed
-          FROM instances_Flag
-          WHERE raised_by_pass = 'concept'
-          GROUP BY flag_type
-          ORDER BY dismissed DESC
-
-      risk_score_vs_model:
-        title: Where the rule score and the model's reading disagree
-        sql: |-
-          SELECT s.target_document_id AS document_id,
-                 d.filename,
-                 json_extract(s.result, '$.tier')        AS score_tier,
-                 json_extract(s.result, '$.score')       AS score,
-                 json_extract(n.result, '$.risk_level')  AS model_level
-          FROM concept_evaluations s
-          JOIN concept_evaluations n
-            ON n.target_document_id = s.target_document_id
-           AND n.kind = 'narrative' AND n.stale = 0
-          LEFT JOIN documents d ON d.document_id = s.target_document_id
-          WHERE s.kind = 'score' AND s.stale = 0
-            AND LOWER(json_extract(s.result, '$.tier'))
-                != LOWER(json_extract(n.result, '$.risk_level'))
-          ORDER BY score DESC
-
-      amendment_trail:
-        title: Every human correction, newest first
-        sql: |-
-          SELECT seq, edited_at, edited_by, table_name, row_id, action,
-                 previous_value, new_value, note
-          FROM edit_history
-          WHERE action IN ('amend', 'confirm', 'reject')
-          ORDER BY seq DESC
-
-# ---------------------------------------------------------------------------
-# Per-document row-level permissions
-#
-# Datasette core `allow` blocks gate a table or a database, not rows. The rules
-# below are what a permission_resources_sql plugin hook should run. They are
-# generated from orph_permission_sql(), so they cannot drift from what the API
-# enforces. Bind :actor_id to the authenticated actor.
-#
-# Regenerate this file with orph_write_datasette_metadata() after any change to
-# the permission model.
-# ---------------------------------------------------------------------------
-# -- Documents an actor may view. Bind :actor_id.
-# SELECT d.document_id AS resource
-# FROM documents d
-# LEFT JOIN actors a ON a.actor_id = :actor_id
-# WHERE a.actor_id IS NOT NULL
-#   AND (
-#     a.is_admin = 1
-#     OR d.created_by = :actor_id
-#     OR d.visibility IN ('link-view', 'link-edit')
-#     OR EXISTS (
-#       SELECT 1 FROM document_shares s
-#       WHERE s.document_id = d.document_id AND s.actor_id = :actor_id
-#     )
-#   )
-#
-# -- Documents an actor may edit. Bind :actor_id.
-# SELECT d.document_id AS resource
-# FROM documents d
-# LEFT JOIN actors a ON a.actor_id = :actor_id
-# WHERE a.actor_id IS NOT NULL
-#   AND (
-#     a.is_admin = 1
-#     OR d.created_by = :actor_id
-#     OR d.visibility IN ('link-edit')
-#     OR EXISTS (
-#       SELECT 1 FROM document_shares s
-#       WHERE s.document_id = d.document_id AND s.actor_id = :actor_id AND s.role = 'editor'
-#     )
-#   )
 

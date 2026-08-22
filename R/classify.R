@@ -11,11 +11,11 @@
 ORPH_DOC_TYPES <- c("contract", "amendment", "tender", "correspondence", "other")
 
 #' @keywords internal
-classify_system_prompt <- function() {
+classify_system_prompt <- function(doc_types = ORPH_DOC_TYPES) {
   paste0(
     "You classify documents held by a public-sector contract analysis team.\n",
     "Return JSON with keys:\n",
-    '  doc_type      one of: ', paste(ORPH_DOC_TYPES, collapse = ", "), "\n",
+    '  doc_type      one of: ', paste(doc_types, collapse = ", "), "\n",
     '  sector        the public sector domain (e.g. health, transport, education, ict), or null\n',
     '  jurisdiction  the governing jurisdiction if stated or clearly inferable, or null\n',
     '  confidence    one of 1.0, 0.9, 0.7, 0.5, 0.2\n',
@@ -56,12 +56,13 @@ orph_classify <- function(con, document_id, actor_id = NULL, max_chars = 12000L)
   text <- orph_document_text(con, document_id)
   if (nchar(text) > max_chars) text <- substr(text, 1, max_chars)
 
-  reply <- orph_llm_json(con, "local", classify_system_prompt(), text,
+  doc_types <- orph_document_types(orph_active_bundle(con))
+  reply <- orph_llm_json(con, "local", classify_system_prompt(doc_types), text,
                          purpose = "classify", document_id = document_id,
                          actor_id = actor_id, excerpt_only = nchar(text) >= max_chars)
 
   doc_type <- reply$doc_type %||% "other"
-  if (!(doc_type %in% ORPH_DOC_TYPES)) doc_type <- "other"
+  if (!(doc_type %in% doc_types)) doc_type <- "other"
   confidence <- orph_snap_confidence(reply$confidence %||% 0.5)
 
   previous <- list(doc_type = doc$doc_type, sector = doc$sector, jurisdiction = doc$jurisdiction)

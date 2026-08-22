@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ document.filename if document else document_id }}{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus') }}">&larr; Documents</a></p>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+{% if note %}<p class="message-info">{{ note }}</p>{% endif %}
+{% if uploaded %}<p class="message-info">Ingested and extracted.</p>{% endif %}
+
+{% if document %}
+<h1>{{ document.filename }}</h1>
+<p style="color:#666">
+  {{ document.doc_type or "unclassified" }}
+  {%- if document.sector %} &middot; {{ document.sector }}{% endif %}
+  {%- if document.jurisdiction %} &middot; {{ document.jurisdiction }}{% endif %}
+  &middot; {{ document.n_pages }} page(s) &middot; {{ document.review_status }}
+</p>
+
+{% if review %}
+<p>
+  <strong>{{ review.unconfirmed }}</strong> unconfirmed &middot;
+  {{ review.confirmed }} confirmed &middot;
+  {{ review.amended }} amended &middot;
+  {{ review.rejected }} rejected
+</p>
+{% endif %}
+
+<h2>Extracted facts</h2>
+<p style="color:#666">
+  Every row below is a machine reading until a person says otherwise. Confirming
+  keeps the value and records that it was checked; amending replaces it and keeps
+  the original in the history; rejecting excludes it without deleting it.
+</p>
+
+{% for i in instances %}
+<div style="border:1px solid #ddd;padding:1em;margin-bottom:1em">
+  <p>
+    <strong>{{ i.type_id }}</strong>
+    &middot; {{ i.status }}
+    &middot; confidence {{ i.provenance_confidence }}
+  </p>
+
+  {% if i.excerpt %}
+  <blockquote style="color:#444;border-left:3px solid #ccc;padding-left:1em;margin-left:0">
+    {{ i.excerpt }}
+    {% if i.page_no %}<br><span style="color:#888">page {{ i.page_no }}</span>{% endif %}
+  </blockquote>
+  {% endif %}
+
+  <form action="{{ urls.path('/-/orpheus/review') }}" method="post">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+    <input type="hidden" name="instance_id" value="{{ i.instance_id }}">
+    <input type="hidden" name="document_id" value="{{ document_id }}">
+    <table class="rows-and-columns">
+      <tbody>
+      {% for key, value in i.parsed.items() %}
+        {% if key not in ("document_id", "source", "confidence", "status",
+                          "amended_by", "amended_at", "created_at", "naive_key")
+              and value is not none %}
+        <tr>
+          <th style="text-align:left">{{ key }}</th>
+          <td><input type="text" name="change_{{ key }}" value="{{ value }}" style="width:26em"></td>
+        </tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+    <p>
+      <input type="text" name="note" placeholder="why (optional)" style="width:22em">
+      <button type="submit" name="action" value="confirm">Confirm</button>
+      <button type="submit" name="action" value="amend">Save changes</button>
+      <button type="submit" name="action" value="reject">Reject</button>
+    </p>
+  </form>
+</div>
+{% else %}
+<p>Nothing has been extracted from this document.</p>
+{% endfor %}
+{% endif %}
+{% endblock %}

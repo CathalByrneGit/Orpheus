@@ -14,7 +14,6 @@
 | `testthat`, `withr` | Tests | For development |
 | `ontologyDiscoverR` | The extraction engine | For real extraction |
 | `conceptR` | Rule concepts (step 7) | For step 7 |
-| `objectSetsR` | Corpus queries (step 9) | No — SQL fallback exists |
 | `ellmer` | Model providers | Unless you register your own |
 | `pdftools` **or** `pdftotext` | PDF text | For PDFs |
 | `tesseract` (R package or binary) | OCR | For scanned documents |
@@ -24,8 +23,7 @@ install.packages(c("DBI", "RSQLite", "jsonlite", "digest", "rlang", "cli",
                    "plumber", "testthat", "withr", "pdftools", "ellmer"))
 remotes::install_github(c(
   "CathalByrneGit/ontologyDiscoverR",
-  "CathalByrneGit/conceptR",
-  "CathalByrneGit/objectSetsR"
+  "CathalByrneGit/conceptR"
 ))
 R CMD INSTALL .
 ```
@@ -42,7 +40,7 @@ errors. That is deliberate: see [Open decisions](open-decisions.md#r-stack-vs-a-
 Rscript -e 'testthat::test_dir("tests/testthat")'
 ```
 
-588 tests, no skips on a machine with `conceptR` installed. Tests that need it
+687 tests, no skips on a machine with `conceptR` installed. Tests that need it
 call `skip_if_no_conceptr()`.
 
 ### How the tests are built
@@ -105,7 +103,7 @@ Edit `orph_can()` **and** `orph_permission_sql()` together. The test
 they diverge. Then regenerate the Datasette metadata:
 
 ```r
-orph_write_datasette_metadata()
+orph_write_datasette_config()
 ```
 
 ### Adding a migration
@@ -187,9 +185,9 @@ orpheus/
 ├── inst/
 │   ├── bundles/             # contract-core-0.1.0.json
 │   ├── plumber/plumb.R      # service entry point
-│   └── datasette/metadata.yml
+│   └── datasette/            # generated: metadata.yml + datasette.yml
 ├── data-raw/make_bundle.R   # regenerates the bundle
-├── tests/testthat/          # 588 tests
+├── tests/testthat/          # 687 tests
 └── docs/
 ```
 

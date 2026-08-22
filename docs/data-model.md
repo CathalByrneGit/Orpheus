@@ -65,6 +65,34 @@ an object type because `objectSetsR` traverses links by joining object tables on
 key columns — a many-to-many link cannot be traversed in one hop, but it can be
 reached in two through the edge itself.
 
+### The domain block
+
+Three or four lines that keep the engine domain-neutral. Without them the
+pipeline would have to hardcode `Contract`, and would become a contracts-only
+tool the first time it needed to attach a date to something.
+
+```json
+"x_orpheus": {
+  "primary_object_type": "Contract",
+  "container_property":  "contract_instance_id",
+  "value_property":      "value_amount",
+  "currency_property":   "value_currency",
+  "document_types":      ["contract", "amendment", "tender", "correspondence", "other"]
+}
+```
+
+| Field | What reads it |
+|---|---|
+| `primary_object_type` | Deterministic findings attach to it; corpus comparison anchors on it |
+| `container_property` | The property on child types pointing back at that instance |
+| `value_property`, `currency_property` | The corpus value comparison. Omit both and it reports itself unavailable |
+| `document_types` | The classifier's vocabulary |
+
+Validated at registration: a `primary_object_type` that is not an object type,
+or a `value_property` that is not one of its properties, is rejected. A typo
+there would disable a pipeline stage silently — findings would simply stop being
+linked — which is the kind of failure that goes unnoticed for a long time.
+
 ### Interfaces: asking one question across several types
 
 An interface is a contract several object types share, so a question spans them

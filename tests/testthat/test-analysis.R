@@ -95,11 +95,60 @@ test_that("a rejected counterparty drops out of the corpus match", {
   expect_equal(result$matched_companies, 0)
 })
 
-test_that("the engine used is reported so results can be traced to their query path", {
+test_that("companies are matched across documents by stated registration number", {
   con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
-  docs <- seed_corpus(con, root, list(
-    list(name = "A", supplier = "Meridian Systems Limited", value = 2400000),
-    list(name = "B", supplier = "Meridian Systems Limited", value = 900000)))
-  result <- orph_corpus_analysis(con, docs[[1]], actor_id = "act_test")
-  expect_true(result$engine %in% c("objectSetsR", "sql_fallback"))
+
+  # The same registered entity, written two different ways. A naive key would
+  # match these anyway; the point is that the identifier match does not depend
+  # on that, and says so.
+  seed_registered <- function(name, reg, doc_name) {
+    orph_set_populator(function(bundle, source, llm_fn, tier) list(
+      entities = list(list(instance_id = "co", type_id = "Company", confidence = 0.9,
+        source_refs = list(list(source_label = "d", excerpt = "e")),
+        properties = list(name = name, registration_number = reg, role = "supplier"))),
+      relationships = list(), amendments = list()))
+    path <- write_contract_file(name = doc_name)
+    doc <- orph_ingest(con, path, actor_id = "act_test", storage_root = root)$document_id
+    orph_extract(con, doc, "local", actor_id = "act_test")
+    doc
+  }
+  doc1 <- seed_registered("Meridian Systems Limited", "IE-123456", "a.txt")
+  doc2 <- seed_registered("Meridian Sys. Ltd",        "IE-123456", "b.txt")
+
+  result <- orph_corpus_analysis(con, doc1, actor_id = "act_test")
+  expect_equal(result$identifier_matched, 1)
+
+  match <- result$counterparties[[1]]
+  expect_equal(length(match$identifier_matches), 1)
+  hit <- match$identifier_matches[[1]]
+  expect_equal(hit$document_id, doc2)
+  expect_equal(hit$registration_number, "IE-123456")
+  # Proven, not guessed: same registered entity, different spelling.
+  expect_true(hit$name_differs)
+
+  expect_match(result$caveat, "stated registration", fixed = TRUE)
+})
+
+test_that("different registration numbers are not matched, whatever the names say", {
+  con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
+  seed_registered <- function(reg, doc_name) {
+    orph_set_populator(function(bundle, source, llm_fn, tier) list(
+      entities = list(list(instance_id = "co", type_id = "Company", confidence = 0.9,
+        source_refs = list(list(source_label = "d", excerpt = "e")),
+        properties = list(name = "Apex Limited", registration_number = reg))),
+      relationships = list(), amendments = list()))
+    path <- write_contract_file(name = doc_name)
+    doc <- orph_ingest(con, path, actor_id = "act_test", storage_root = root)$document_id
+    orph_extract(con, doc, "local", actor_id = "act_test")
+    doc
+  }
+  doc1 <- seed_registered("IE-111111", "a.txt")
+  seed_registered("IE-999999", "b.txt")
+
+  result <- orph_corpus_analysis(con, doc1, actor_id = "act_test")
+  # The naive key still matches them -- identical names -- which is exactly the
+  # over-merge the identifier is there to contradict.
+  expect_equal(result$matched_companies, 1)
+  expect_equal(result$identifier_matched, 0)
+  expect_equal(length(result$counterparties[[1]]$identifier_matches), 0)
 })

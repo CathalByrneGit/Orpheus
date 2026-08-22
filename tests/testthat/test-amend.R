@@ -132,6 +132,30 @@ test_that("accepting a new_property amendment adds the column and bumps the bund
   expect_no_error(orph_amend_instance(con, id, list(renewal_notice_period = "90 days"), "act_test"))
 })
 
+test_that("an accepted amendment leaves every alias spelling in agreement", {
+  # The bundle carries each list under two keys, one per consumer package. The
+  # mirrors used to be maintained by hand at the point of amendment, so an
+  # accepted property reached `object_types` and `objects` but not the rest.
+  con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
+  use_fakes(populator = fake_populator(extra_properties = list(renewal_notice_period = "90 days")))
+  seed_document(con, root)
+
+  am <- orph_schema_amendments(con)
+  am <- am[am$amendment_type == "new_property", ]
+  orph_review_schema_amendment(con, am$amendment_id, "accepted", "act_admin")
+
+  bundle <- orph_active_bundle(con)
+  expect_identical(bundle$objects, bundle$object_types)
+  expect_identical(bundle$links, bundle$link_types)
+  expect_identical(bundle$interfaceTypes, bundle$interfaces)
+  expect_identical(bundle$concepts, bundle$concept_defs)
+
+  # And the amendment really did land, so the agreement is not vacuous.
+  contract <- bundle$objects[[which(vapply(bundle$objects,
+    function(ot) identical(ot$id, "Contract"), logical(1)))]]
+  expect_true("renewal_notice_period" %in% orph_property_ids(contract))
+})
+
 test_that("a new_type amendment is recorded but not auto-applied", {
   con <- new_test_store(); root <- test_storage_root(); seed_actors(con)
   use_fakes(populator = fake_populator(extra_entities = list(
