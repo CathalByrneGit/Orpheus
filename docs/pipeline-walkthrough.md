@@ -9,27 +9,27 @@ Nine steps from a file on disk to reviewed facts in the store. Steps 1, 3, 4 and
 flowchart TD
   F["contract.pdf"] --> S1
 
-  S1["<b>1 Ingest</b><br/>orph_ingest()<br/>hash, pages, OCR fallback"]
-  S1 --> S3["<b>3 Classify</b><br/>orph_classify()<br/>local model"]
+  S1["<b>1 Ingest</b><br/>ingest()<br/>hash, pages, OCR fallback"]
+  S1 --> S3["<b>3 Classify</b><br/>classify()<br/>local model"]
   S3 --> S4
 
   subgraph pop["4 Population — local, always on"]
-    S4A["orph_find_dates()<br/>orph_find_amounts()<br/><i>deterministic</i>"]
-    S4B["orph_populate()<br/><i>ontologyDiscoverR + local model</i>"]
+    S4A["find_dates()<br/>find_amounts()<br/><i>deterministic, no model</i>"]
+    S4B["populate()<br/><i>an engine + a local model</i>"]
     S4A --> S4B
   end
-  S4["orph_extract(tier = 'local')"] --> pop
+  S4["extract(tier='local')"] --> pop
   pop --> S6
 
-  S5["<b>5 Cloud population</b><br/>orph_extract(tier = 'cloud')<br/><i>opt-in, excerpts only</i>"]
+  S5["<b>5 Cloud population</b><br/>extract(tier='cloud')<br/><i>opt-in, excerpts only</i>"]
   pop -.-> S5 -.-> S6
 
   S6["<b>6 Review of extraction</b><br/>confirm / amend / reject"]
-  S6 --> S7["<b>7 Analysis</b><br/>orph_evaluate_concepts()<br/>orph_analyse_document()"]
-  S7 --> S8["<b>8 Review of analysis</b><br/>orph_review_evaluation()"]
-  S8 -.-> S9["<b>9 Corpus escalation</b><br/>orph_corpus_analysis()<br/><i>naive matching</i>"]
+  S6 --> S7["<b>7 Analysis</b><br/>evaluate_concepts()<br/>analyse_document()"]
+  S7 --> S8["<b>8 Review of analysis</b><br/>review_evaluation()"]
+  S8 -.-> S9["<b>9 Corpus escalation</b><br/>corpus_analysis()<br/><i>naive matching</i>"]
 
-  S2["<b>2 Schema discovery</b><br/>ontologyDiscoverR discover<br/><i>occasional</i>"] -.->|"produces the bundle"| pop
+  S2["<b>2 Schema discovery</b><br/>a discovery pass over a sample<br/><i>occasional</i>"] -.->|"produces the bundle"| pop
 
   style S5 stroke-dasharray: 5 5
   style S9 stroke-dasharray: 5 5
@@ -40,7 +40,7 @@ flowchart TD
 
 ## 1 — Ingest
 
-`orph_ingest(con, path, actor_id, storage_root, filename, visibility)`
+`ingest(store, path, actor_id, storage_root, filename, visibility)`
 
 Accepts PDF, `.docx`, plain text and images. The file is hashed with SHA-256 and
 copied into a content-addressed store (`storage/documents/ab/abcd…pdf`), so an
@@ -50,43 +50,52 @@ Text extraction is per format:
 
 | Format | Backend |
 |---|---|
-| PDF | `pdftools::pdf_text()`, falling back to the `pdftotext` binary |
-| `.docx` | Pure R: the file is a zip, and `word/document.xml` holds the body |
+| PDF | the `pdftotext` binary, falling back to `pdfminer.six`, or `docling` if layout matters |
+| `.docx` | Standard library: the file is a zip, and `word/document.xml` holds the body |
 | Plain text | Read directly; form feeds split pages |
 | Image | Straight to OCR |
 
+The last page of a `pdftotext` document ends with a form feed too, so a naive
+split yields a phantom empty final page — one Orpheus shipped, because R's
+`strsplit` drops a trailing empty field and Python's `str.split` does not. Page
+attribution is exactly the kind of provenance that can be wrong without anyone
+noticing, so `split_pages()` handles it and a test holds it.
+
 **Dedup is on content, not filename.** Re-ingesting identical bytes returns the
-existing `document_id` with `duplicate = TRUE` rather than creating a second row.
+existing `document_id` with `duplicate = True` rather than creating a second row.
 
 **OCR is a provider, not a hardcoded tool** — which tool to use is still an open
 decision. Any page yielding fewer than 40 characters is treated as image-only,
-rendered to PNG, and passed to whatever `orph_ocr_provider()` returns: the
-`tesseract` R package, a `tesseract` binary, or a function registered with
-`orph_set_ocr_provider()`. With no provider available the page is recorded as
+rendered to PNG, and passed to whatever `ocr_backend()` returns: `pytesseract`, a
+`tesseract` binary, or a function registered with `set_ocr_backend()`. With no provider available the page is recorded as
 `text_source = 'needs_ocr'` — visible as a gap, rather than passed off as an
 empty page.
 
 Returns `document_id`, `n_pages`, `needs_ocr`, `text_source`.
 
 **Exercised against a real PDF, not a stand-in.**
-`tests/testthat/fixtures/services-agreement.pdf` is a genuine two-page PDF with
-a text layer, built by `data-raw/make_test_pdf.py`. `test-pdf.R` runs it through
-ingest and the deterministic pass and asserts the page split lands in the right
-place, `text_source` is `native` rather than a silent fall through to OCR, and
-each finding carries the page it was read from. Page attribution is the part of
-provenance a multi-page document can get wrong without anyone noticing.
+`tests/fixtures/services-agreement.pdf` is a genuine two-page PDF with a text
+layer, built by `tests/fixtures/make_test_pdf.py`. `test_ingest.py` runs it
+through ingest and the deterministic pass and asserts the page split lands in
+the right place, `text_source` is `native` rather than a silent fall through to
+OCR, and each finding carries the page it was read from. The same file is what
+`tests/e2e/browser_loop.sh` uploads through the browser form.
 
 ## 2 — Schema discovery
 
-Occasional, and not part of a document's journey. An `ontologyDiscoverR`
-discovery session run over a sample of contracts produces a bundle via
-`dis_to_bundle()`, reviewed with `dis_review()`, and registered with
-`orph_register_bundle()`. Phase 1 ships a hand-seeded bundle so the pipeline
-runs before anyone has done this.
+Occasional, and not part of a document's journey. A discovery pass over a sample
+of contracts proposes object types and properties; a person reviews them, and
+the result is registered with `bundle.register()`. Phase 1 ships a hand-seeded
+bundle so the pipeline runs before anyone has done this.
+
+The bundle format is
+[ontologySpecR](https://github.com/CathalByrneGit/ontologySpecR)'s, unmodified
+and validated against that project's own schema, so a bundle produced by any
+tool that speaks it registers here without translation.
 
 ## 3 — Classify
 
-`orph_classify(con, document_id, actor_id, max_chars)`
+`classify(store, document_id, actor_id, tier, max_chars)`
 
 Always the **local** tier. Classification reads the whole document, so routing it
 to the cloud would mean sending every ingested document off-site to learn what it
@@ -99,7 +108,7 @@ jurisdiction the text does not support.
 
 ## 4 — Population, local
 
-`orph_extract(con, document_id, tier = "local", ...)`
+`extract(store, document_id, tier="local", ...)`
 
 Two passes, deterministic first.
 
@@ -108,12 +117,12 @@ amounts by pattern, per page. A date printed in the document is a fact about the
 text, not a judgement, so it is recorded at the top of the rubric and the model
 is left to do the work only it can do.
 
-- `orph_find_dates()` handles ISO, `31 December 2024`, `December 31, 2024` and
+- `find_dates()` handles ISO, `31 December 2024`, `December 31, 2024` and
   `31/12/2024`. Slash dates are read day-first, which is right for Irish, UK and
   EU documents and wrong for US ones — so an ambiguous one (both fields ≤ 12) is
   recorded at `0.5` with its raw text kept, rather than at `1.0` with a guess
   baked in.
-- `orph_find_amounts()` handles symbols, ISO codes, and written-out currency. A
+- `find_amounts()` handles symbols, ISO codes, and written-out currency. A
   currency read from a word (`500,000 euro`) scores `0.9`; one read from a code
   (`EUR 500,000`) scores `1.0`.
 - `infer_role()` labels each finding from the **nearest** cue phrase, not the
@@ -129,25 +138,41 @@ is left to do the work only it can do.
   termination date was therefore stored as its start date: not a missing fact,
   which review would catch, but a confidently wrong one, which it might not.
 
-**The model pass** calls `orph_populate()`, which hands an `ontologyDiscoverR`
-`populate_session()` the whole schema and asks for instances and relationships.
+**The model pass** calls `populate()`, which hands the chosen engine the whole
+schema and asks for instances and relationships. Which engine is a setting —
+`gliner2`, `langextract`, `llm`, `chat`, or `auto` — and none of them is the
+architecture; see [Extraction engines](extraction-engines.md).
+
+Whatever the engine returns, **its excerpts are located in the source text
+here**, by `align.py`, and the rubric level follows from how well they matched:
+verbatim is `explicit`, a whitespace-and-punctuation difference still counts as
+the document, a drifting quotation is `implied`, and one the document does not
+contain at all is `speculative`. An engine cannot assert its own grounding, and
+a model that invents a quotation is the failure mode the whole quality report
+depends on catching.
+
+**If the model pass fails, the deterministic findings stay.** The run is
+recorded as `partial` with the reason on it, the document page says so, and a
+retry needs no `force`. The deterministic half needs no model at all, and losing
+it whenever the other half was unavailable would mean the offline path only ever
+worked when the online one did.
 
 ## 5 — Population, cloud
 
-`orph_extract(con, document_id, tier = "cloud", opt_in = TRUE)`
+`extract(store, document_id, tier="cloud", opt_in=True)`
 
 Same persistence path, `source = 'ai_cloud'`. Two independent conditions must
 both hold — see [Provenance and amendment](provenance-and-amendment.md#the-cloud-gate).
 
-By default only excerpts are sent: `orph_select_excerpts()` scores pages against
+By default only excerpts are sent: `select_excerpts()` scores pages against
 clause-related terms and sends the best few with their page markers intact, so
 the model can still cite a page. `cloud_send_mode = 'full_document'` overrides
 this deployment-wide.
 
 ## 6 — Review of extraction
 
-`orph_confirm_instance()`, `orph_amend_instance()`, `orph_reject_instance()`,
-`orph_review_edge()`, `orph_mark_document_reviewed()`.
+`confirm_instance()`, `amend_instance()`, `reject_instance()`,
+`review_edge()`, `mark_document_reviewed()`.
 
 Covered in full in [Provenance and amendment](provenance-and-amendment.md).
 
@@ -156,25 +181,25 @@ Covered in full in [Provenance and amendment](provenance-and-amendment.md).
 Two different things wear this name, and they are kept apart because they fail
 differently and want different review.
 
-**Rule concepts** — `orph_evaluate_concepts()` runs `conceptR`'s versioned SQL
-boolean expressions over the instance tables. Deterministic, reproducible,
+**Rule concepts** — `evaluate_concepts()` runs versioned SQL boolean expressions
+over the instance tables. Deterministic, reproducible,
 diffable between versions. The six seed concepts are `high_value`,
 `missing_signature`, `open_ended_term`, `direct_award`, `uncapped_liability` and
 `auto_renewal`. A concept that comes out true raises a `Flag` instance, so a rule
 finding sits in the same review queue as a model-raised one.
 
-Two filters are applied that `conceptR` cannot apply itself, because it evaluates
-a whole table: results are restricted to this document, and rejected rows are
+Two filters are applied on top of the concept's own SQL, which is written
+against a whole table: results are restricted to this document, and rejected rows are
 excluded. A fact a reviewer threw out must not come back as a finding.
 
-**Composite scores** — `orph_evaluate_score()` sums the weights of the concepts
+**Composite scores** — `evaluate_score()` sums the weights of the concepts
 a contract triggered and bands the total (`low` / `medium` / `high`). Arithmetic
 over concepts already evaluated, so it is reproducible, decomposable and
 diffable between versions. Every result carries its `contributions`: which
 concepts fired and by how much. A score nobody can decompose is no better than
 the model's opinion.
 
-`orph_risk_comparison()` puts it beside the narrative risk level. Agreement is
+`risk_comparison()` puts it beside the narrative risk level. Agreement is
 mild evidence both are working; **disagreement is the useful signal**, and says
 nothing about which one is wrong — the score sees only concepts that were
 evaluated, the model sees only facts that were extracted.
@@ -183,8 +208,8 @@ evaluated, the model sees only facts that were extracted.
 a `value_threshold` template whose parameter defaults in the bundle and is
 overridden per deployment:
 
-```r
-orph_set_concept_parameter(con, "value_threshold", "threshold", 5000000, actor_id)
+```python
+set_concept_parameter(store, "value_threshold", "threshold", 5_000_000, actor_id)
 ```
 
 That adds a **new concept version** rather than editing the current one, so an
@@ -193,7 +218,7 @@ and still explains itself. A threshold is local policy, not a fact about
 contracts, and treating it as configuration rather than code is what stops a
 placeholder quietly becoming the rule.
 
-**Narrative analysis** — `orph_analyse_document()` gives a model the extracted
+**Narrative analysis** — `analyse_document()` gives a model the extracted
 instances, with their confidence and status, and asks for a summary, risk level,
 key issues and recommendations. It reads *structured facts, not document text*,
 which keeps what goes to a cloud model to the facts a person has already seen.
@@ -201,20 +226,20 @@ Re-analysing supersedes the previous narrative rather than sitting beside it.
 
 ## 8 — Review of analysis
 
-`orph_review_evaluation(con, evaluation_id, status, actor_id, result)` — the same
+`review_evaluation(store, evaluation_id, status, actor_id, result)` — the same
 amendment model as instances. An amended evaluation becomes `source = 'human'` at
 confidence `1.0`, with the original preserved in `edit_history`.
 
 ## 9 — Database-wide analysis
 
-`orph_corpus_analysis(con, document_id, actor_id, narrate, tier, opt_in)`
+`corpus_analysis(store, document_id, actor_id, narrate, tier, opt_in)`
 
 A deliberate escalation, refused outright on a single-document store. It answers
 the two questions Phase 1 can honestly answer without entity resolution: do the
 companies and people here appear in other documents, and how does this contract's
 value sit against others sharing a counterparty.
 
-Matching is on `orph_naive_key()` — lowercase, punctuation stripped, company
+Matching is on `naive_key()` — lowercase, punctuation stripped, company
 suffixes dropped — and the lookup runs across every object type implementing the
 `Named` interface, not just the type being asked about. A name that is a company
 in one document and a person in another comes back as a `cross_type_match`,
@@ -227,8 +252,8 @@ available signal that real resolution is needed.
 Values are compared only within a single currency. Converting them would need a
 rate for the right date, which is not something to invent.
 
-The corpus lookup runs through `orph_object_set_by_interface()`, so a match can
-land on any type implementing `Named` rather than only on the type asked about.
+The corpus lookup runs through `object_set_by_interface()`, so a match can land
+on any type implementing `Named` rather than only on the type asked about.
 
 ---
 
@@ -237,16 +262,17 @@ land on any type implementing `Named` rather than only on the type asked about.
 | Change | What re-runs |
 |---|---|
 | New document ingested | Steps 3–4 for that document only |
-| `orph_extract()` called again for a tier that succeeded | Refused, unless `force = TRUE` |
-| `orph_extract(force = TRUE)` | Unreviewed instances from that tier become `rejected`; confirmed and amended rows survive |
+| `extract()` called again for a tier that **succeeded** | Refused, unless `force=True` |
+| `extract()` called again after a **partial** run | Runs. A partial run is what a retry is for, so the guard is not in its way |
+| `extract(force=True)` | Unreviewed instances from that tier become `rejected`; confirmed and amended rows survive |
 | An instance amended or rejected | Every evaluation that read it is marked `stale = 1` |
 | A narrative analysis re-run | The previous one is marked stale and superseded |
-| A concept's SQL changed in the bundle | `orph_setup_concepts()` adds a new version and deprecates the old; past evaluations keep pointing at the version that produced them |
+| A concept's SQL changed in the bundle | `setup_concepts()` adds a new version and deprecates the old; past evaluations keep pointing at the version that produced them |
 | A schema amendment accepted | The bundle gains a property, its version bumps, and the column is added live |
 
 Re-running a tier is refused by default because it would otherwise write a second
 copy of every instance, leaving a reviewer to work out which of two identical
-rows is current. `force = TRUE` supersedes rather than deletes: superseded rows
+rows is current. `force=True` supersedes rather than deletes: superseded rows
 become `rejected` with a note in `edit_history`, staying queryable as evidence
 about extraction quality.
 

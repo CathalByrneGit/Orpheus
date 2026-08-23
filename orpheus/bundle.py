@@ -529,6 +529,17 @@ def document_types(bundle: dict) -> list[str]:
     return list(domain(bundle).get("documentTypes") or [])
 
 
+def flag_object_type(bundle: dict) -> dict | None:
+    """Where a rule finding is written, if this bundle has anywhere to put one.
+
+    Named by the bundle rather than hardcoded, and optional. A domain may well
+    have no flag type; the *evaluation* is still recorded, because that is the
+    engine's job, while raising an instance alongside it is a convenience that
+    needs a declared place to go.
+    """
+    return object_type(bundle, domain(bundle).get("flagObjectType", "Flag"))
+
+
 def object_types(bundle: dict) -> list[dict]:
     return list(bundle.get("objects") or [])
 

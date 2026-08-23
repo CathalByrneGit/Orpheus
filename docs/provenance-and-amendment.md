@@ -32,9 +32,9 @@ So nothing is destructively overwritten, and every fact says where it came from.
 ```mermaid
 stateDiagram-v2
   [*] --> unconfirmed: extraction writes<br/>source = ai_local / ai_cloud
-  unconfirmed --> confirmed: orph_confirm_instance()<br/><i>values unchanged</i>
-  unconfirmed --> amended: orph_amend_instance()<br/><i>source becomes human</i>
-  unconfirmed --> rejected: orph_reject_instance()<br/><i>excluded, not deleted</i>
+  unconfirmed --> confirmed: confirm_instance()<br/><i>values unchanged</i>
+  unconfirmed --> amended: amend_instance()<br/><i>source becomes human</i>
+  unconfirmed --> rejected: reject_instance()<br/><i>excluded, not deleted</i>
   confirmed --> amended: a later correction
   amended --> amended: a further correction
   rejected --> [*]: stays queryable as evidence
@@ -56,9 +56,17 @@ agreeing with a machine does not make it a human observation. Only `status` and
 correction is ground truth. Leaving the model's `0.7` in place would mean a
 corrected row still read as a machine guess.
 
-**Rejecting never deletes.** The row is excluded from `orph_document_instances()`,
+**Rejecting never deletes.** The row is excluded from `document_instances()`,
 from concept evaluation and from corpus matching, but it stays in the table. A
 rejected extraction is evidence about extraction quality.
+
+**An amendment that changes nothing is refused**, not recorded as a no-op. A
+browser form posts every field it renders, so retyping a value the machine
+already had would otherwise flip `source` to `human` on a row the machine got
+right — and since the quality report counts amendments as machine errors a human
+had to fix, that inflates the error rate with agreements. Unchanged fields are
+dropped from a real amendment too, so the history reads as what the person
+actually corrected. Agreeing with the machine has a name, and it is *confirm*.
 
 ---
 
@@ -77,7 +85,7 @@ together.
 | `previous_value`, `new_value` | JSON |
 | `edited_by`, `edited_at`, `note` | Who, when, why |
 
-`orph_row_history()` gives one row's story; `orph_document_history()` gives
+`row_history()` gives one row's story; `document_history()` gives
 everything that has happened to a document and to every instance extracted from
 it — the view an auditor asks for.
 
@@ -106,22 +114,22 @@ questions.
 
 | Level | Function | Question it answers |
 |---|---|---|
-| Per-instance | `orph_confirm_instance()` etc. | Has *this fact* been checked? |
-| Per-document | `orph_mark_document_reviewed()` | Has anyone been through *the whole thing*? |
+| Per-instance | `confirm_instance()` etc. | Has *this fact* been checked? |
+| Per-document | `mark_document_reviewed()` | Has anyone been through *the whole thing*? |
 
 Marking a document reviewed **does not** confirm its instances. Conflating the
 two would let one click silently promote every unchecked machine guess in the
 document to `confirmed` — turning the review flag from a signal into noise.
 Instead the result reports what is still outstanding:
 
-```r
-orph_mark_document_reviewed(con, doc, actor_id = "act_nuala")
-#> $review_status         "reviewed"
-#> $unconfirmed_instances 6
-#> $note                  "Marked reviewed with 6 instance(s) still unconfirmed."
+```python
+>>> mark_document_reviewed(store, document_id, actor_id="act_nuala")
+{"review_status": "reviewed",
+ "unconfirmed_instances": 6,
+ "note": "Marked reviewed with 6 instance(s) still unconfirmed."}
 ```
 
-`orph_review_progress()` gives the counts by status at any time.
+`review_progress()` gives the counts by status at any time.
 
 ---
 
@@ -153,10 +161,9 @@ accepting one records the decision and leaves the bundle edit deliberate.
 
 **Deciding an amendment is an administrator action**, not an ordinary review:
 
-```r
-orph_review_schema_amendment(con, id, "accepted", actor_id = "act_admin")
-#> $applied_to_bundle TRUE
-#> $bundle_version    "0.1.1"
+```python
+>>> review_schema_amendment(store, amendment_id, "accepted", actor_id="act_admin")
+{"applied_to_bundle": True, "bundle_version": "0.2.1"}
 ```
 
 Accepting one changes the bundle for every document, not one row. The API
@@ -184,7 +191,7 @@ flowchart LR
   I -->|"read during analysis"| D
   D --> E
 
-  A["orph_amend_instance()<br/>→ 'yes'"] --> I
+  A["amend_instance()<br/>→ 'yes'"] --> I
   A -.->|"mark_dependent_<br/>evaluations_stale()"| E
 
   E --> S["stale = 1<br/>stale_reason = 'Instance … was amended.'"]
@@ -205,17 +212,17 @@ that is for.
 
 Phase 1's definition of done is extraction *good enough to trust as a
 foundation*. That is a claim about a number, and until the number exists the
-claim cannot be made either way. `orph_quality_report()` computes it from data
+claim cannot be made either way. `quality_report()` computes it from data
 the store already holds — every reviewed row is a labelled example, so there is
 nothing to sample.
 
 | Function | Question it answers |
 |---|---|
-| `orph_extraction_quality()` | How often did extracted facts survive review, by type, confidence and tier? |
-| `orph_confidence_calibration()` | Does a higher rubric level actually mean a more reliable fact? |
-| `orph_concept_precision()` | How often does each rule concept point at something real? |
-| `orph_property_corrections()` | Which fields do people keep having to fix? |
-| `orph_quality_report()` | All of the above, plus a readiness verdict |
+| `extraction_quality()` | How often did extracted facts survive review, by type, confidence and tier? |
+| `confidence_calibration()` | Does a higher rubric level actually mean a more reliable fact? |
+| `concept_precision()` | How often does each rule concept point at something real? |
+| `property_corrections()` | Which fields do people keep having to fix? |
+| `quality_report()` | All of the above, plus a readiness verdict |
 
 ### Three things it refuses to do
 
@@ -224,11 +231,13 @@ an unknown one. Every rate is computed over the reviewed subset only, and
 reported next to the `coverage` it rests on. Below 20% coverage the report
 declines to give a verdict at all:
 
-```r
-orph_quality_report(con)$readiness
-#> $state "insufficient_review"
-#> $note  "Only 8% of instances have been reviewed. Too little to judge extraction on."
+```python
+>>> quality_report(store)["headline"]
+"Only 3 instance(s) reviewed. Not enough to say anything about extraction quality yet."
 ```
+
+It says it in words rather than returning a rate over three rows, because a
+number invites being read as a score.
 
 **It attributes a correction to the confidence the machine originally gave it.**
 Amending a row sets its `confidence` to `1.0` and `source` to `human` — correct,
@@ -245,23 +254,27 @@ are measured separately, by precision.
 
 ### What it looks like when it works
 
-```r
-orph_quality_report(con)$by_confidence
-#>   confidence_label n_reviewed accuracy amend_rate reject_rate
-#> 1         explicit         12    0.917      0.083       0.000
-#> 2            named         16    0.812      0.188       0.000
-#> 3          implied          8    0.500      0.250       0.250
-#> 4         inferred          8    0.250      0.250       0.500
+```
+$ orpheus --db data/orpheus.sqlite report
+
+81% of reviewed instances were confirmed as extracted, 13% needed correcting
+and 6% were rejected, over 67% of the population.
+
+  calibration: monotonic
+    explicit     1.0  12/14 reviewed, 92% correct
+    named        0.9  16/19 reviewed, 81% correct
+    implied      0.7   8/12 reviewed, 50% correct
+    inferred     0.5   8/11 reviewed, 25% correct
 ```
 
 That is the rubric earning its place: accuracy falls as confidence falls. When
 it does not, the report says so plainly rather than leaving it to be noticed:
 
-```r
-orph_confidence_calibration(con)$note
-#> "A higher rubric level scored worse than a lower one. The rubric is not
-#>  ranking reliability here -- treat the levels as labels, not as a ranking,
-#>  until this resolves."
+```python
+>>> confidence_calibration(store)["note"]
+"A higher rubric level scored worse than a lower one. The rubric is not
+ ranking reliability here -- treat the levels as labels, not as a ranking,
+ until this resolves."
 ```
 
 A rubric that does not rank correctly is worse than no rubric, because people
@@ -269,12 +282,14 @@ trust it.
 
 ### Rule precision
 
-```r
-orph_concept_precision(con)
-#>          concept_id n_raised n_reviewed n_upheld n_dismissed precision
-#> 1   open_ended_term        8          8        1           7     0.125
-#> 2  missing_signature        8          8        6           2     0.750
-#> 3 uncapped_liability        8          8        7           1     0.875
+```python
+>>> concept_precision(store)
+[{"concept_id": "open_ended_term",    "n_raised": 8, "n_reviewed": 8,
+  "n_upheld": 1, "n_dismissed": 7, "precision": 0.125},
+ {"concept_id": "missing_signature",  "n_raised": 8, "n_reviewed": 8,
+  "n_upheld": 6, "n_dismissed": 2, "precision": 0.750},
+ {"concept_id": "uncapped_liability", "n_raised": 8, "n_reviewed": 8,
+  "n_upheld": 7, "n_dismissed": 1, "precision": 0.875}]
 ```
 
 `open_ended_term` firing on eight documents and being dismissed seven times is
@@ -307,7 +322,7 @@ building:
 | Condition | Where it lives | Values |
 |---|---|---|
 | Org policy allows it at all | `org_settings.cloud_ai_policy` | `disabled` (default), `per_user`, `org_allow` |
-| This request explicitly asked | `opt_in` / `cloud_opt_in` | must be `TRUE` |
+| This request explicitly asked | `opt_in` / `cloud_opt_in` | must be `True` |
 
 **The default is `disabled`.** A deployment handling sensitive contract data
 should have to turn cloud processing on deliberately, not discover it was on.
@@ -316,7 +331,7 @@ question, so both policies exist and neither is assumed — see
 [Open decisions](open-decisions.md#cloud-ai-opt-in-policy).
 
 **Policy alone never authorises a call.** Even under `org_allow`, a request
-without `opt_in = TRUE` is refused. That is what stops cloud becoming a silent
+without `opt_in=True` is refused. That is what stops cloud becoming a silent
 default the moment an administrator relaxes the policy.
 
 The gate is checked *before* any document text is prepared, so a blocked request

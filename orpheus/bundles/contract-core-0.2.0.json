@@ -2209,7 +2209,7 @@
         "threshold": 1000000
       },
       "sqlExpr": "value_amount IS NOT NULL AND CAST(value_amount AS REAL) >= 1000000",
-      "rationale": "Threshold is a deployment setting, not a fact. Override it with orph_set_concept_parameter().",
+      "rationale": "Threshold is a deployment setting, not a fact. Override it with set_concept_parameter().",
       "status": "draft"
     },
     {
@@ -2248,7 +2248,7 @@
         "description": "Awarded without a competitive procedure."
       },
       "sqlExpr": "procurement_procedure = 'direct'",
-      "rationale": "Matches the closed OCDS procurementMethod codelist rather than guessing at phrasings. A contract whose procedure is recorded outside the codelist is reported by orph_codelist_violations(), not silently missed here.",
+      "rationale": "Matches the closed OCDS procurementMethod codelist rather than guessing at phrasings. A contract whose procedure is recorded outside the codelist is reported by codelist_violations(), not silently missed here.",
       "status": "draft"
     },
     {

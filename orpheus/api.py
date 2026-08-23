@@ -345,7 +345,19 @@ def post_corpus_analysis(store, document_id, actor, body, **_):
 # ---------------------------------------------------------------------------
 
 @route("GET", "/quality")
-def get_quality(store, body, **_):
+def get_quality(store, actor, body, **_):
+    """Corpus-wide extraction quality. Administrator only.
+
+    Not because the numbers are sensitive, but because they aggregate over every
+    document in the store, including ones this actor has no permission to read.
+    A per-document report needs only `view` on that document, and is the route
+    a reviewer wants anyway.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "The corpus-wide quality report aggregates documents you may not "
+            "be able to read, so it is an administrator view. "
+            "GET /documents/<id>/quality is scoped to one document.")
     return quality.quality_report(store,
                                   min_reviewed=int(body.get("min_reviewed", 5)))
 

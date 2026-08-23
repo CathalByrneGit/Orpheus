@@ -37,9 +37,34 @@ trail.
 
 Because corrections preserve the machine's value beside the human's, the store
 answers the question Phase 1 actually turns on: **is extraction good enough to
-build on yet?** `orph_quality_report()` computes it — accuracy by confidence
-level, whether the rubric ranks reliability at all, which rule concepts
-over-fire, and which fields people keep fixing.
+build on yet?** `orpheus report` computes it — accuracy by confidence level,
+whether the rubric ranks reliability at all, which rule concepts over-fire, and
+which fields people keep fixing.
+
+---
+
+## Quick start
+
+```bash
+pip install -e '.[server]'
+
+orpheus --db data/orpheus.sqlite init --admin "Ada"
+orpheus --db data/orpheus.sqlite ingest contract.pdf --actor-id act_... --extract
+orpheus --db data/orpheus.sqlite report
+```
+
+`init` prints the command that serves what it just built:
+
+```bash
+datasette serve data/orpheus.sqlite \
+  --metadata config/metadata.yml --config config/datasette.yml \
+  --plugins-dir plugins --template-dir templates --port 8001
+```
+
+Or `cd deploy && docker compose up -d`, which runs that plus Ollama.
+
+The browser page at `/-/orpheus` adds upload and per-row confirm/amend/reject.
+The same routes are available as JSON under `/-/orpheus/api/`.
 
 ---
 
@@ -52,61 +77,28 @@ Start at **[docs/index.md](docs/index.md)**.
 | [Data model](docs/data-model.md) | Tables, the ontology bundle, the confidence rubric |
 | [Pipeline walkthrough](docs/pipeline-walkthrough.md) | The nine steps, with the function that runs each |
 | [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
-| [API reference](docs/api-reference.md) | Endpoints, permissions, response shapes |
+| [Extraction engines](docs/extraction-engines.md) | Four ways to run the model pass, and when each is right |
+| [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
 | [Deployment](docs/deployment.md) | Running it, and the WAL trap that catches people |
 | [Developer guide](docs/developer-guide.md) | Setup, tests, troubleshooting |
 | [Open decisions](docs/open-decisions.md) | What is still undecided, and what the build corrected |
 
 ---
 
-## Quick start
-
-```bash
-R CMD INSTALL .
-```
-
-```r
-library(orpheus)
-
-con   <- orph_init_store("data/orpheus.sqlite")
-admin <- orph_create_actor(con, "Ada", is_admin = TRUE)
-
-doc <- orph_ingest(con, "contract.pdf", actor_id = admin)$document_id
-orph_classify(con, doc, actor_id = admin)
-orph_extract(con, doc, tier = "local", actor_id = admin)
-orph_document_instances(con, doc)
-```
-
-Serving it:
-
-```bash
-Rscript inst/plumber/plumb.R                                    # writer, :8000
-
-ORPHEUS_API_TOKEN=$TOKEN datasette serve data/orpheus.sqlite \
-  --metadata inst/datasette/metadata.yml \
-  --config   inst/datasette/datasette.yml \
-  --plugins-dir plugins --template-dir templates --port 8001    # UI + reader, :8001
-```
-
-Or `cd deploy && docker compose up -d`, which runs both plus Ollama.
-
-The Datasette plugin adds an upload page and per-row confirm/amend/reject. It is
-a thin client over the API — it never opens a SQLite connection and never calls
-a model, so the single-writer guarantee and the cloud opt-in gate both still
-hold when a person is driving. See [deployment](docs/deployment.md#the-datasette-ui-plugin).
-
----
-
 ## Three things worth knowing before reading the code
 
-**The Plumber API is the only writer.** SQLite permits one writer, and with
-multiple concurrent users that is a real constraint rather than a theoretical
-one. It is enforced by an advisory lock that refuses a second writer at startup,
-and by read connections that reject writes before SQLite sees them.
+**Datasette is the writer, and the core is a library it imports.** SQLite
+permits one writer, and with multiple concurrent users that is a real constraint
+rather than a theoretical one. There is one process: the plugin calls
+`orpheus.api.handle()` on Datasette's own write thread, so Datasette's write
+queue serialises every change. The invariant is *nothing writes except through
+`orpheus` core functions* — no SQL is written in the plugin. An advisory lock
+stops a second process (the CLI, a script) opening the same store for writing
+while the server holds it.
 
 **Do not serve the store with `--immutable`.** It is the obvious flag for a
-database Datasette never writes to, and combined with WAL mode it silently shows
-an empty site. [Why](docs/deployment.md#the-wal-and-immutable-mode-trap).
+database you think nothing writes to, and combined with WAL mode it silently
+shows a site missing rows. [Why](docs/deployment.md#the-wal-and-immutable-mode-trap).
 
 **Nothing is destructively overwritten.** Corrections insert into `edit_history`
 and update the row's status; rejected rows are excluded, never deleted. That is
@@ -116,14 +108,22 @@ both the audit story and the only way to measure whether extraction is improving
 
 ## Status
 
-709 tests, no skips with `conceptR` installed:
+307 tests:
 
 ```bash
-Rscript -e 'testthat::test_dir("tests/testthat")'
+pip install -e '.[dev]'
+python3 -m pytest
 ```
 
-The extraction engine (`ontologyDiscoverR`) sits behind a single adapter, and the
-suite passes without it installed by driving a substitute engine through the same
-interface. Whether to keep the R stack or rebuild its ideas in Python is
-[still open](docs/open-decisions.md#r-stack-vs-a-python-rebuild) — that isolation
-is what keeps the decision cheap.
+They call the core directly, which cannot catch what only goes wrong with a real
+server in the middle. `tests/e2e/browser_loop.sh` drives the whole loop over
+HTTP against a live Datasette — multipart limits, CSRF, upload, extraction,
+grounding, confirm/amend/reject, rollback — and checks the store agrees with
+what the browser was told.
+
+The core has no third-party dependencies. Every extraction engine, the PDF
+backends and OCR are optional installs, and the code says which one is missing
+when you reach for it. What has **not** been done is the thing Phase 1 exists
+for: no real model has run against a real corpus, so the question of whether
+extraction is good enough remains open. See
+[open decisions](docs/open-decisions.md).

@@ -7,7 +7,7 @@ whether a person has checked it.
 **The domain is the bundle.** The engine — ingest, classify, extract, review,
 evaluate, compare — knows nothing about contracts. It is told which object type
 a document is fundamentally about, and which property holds a comparable value,
-by the bundle's `x_orpheus` block. The bundle shipped here describes
+by the bundle's `extensions.orpheus` block. The bundle shipped here describes
 public-sector contracts because that is the driving use case and it makes the
 documentation concrete; swapping it swaps the domain.
 
@@ -25,8 +25,8 @@ views and the live reading-companion UI are deliberately out of scope — see
 | [Data model](data-model.md) | Every table in the store, the ontology bundle, and the confidence rubric |
 | [Pipeline walkthrough](pipeline-walkthrough.md) | Steps 1–9, in execution order, with the function that runs each |
 | [Provenance and amendment](provenance-and-amendment.md) | The hardest part: how a machine guess becomes a checked fact, and how extraction quality gets measured |
-| [API reference](api-reference.md) | Every HTTP endpoint, its permissions, and its response shape |
-| [Deployment](deployment.md) | Running the API and Datasette together, and the WAL trap that catches people |
+| [API reference](api-reference.md) | Every route, its permissions, and its response shape |
+| [Deployment](deployment.md) | Running it, and the WAL trap that catches people |
 | [Developer guide](developer-guide.md) | Setup, tests, troubleshooting, project structure |
 | [Open decisions](open-decisions.md) | What Phase 1 deliberately did not decide, and what the build corrected |
 | [Prior art](prior-art.md) | Open-source tools that already do parts of this, and what that means |
@@ -40,34 +40,36 @@ views and the live reading-companion UI are deliberately out of scope — see
 
 ```mermaid
 flowchart LR
-  subgraph client["Users (browser)"]
-    UI["Review UI / curl"]
-    DS["Datasette<br/>read-only browsing"]
-  end
+  U["Public servants<br/>(browser)"]
 
-  subgraph server["One host"]
-    API["Plumber API<br/><b>the only writer</b>"]
-    OLL["Ollama<br/>local model"]
+  subgraph server["One host, one process"]
+    DS["<b>Datasette</b><br/>browsing, upload, review"]
+    CORE["orpheus core<br/><i>imported, not called over HTTP</i>"]
     STORE[("SQLite store<br/>WAL mode")]
     FILES[("Content-addressed<br/>originals + page images")]
+    DS -->|"api.handle(), on the write thread"| CORE
+    CORE -->|"read + write"| STORE
+    CORE --> FILES
   end
 
-  CLOUD["Claude API<br/><i>opt-in only</i>"]
+  OLL["Ollama<br/>local model"]
+  CLOUD["a cloud model<br/><i>opt-in only</i>"]
+  CLI["orpheus CLI<br/><i>corpus runs, reports</i>"]
 
-  UI -->|"Bearer token"| API
-  DS -->|"read"| STORE
-  API -->|"read + write"| STORE
-  API --> FILES
-  API <-->|"always on"| OLL
-  API -.->|"explicit per-request opt-in"| CLOUD
+  U -->|HTTPS| DS
+  CORE <-->|"always on"| OLL
+  CORE -.->|"explicit per-request opt-in"| CLOUD
+  CLI -.->|"advisory lock:<br/>not while the server runs"| STORE
 
-  style API fill:#2d6a4f,color:#fff
+  style DS fill:#2d6a4f,color:#fff
   style CLOUD stroke-dasharray: 5 5
+  style CLI stroke-dasharray: 5 5
 ```
 
-The **Plumber API is the single writer**. Datasette, and any future UI, are
-read-only clients against the same SQLite file. That is not a convention: a
-second writer is refused at startup by an advisory lock, and read connections
+**Datasette is the single writer**, and the core is a library it imports rather
+than a service it calls. That is not a convention: every write is queued through
+Datasette's own write thread, the plugin writes no SQL of its own, and a second
+*process* — the CLI, a script — is refused by an advisory lock. Read connections
 reject writes before SQLite ever sees them.
 
 ---
@@ -75,9 +77,9 @@ reject writes before SQLite ever sees them.
 ## The pipeline in one sentence
 
 A document is ingested and hashed, classified by a local model, populated into
-per-object-type instance tables by the `ontologyDiscoverR` flow plus a
-deterministic date-and-money pass, evaluated against versioned `conceptR` rule
-concepts and an optional narrative analysis, and every resulting fact is
+per-object-type instance tables by an extraction engine plus a deterministic
+date-and-money pass, evaluated against versioned rule concepts and an optional
+narrative analysis, and every resulting fact is
 correctable by a named person without anything being overwritten -- which is
 also what makes extraction quality measurable rather than asserted.
 
@@ -85,50 +87,56 @@ also what makes extraction quality measurable rather than asserted.
 
 ## Quick start
 
-```r
-# install.packages(c("DBI", "RSQLite", "jsonlite", "digest", "rlang", "cli", "plumber"))
-# remotes::install_github(c("CathalByrneGit/ontologyDiscoverR", "CathalByrneGit/conceptR"))
-R CMD INSTALL .
+```bash
+pip install -e '.[server]'
 ```
 
-```r
-library(orpheus)
+```bash
+orpheus --db data/orpheus.sqlite init --admin "Ada"
+#   → creates the store, loads the bundle, sets up concepts and scores,
+#     writes config/metadata.yml and config/datasette.yml, and prints the
+#     command that serves what it just built
 
-con   <- orph_init_store("data/orpheus.sqlite")   # migrations + the shipped bundle
-admin <- orph_create_actor(con, "Ada", is_admin = TRUE)
-token <- orph_create_token(con, admin, "cli")$token
+orpheus --db data/orpheus.sqlite ingest contract.pdf --actor-id act_... --extract
+orpheus --db data/orpheus.sqlite report
+```
 
-doc <- orph_ingest(con, "contract.pdf", actor_id = admin)$document_id
-orph_classify(con, doc, actor_id = admin)
-orph_extract(con, doc, tier = "local", actor_id = admin)
+Or as a library, with no server anywhere:
 
-orph_setup_concepts(con, actor_id = admin)
-orph_evaluate_concepts(con, doc, actor_id = admin)
+```python
+from orpheus.store import Store
+from orpheus import bundle, ingest, classify, extract, concepts
 
-orph_document_instances(con, doc)
-orph_disconnect(con)
+store = Store("data/orpheus.sqlite")
+bundle.register(store, bundle.load())
+bundle.apply_schema(store, bundle.load())
+
+document_id = ingest.ingest(store, "contract.pdf", actor_id="act_...")["document_id"]
+classify.classify(store, document_id, actor_id="act_...")
+extract.extract(store, document_id, tier="local", actor_id="act_...")
+concepts.evaluate_concepts(store, document_id, actor_id="act_...")
+
+extract.document_instances(store, document_id)
+store.close()
 ```
 
 Serving it:
 
 ```bash
-ORPHEUS_DB=data/orpheus.sqlite Rscript inst/plumber/plumb.R      # writer, port 8000
-
-ORPHEUS_API_TOKEN=$TOKEN datasette serve data/orpheus.sqlite \
-  --metadata inst/datasette/metadata.yml \
-  --config   inst/datasette/datasette.yml \
-  --plugins-dir plugins --template-dir templates --port 8001     # UI + reader
+datasette serve data/orpheus.sqlite \
+  --metadata config/metadata.yml \
+  --config   config/datasette.yml \
+  --plugins-dir plugins --template-dir templates --port 8001
 ```
 
-Do **not** add `--immutable` to that Datasette command. It is the obvious flag
-for a database this process never writes to, and it silently hides every row —
+Do **not** add `--immutable` to that command. It is the obvious flag for a
+database you think nothing writes to, and it silently hides rows —
 [Deployment](deployment.md#the-wal-and-immutable-mode-trap) explains why.
 
-Both YAML files are generated by `orph_write_datasette_config()`. Datasette
-reads them through different paths and they are not interchangeable: `--metadata`
-is descriptive text and is the only one that reaches the rendered pages;
-`--config` carries the `allow` blocks, the canned queries and the UI plugin's
-settings.
+Both YAML files are generated by `orpheus config`. Datasette reads them through
+different paths and they are not interchangeable: `--metadata` is descriptive
+text and is the only one that reaches the rendered pages; `--config` carries the
+`allow` blocks, the canned queries and the UI plugin's settings.
 
 ---
 

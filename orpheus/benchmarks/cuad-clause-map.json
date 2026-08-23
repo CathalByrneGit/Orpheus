@@ -1,5 +1,5 @@
 {
-  "description": "CUAD clause category -> Orpheus clause_type. Seeded, not complete. Categories absent from this file are reported as unmapped by orph_benchmark_extraction() rather than being scored as misses, so extending it is the intended way to widen the benchmark. Category names must match those in the CUAD file exactly; the loader reads the vocabulary from the data rather than assuming it.",
+  "description": "CUAD clause category -> Orpheus clause_type. Seeded, not complete. Categories absent from this file are reported as unmapped by benchmark_extraction() rather than being scored as misses, so extending it is the intended way to widen the benchmark. Category names must match those in the CUAD file exactly; the loader reads the vocabulary from the data rather than assuming it.",
   "source": "https://www.atticusprojectai.org/cuad",
   "license": "CUAD is CC BY 4.0, The Atticus Project",
   "mapping": {

@@ -14,31 +14,38 @@ carries.
 Instance tables are not hand-written. They are generated from an **ontology
 bundle**: a JSON document listing object types, their properties, link types,
 and seed concept definitions. The shipped bundle is
-`inst/bundles/contract-core-0.1.0.json`, reproducible from
-`data-raw/make_bundle.R`, and replaceable wholesale by `dis_to_bundle()` output
-from a real `ontologyDiscoverR` discovery run.
+`orpheus/bundles/contract-core-0.2.0.json`, and it is replaceable wholesale by
+the output of a discovery run over a real corpus.
 
-`orph_apply_bundle_schema()` turns the bundle into DDL: one table per managed
+`bundle.apply_schema()` turns the bundle into DDL: one table per managed
 object type, one column per declared property. It is idempotent, and it adds
 columns the bundle has gained since — which is what makes accepting a schema
 amendment a live operation rather than a redeployment.
 
-### One bundle, three readers
+### One spelling, and a format other tools already read
 
-The bundle is read by three packages that spell the same ideas differently. It
-carries every spelling, so each package works unmodified:
+The bundle is an
+[ontologySpecR](https://github.com/CathalByrneGit/ontologySpecR) bundle:
+camelCase, `objects` / `links` / `interfaces` / `actions` / `queries`, and
+vendor concerns under `extensions`. It is validated against that project's
+schema **unmodified**, alongside Orpheus's own — so a bundle written for any
+tool that speaks the format registers here without translation, and one written
+here is readable by tools that know nothing about Orpheus.
 
-| Concept | `ontologyDiscoverR` | `conceptR` | `objectSetsR` |
-|---|---|---|---|
-| Object type list | `object_types` | `object_types` | `objects` / `object_types` |
-| Backing table | — | `table_name` | `source$table` |
-| Primary key | `primary_key` | `primary_key` | `primaryKey` / `primary_key` |
-| Link endpoints | `from_type_id` / `to_type_id` | — | `from` / `to` |
-| Join keys | — | — | `join$fromKeys` / `join$toKeys` |
+That is a change worth naming. The earlier bundle carried **every list twice**,
+once per consuming R package, because three of them spelled the same ideas
+differently (`objects` / `object_types`, `primaryKey` / `primary_key`,
+`concept_defs` / `concepts`). Validation existed mainly to check the duplicated
+pairs agreed. Dropping the duplicates halved the file — 114 KB to 58 KB — and
+removed a whole class of bug: a bundle cannot disagree with itself if it only
+says each thing once. `tests/fixtures/contract-core-0.1.0.json` keeps the old
+shape, because the loader still has to read it for anyone holding a store built
+by it.
 
-`orph_validate_bundle()` checks all of these up front, including that the
-duplicated pairs agree. Without that check a mismatch surfaces much later, deep
-inside whichever package needed the spelling that was missing.
+`bundle.validate()` runs both schemas and then the checks a schema cannot make:
+that an object type implementing an interface really carries the interface's
+properties, and that the domain block names types that exist. Those are the
+failures that surface weeks later as fewer rows rather than as an error.
 
 ### Object types
 
@@ -60,8 +67,8 @@ write a finding with its own page-level provenance, rather than overwriting a
 fact stay visible as two rows.
 
 `Relationship` is backed by the hand-written `edges` table and marked
-`x_orpheus.managed = false`, so schema generation leaves it alone. It exists as
-an object type because `objectSetsR` traverses links by joining object tables on
+`extensions.orpheus.managed = false`, so schema generation leaves it alone. It
+exists as an object type because links are traversed by joining object tables on
 key columns — a many-to-many link cannot be traversed in one hop, but it can be
 reached in two through the edge itself.
 
@@ -72,21 +79,31 @@ pipeline would have to hardcode `Contract`, and would become a contracts-only
 tool the first time it needed to attach a date to something.
 
 ```json
-"x_orpheus": {
-  "primary_object_type": "Contract",
-  "container_property":  "contract_instance_id",
-  "value_property":      "value_amount",
-  "currency_property":   "value_currency",
-  "document_types":      ["contract", "amendment", "tender", "correspondence", "other"]
+"extensions": {
+  "orpheus": {
+    "domain": {
+      "primaryObjectType":  "Contract",
+      "containerProperty":  "contract_instance_id",
+      "valueProperty":      "value_amount",
+      "currencyProperty":   "value_currency",
+      "documentTypes":      ["contract", "amendment", "tender",
+                             "correspondence", "other"]
+    }
+  }
 }
 ```
 
 | Field | What reads it |
 |---|---|
-| `primary_object_type` | Deterministic findings attach to it; corpus comparison anchors on it |
-| `container_property` | The property on child types pointing back at that instance |
-| `value_property`, `currency_property` | The corpus value comparison. Omit both and it reports itself unavailable |
-| `document_types` | The classifier's vocabulary |
+| `primaryObjectType` | Deterministic findings attach to it; corpus comparison anchors on it |
+| `containerProperty` | The property on child types pointing back at that instance |
+| `valueProperty`, `currencyProperty` | The corpus value comparison. Omit both and it reports itself unavailable |
+| `documentTypes` | The classifier's vocabulary |
+| `flagObjectType` | Where a rule finding is written. Optional — a domain with no flag type still evaluates its concepts and records them, it just has nowhere to raise an instance |
+
+It lives under `extensions` because that is where the spec puts vendor
+concerns — which is what keeps the same file valid for a tool that has never
+heard of Orpheus.
 
 Validated at registration: a `primary_object_type` that is not an object type,
 or a `value_property` that is not one of its properties, is rejected. A typo
@@ -105,11 +122,14 @@ object type silently stops being included in an answer.
 | `Named` | `Company`, `Person` | "Does this name appear anywhere else?" |
 | `PageAnchored` | `Clause`, `KeyDate`, `MonetaryAmount` | "What can I point at on this page?" |
 
-```r
-orph_object_set_by_interface(con, "Named")
-#>   instance_id  document_id  name                  naive_key         status       type_id
-#> 1 inst_8e00…   doc_45ee…    Meridian Systems Ltd  meridian systems  unconfirmed  Company
-#> 2 inst_0463…   doc_45ee…    Aoife Nolan           aoife nolan       unconfirmed  Person
+```python
+>>> object_set_by_interface(store, "Named")
+[{"instance_id": "inst_8e00…", "document_id": "doc_45ee…",
+  "name": "Meridian Systems Ltd", "naive_key": "meridian systems",
+  "status": "unconfirmed", "type_id": "Company"},
+ {"instance_id": "inst_0463…", "document_id": "doc_45ee…",
+  "name": "Aoife Nolan", "naive_key": "aoife nolan",
+  "status": "unconfirmed", "type_id": "Person"}]
 ```
 
 Rows are projected to the interface's properties only, so every row has the
@@ -117,15 +137,15 @@ same shape whichever type it came from; `type_id` says which that was.
 Type-specific properties (`role`, `job_title`) are deliberately not projected —
 if a caller needs those it is asking a type question, not an interface one.
 
-`orph_validate_bundle()` refuses a bundle where a type declares an interface it
+`bundle.validate()` refuses a bundle where a type declares an interface it
 cannot satisfy. An unchecked interface is worse than none: the cross-type query
 would fail at runtime, or quietly return fewer rows than it should.
 
 `Relationship` implements nothing — it is an edge, not an extracted instance,
 and its primary key is `edge_id`.
 
-This is `ontologySpecR`'s `interface_type` and `objectSetsR`'s
-`object_set_by_interface()`, carried across. The corpus escalation uses it: a
+This is `ontologySpecR`'s `interfaces`, carried across. The corpus escalation
+uses it: a
 name is looked up across every `Named` type, so a name that is a company in one
 document and a person in another is reported as a `cross_type_match` rather than
 filtered out before anyone sees it.
@@ -150,7 +170,7 @@ filtered out before anyone sees it.
 > quality measurable after people start correcting things.
 
 `source`, `confidence` and `status` are declared as **bundle properties**, not
-hidden metadata. `objectSetsR` projects an object set down to declared
+hidden metadata. An object set is projected down to declared
 properties only, so a query that cannot see `status` cannot exclude rejected
 rows — which would make every corpus-wide answer quietly wrong.
 
@@ -169,7 +189,7 @@ means the same thing to every reviewer:
 | `0.5` | `inferred` | Inferred from surrounding context |
 | `0.2` | `speculative` | Speculative |
 
-Extraction backends return arbitrary scores, so `orph_snap_confidence()` snaps
+Extraction backends return arbitrary scores, so `snap_confidence()` snaps
 every score to the nearest level **at the persistence boundary**, biased
 downward: a score is promoted to a level only if it is at least that level. A
 model's `0.83` is stored as `0.7`, never as `0.9`. A missing confidence becomes
@@ -182,12 +202,12 @@ model's `0.83` is stored as `0.7`, never as `0.9`. A missing confidence becomes
 | Status | Set by | Meaning |
 |---|---|---|
 | `unconfirmed` | extraction | No person has looked at this |
-| `confirmed` | `orph_confirm_instance()` | A person agrees with it as it stands |
-| `amended` | `orph_amend_instance()` | A person changed it; the previous value is in `edit_history` |
-| `rejected` | `orph_reject_instance()` | Excluded from downstream use, never deleted |
+| `confirmed` | `confirm_instance()` | A person agrees with it as it stands |
+| `amended` | `amend_instance()` | A person changed it; the previous value is in `edit_history` |
+| `rejected` | `reject_instance()` | Excluded from downstream use, never deleted |
 
-`ontologyDiscoverR` uses its own `pending`/`approved` vocabulary. It is
-translated in the adapter (`R/ontology_stack.R`) so the store has one vocabulary
+An engine that uses its own vocabulary — `pending`/`approved`, say — is
+translated at the boundary in `engines.py`, so the store has one vocabulary
 rather than two.
 
 ---
@@ -220,7 +240,7 @@ contract mailed round twice under different names is one document.
 |---|---|
 | `concept_evaluations` | Rule results, narrative analyses and corpus comparisons, distinguished by `kind` |
 | `concept_evaluation_dependencies` | Which instances an evaluation read — this is what makes `stale` automatic |
-| `concept_definitions`, `concept_versions` | Created and owned by `conceptR` |
+| `concept_definitions`, `concept_versions` | Versioned rule concepts: the SQL and its history |
 
 `concept_evaluations` carries `scope` (`document` or `database`),
 `resolution_quality` (set to `naive_unresolved` for corpus results),

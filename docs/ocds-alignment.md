@@ -9,7 +9,7 @@ eTenders and EU TED data speak.
 
 This page is the mapping and the proposed change. **The change is deliberately
 additive** — no table is renamed and no test breaks. Renaming `Contract` to
-`contracts` across nine object types, thirteen link types and 709 tests would be
+`contracts` across nine object types, thirteen link types and 300 tests would be
 a large change justified by nothing more than tidiness; carrying the mapping as
 metadata gets the interoperability without the churn.
 
@@ -122,7 +122,7 @@ Orpheus invented `contracting_authority`, `supplier`, `subcontractor`,
 from the OCDS subcontracting extension.
 
 Being an **open** codelist, extending it is legitimate. Using it means the values
-are documented somewhere other than a comment in `make_bundle.R`.
+are documented in the bundle rather than in a comment beside it.
 
 ### `contractStatus` (closed)
 
@@ -163,14 +163,16 @@ in the one place ambiguity is least affordable. Bundle validation now rejects
 duplicate property ids, because this class of mistake produced a table with two
 columns of one name and nothing noticed until the JSON was inspected.
 
-**Codelist values are reported, never rejected.** `orph_codelist_violations()`
-lists values recorded outside the codelist that governs them:
+**Codelist values are reported, never rejected.** `codelist_violations()` lists
+values recorded outside the codelist that governs them, and the corpus quality
+report carries them:
 
-```r
-orph_codelist_violations(con)
-#>   type_id  property               value                  n  x_ocds
-#> 1 Contract procurement_procedure  Direct Award           1  tender/procurementMethod
-#> 2 Company  role                   contracting_authority  1  parties/roles
+```python
+>>> codelist_violations(store)
+[{"type_id": "Contract", "property": "procurement_procedure",
+  "value": "Direct Award", "n": 1, "ocds": "tender/procurementMethod"},
+ {"type_id": "Company", "property": "role",
+  "value": "contracting_authority", "n": 1, "ocds": "parties/roles"}]
 ```
 
 The value stays in the table. That follows the same rule as an unrecognised

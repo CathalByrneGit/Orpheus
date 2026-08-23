@@ -7,13 +7,20 @@ Researched because the direction is Datasette-first and the Datasette team keeps
 building things Orpheus would otherwise build badly.
 
 The headline question was whether **`datasette-agent` removes the need for R and
-the Plumber API**. The short answer is no, but not for the reason it looks like,
-and the long answer changes what the API is *for*.
+the Plumber API**. The answer was no to the first half and yes to the second, but
+neither for the reason it looked like.
+
+The Plumber API is gone — not because a chat plugin replaced it, but because the
+port made Datasette the writer, so the API became a dispatch table imported
+in-process rather than a service to call. R is gone too, on
+[evidence unrelated to any plugin](open-decisions.md#r-stack-vs-a-python-rebuild).
+What the research below actually established is what an agent must *not* be
+allowed to do, and that conclusion outlived both changes.
 
 | Plugin | What it is | Verdict here |
 |---|---|---|
 | `datasette-agent` | Chat UI + tool-calling loop over `datasette-llm` | **Adopt as a client, never as a writer.** Its tool hook is the right seam; its `execute_write_sql` is the wrong one |
-| `datasette-accounts` | Username/password accounts in the internal DB | **Adopt.** Settles an open decision, deletes ~half of `R/auth.R` |
+| `datasette-accounts` | Username/password accounts in the internal DB | **Adopt.** Settles an open decision, deletes ~half of `auth.py` |
 | `datasette-paper` | Collaborative document editor | **Read it, don't adopt it.** The working reference for the hook Orpheus already emits SQL for |
 | `datasette-apps` | Sandboxed HTML/JS apps over allow-listed queries | **Adopt for dashboards.** Wrong shape for anything that writes |
 
@@ -32,38 +39,40 @@ agents. 116 commits, actively developed, beta.
 It is an **orchestration and conversation layer**. That is worth being precise
 about, because it is the whole of the answer to the R question.
 
-### Why it cannot remove R
+### Why it cannot replace the core
 
-Orpheus is about 6,400 lines of R. The bulk of it, by what it does:
+The core is about 6,000 lines. The bulk of it, by what it does:
 
-| Concern | Lines | Would `datasette-agent` cover it? |
-|---|---|---|
-| Concept evaluation, versioning, scores (`concepts.R`) | 776 | No |
-| Store, migrations, WAL, writer lock (`db.R`) | 561 | No |
-| Persistence, provenance, rubric snapping (`extract.R`) | 513 | No |
-| HTTP surface (`api.R`) | 508 | Partly — see below |
-| Bundle load, validate, DDL (`bundle.R`) | 464 | No |
-| Quality measurement (`quality.R`) | 428 | No |
-| Amendment model, edit history (`amend.R`) | 416 | No |
-| Corpus analysis (`analysis.R`) | 405 | No |
-| Auth, per-document permissions (`auth.R`) | 350 | Partly — but that is `datasette-accounts` |
-| Model provider layer + cloud gate (`llm.R`) | 258 | **Yes** |
-| Deterministic date/money pass (`deterministic.R`) | 216 | No |
-| Ingest, OCR (`ingest.R`, `ocr.R`) | 387 | No |
+| Concern | Would `datasette-agent` cover it? |
+|---|---|
+| Concept evaluation, versioning, scores (`concepts.py`) | No |
+| Store, migrations, WAL, writer lock (`store.py`) | No |
+| Persistence, provenance, rubric snapping (`extract.py`) | No |
+| Grounding: locating every excerpt in the source (`align.py`) | No |
+| Bundle load, validate, DDL (`bundle.py`) | No |
+| Quality measurement (`quality.py`) | No |
+| Amendment model, edit history (`review.py`, `audit.py`) | No |
+| Corpus analysis (`analysis.py`) | No |
+| Auth, per-document permissions (`auth.py`) | Partly — but that is `datasette-accounts` |
+| Model provider layer + cloud gate (`llm.py`) | **Yes** |
+| Deterministic date/money pass (`deterministic.py`) | No |
+| Ingest, OCR (`ingest.py`, `textract.py`) | No |
 
 The agent does not extract entities against an ontology, snap confidences,
-maintain a review vocabulary, track evaluation staleness, or measure whether
-extraction is any good. It calls models and runs SQL. Replacing R with it would
-mean writing all of the above again *and* handing the writes to a chat prompt.
+locate a quotation in the source it claims to come from, maintain a review
+vocabulary, track evaluation staleness, or measure whether extraction is any
+good. It calls models and runs SQL. Replacing the core with it would mean
+writing all of the above again *and* handing the writes to a chat prompt.
 
-**The language question is unaffected by this plugin.** Rewriting Orpheus in
-Python remains a live option — [prior art](prior-art.md#what-this-does-to-the-language-question)
-makes the better argument for it — but that is a decision about where those
-lines live, not one `datasette-agent` makes for you.
+**The port makes adopting it easier, not harder.** `register_agent_tools` wants
+typed operations, and the API is now a dispatch table in the same process — so
+each tool is one `api.handle()` call with the actor already resolved. The
+obstacles that used to stand in the way (a second process, a token, a base URL)
+are gone.
 
 ### The part it would genuinely replace
 
-`R/llm.R` — the provider layer. `datasette-llm` does the same job with a real
+`orpheus/llm.py` — the provider layer. `datasette-llm` does the same job with a real
 plugin ecosystem behind it: keys via `datasette-secrets` or `llm`'s keystore,
 per-model configuration, one interface for every provider `llm` supports.
 
@@ -159,25 +168,27 @@ login, brute-force lockout, revocable server-side sessions, forced first-passwor
 change, audit logging. 38 commits, marked experimental, needs Datasette 1.0a23+.
 
 This settles the **identity provider** open decision. Orpheus's `actors` table
-already carries `idp` and `external_id` for exactly this, and `orph_upsert_actor()`
-is the seam. `datasette-accounts` emits stable actor `id` values; mapping those
-onto `actor_id` is the whole integration.
+already carries `idp` and `external_id` for exactly this, and `upsert_actor()`
+is the seam. `datasette-accounts` emits stable actor `id` values; the plugin's
+`actor_map` already maps a Datasette actor id onto an Orpheus one, so the
+integration is a config entry rather than code.
 
 **What it removes:** token minting, revocation and authentication —
-`orph_create_token()`, `orph_revoke_token()`, `orph_authenticate()`, and the
-`actor_tokens` table. Roughly half of `R/auth.R`, and the more security-sensitive
-half. It also removes the UI plugin's least honest feature: the shared-token
-config, where every amendment is attributed to one identity.
+`create_token()`, `revoke_token()`, `authenticate()`, and the `actor_tokens`
+table. Roughly half of `auth.py`, and the more security-sensitive half.
 
-**What it does not remove:** `orph_can()`, the share grants, visibility, and
-`orph_permission_sql()`. Those are per-document rules over Orpheus's own tables;
+The other thing it was going to fix has already gone. The R plugin held a
+**shared token**, so every browser amendment was attributed to one identity —
+its least honest feature. The Python plugin holds no token at all, because it
+does not speak HTTP; it reads Datasette's actor directly.
+
+**What it does not remove:** `can()`, the share grants, visibility, and
+`permission_sql()`. Those are per-document rules over Orpheus's own tables;
 `datasette-accounts` answers *who is this*, not *may they see this document*.
 
 **Caveat:** it wants accounts in the **internal** database, which is a second
-SQLite file, written by Datasette. That does not violate the single-writer rule —
-the rule is about the Orpheus store — but it does mean two databases with two
-writers, and the deployment story needs to say so. It also makes the API
-dependent on Datasette for identity, which inverts today's arrangement.
+SQLite file. Datasette writes both now, so this no longer inverts anything —
+which is one more thing the port simplified.
 
 ---
 
@@ -191,7 +202,7 @@ Already named in [open decisions](open-decisions.md) as the model for
 per-document sharing. Two concrete things came out of reading it properly.
 
 **It is the working reference for `permission_resources_sql`.** Orpheus already
-generates the SQL that hook needs, from `orph_permission_sql()`, and ships it as
+generates the SQL that hook needs, from `auth.permission_sql()`, and ships it as
 a comment in the generated Datasette config because nothing consumes it yet.
 `datasette-paper` consumes it. Its `_datasette_paper_share` table and three-level
 visibility (`private`, `link-view`, `link-edit`) are the same design as Orpheus's
@@ -220,10 +231,10 @@ helpers restricted by per-app allow-lists. Revisions tracked in an
 `app_revisions` table. Strict CSP: no arbitrary external origins, no localhost,
 no history API. 112 commits.
 
-The natural home for **the quality report**. `orph_quality_report()` answers the
+The natural home for **the quality report**. `quality_report()` answers the
 question Phase 1 turns on — accuracy by confidence level, whether the rubric
 ranks reliability, which rule concepts over-fire — and it currently answers it to
-whoever runs the R function. The canned queries in the generated config are a
+whoever runs `orpheus report` or calls `GET /quality`. The canned queries in the generated config are a
 flat approximation. A stored app over allow-listed queries would give it a real
 surface, and shipping a change to it is a form edit rather than a plugin release.
 

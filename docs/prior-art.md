@@ -60,7 +60,7 @@ multi-modal support via `media_url`.
 
 `datasette-llm` underneath provides named *purposes*, so an administrator can map
 "extraction" and "analysis" to different models — which is a cleaner version of
-the local/cloud tier split in `R/llm.R`.
+the local/cloud tier split in `orpheus/llm.py`.
 
 ---
 
@@ -141,7 +141,7 @@ Two uses, and the second is the valuable one:
 1. A real `clause_type` vocabulary, instead of the list invented for the bundle.
 2. **An evaluation set.** Extraction quality could be measured against expert
    labels immediately, rather than waiting for humans to review enough documents
-   to make `orph_quality_report()` meaningful. It does not replace real review —
+   to make `quality_report()` meaningful. It does not replace real review —
    CUAD is US commercial contracts, not Irish public-sector ones — but it turns
    "we have no idea whether extraction works" into a number, today.
 

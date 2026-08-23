@@ -10,112 +10,88 @@ would settle it.
 
 ## R stack vs. a Python rebuild
 
-**Status: open, and the largest decision on this list.**
+**Status: decided. The platform is Python; the R implementation is deleted.**
 
 Phase 1 was specified as building on the existing R ontology stack rather than
-re-implementing its ideas. That was the right default — the stack already has the
-discover → populate pattern, the confidence rubric, schema amendment candidates
-and versioned concepts, and all of that is genuinely reusable thinking. But the
-stack has not been exercised much in anger, and rebuilding the same ideas in
-Python is a live alternative.
+re-implementing its ideas. That was the right default, and the stack's thinking
+— discover → populate, the confidence rubric, schema amendment candidates,
+versioned concepts — is genuinely reusable and was reused. What was decided
+against is the *stack*, not the ideas.
 
-This build produced concrete evidence rather than opinion, so it is recorded
-here.
+The R implementation was built first and ran end to end: 709 tests, a live
+Plumber API, a Datasette plugin, a real PDF through the whole pipeline. It was
+then ported rather than abandoned, and the port is what settled the question.
 
-### What was verified to work
+### What the R build actually found
 
-| Package | Result |
-|---|---|
-| `conceptR` | **Installed cleanly and worked as documented.** Versioned SQL concepts, activation, deprecation and evaluation all behaved. 37 tests exercise it for real, not against a double. Its dependencies are only `DBI`, `jsonlite`, `cli`. |
-
-### What could not be exercised
-
-| Package | Blocker |
-|---|---|
-| `ontologySpecR` | Imports `jsonvalidate`, which needs V8. Not installable in this environment. |
-| `objectSetsR` | Imports `ontologySpecR`, so blocked behind it. |
-| `ontologyDiscoverR` | Imports `ellmer`, plus `pdftools` for `parse_pdf()`. |
-
-None of these are fatal in a real deployment — they are ordinary dependencies.
-But three of the four packages could not be run at all here, which is itself
-information about how much friction the stack carries.
-
-### Interop findings
-
-These came out of building against the packages' actual source, and they are the
+These came out of building against the packages' source, and they are the
 substantive input to the decision:
 
-1. **Two incompatible bundle shapes share one class.**
+1. **Two incompatible bundle shapes shared one class.**
    `ontologySpecR::bundle()` emits `bundleId` / `objects` / `links`;
    `ontologyDiscoverR::dis_to_bundle()` emits `bundle_id` / `object_types` /
-   `link_types`. Both are classed `ontology_bundle`. A consumer cannot tell them
-   apart by class, and each of the three consumers reads a different subset of
-   the field names. The shipped bundle carries **every spelling** and
-   `orph_validate_bundle()` asserts the duplicated pairs agree — see
-   [Data model](data-model.md#one-bundle-three-readers). That works, but it is a
-   workaround for an inconsistency inside the stack.
+   `link_types`. Both are classed `ontology_bundle`, so a consumer cannot tell
+   them apart, and each of three consumers read a different subset of the field
+   names. The R bundle carried **every spelling** and validation asserted the
+   duplicated pairs agreed — a workaround for an inconsistency inside the stack,
+   and the reason the file was 114 KB.
 
 2. **`pop_add_file()` would silently discard OCR text.** It re-parses the file
-   from disk with `pdftools`, so feeding it a scanned document would throw away
-   the OCR pass and extract from nothing — on exactly the documents where
-   extraction quality matters most. Orpheus bypasses it by constructing the
-   `DiscoverySource` from stored page text and injecting it into
-   `pop_sess$sources`, which relies on an internal shape rather than the public
-   API.
+   from disk with `pdftools`, so a scanned document would have thrown away the
+   OCR pass and extracted from nothing — on exactly the documents where quality
+   matters most. Orpheus bypassed it by injecting a `DiscoverySource` built from
+   stored page text into `pop_sess$sources`, relying on an internal shape rather
+   than the public API.
 
-3. **Vocabulary mismatches at the boundary.** The stack uses
-   `pending` / `approved`; this platform's amendment model needs
-   `unconfirmed` / `confirmed` / `amended` / `rejected`. The stack documents a
-   confidence rubric but `pop_extract()` defaults to `0.8` and passes arbitrary
-   floats through. Both are translated in the adapter.
+3. **Vocabulary mismatches at the boundary.** The stack used
+   `pending` / `approved` against this platform's four states, and documented a
+   confidence rubric while `pop_extract()` defaulted to `0.8` and passed
+   arbitrary floats through.
 
-4. **`objectSetsR` traverses links by joining object tables on key columns**, so
-   a many-to-many link cannot be traversed in one hop. Modelling the edge table
-   as its own object type works, but it is a shape the ontology has to adopt to
-   suit the query library.
+4. **`cpt_add_score_component(version = NULL)` could never work.** Its own
+   default is documented as "use whichever version is active at evaluation
+   time", but `composite_score_components.version` is `NOT NULL` *and* part of
+   the primary key, so the default always failed on insert.
 
-5. **`conceptR` interpolates `sql_expr` directly into SQL.** Concept authoring is
-   therefore a privileged operation; the API restricts it to administrators.
+5. Three of the four packages **could not be installed** in a clean environment
+   at all: `ontologySpecR` needs V8 via `jsonvalidate`, `objectSetsR` imports it,
+   `ontologyDiscoverR` needs `ellmer`. Only `conceptR` installed cleanly and it
+   worked exactly as documented — 37 tests exercised it for real.
 
-6. **`cpt_add_score_component(version = NULL)` cannot work.** Its own default is
-   documented as "use whichever version is active at evaluation time", but
-   `composite_score_components.version` is `NOT NULL` *and* part of the primary
-   key, so the default always fails on insert. Orpheus resolves and pins the
-   active version instead, and re-syncs components when a concept gains a
-   version. That turned out to be the better behaviour — the score records which
-   concept version produced it — but it is a workaround, not a choice.
+### What the port changed
 
-### Why the decision is cheap to reverse
+| | R | Python |
+|---|---|---|
+| Bundle | Every list twice, 114 KB, validated for self-agreement | One spelling, 58 KB, [ontologySpecR](https://github.com/CathalByrneGit/ontologySpecR)'s format validated against that project's own schema |
+| Extraction | One engine behind an adapter | A registry: `gliner2`, `langextract`, `llm`, `chat` — see [Extraction engines](extraction-engines.md) |
+| Grounding | Whatever the engine claimed | Computed: every excerpt located in the source, the rubric level following from match quality |
+| Writer | A Plumber API; Datasette read-only beside it | Datasette itself, with the core as a library it imports |
+| Processes | Two, plus a token between them | One |
+| Dependencies | `DBI`, `RSQLite`, `jsonlite`, `digest`, `rlang`, `cli`, `plumber`, plus four GitHub packages | None. The core is standard library only |
+| Tests | 709 | 300, plus a browser loop over real HTTP |
 
-The extraction engine is reached through exactly one file,
-`R/ontology_stack.R`, behind `orph_populate()`, with `orph_set_populator()` as
-the injection point. Everything downstream — persistence, provenance, the
-amendment model, concepts, permissions, the API — works on a normalised shape
-and never sees the stack. The test suite proves this: all 709 tests pass with
-`ontologyDiscoverR` absent, driving a substitute engine through the same
-interface.
+The test count fell because the R suite tested things the Python core does not
+have to: the bundle's self-agreement, the adapter's vocabulary translation, and
+the interop workarounds above. Removing the need for a test is better than
+passing it.
 
-So the realistic options are not "R" or "Python" wholesale:
+### What the port kept
 
-| Option | What it costs |
-|---|---|
-| Keep the R stack | Nothing further. It is wired up and the adapter absorbs its inconsistencies. |
-| Rebuild extraction in Python, keep this store and API | A new implementation behind `orph_populate()`, reached over HTTP or a subprocess. Nothing else changes. |
-| Rebuild the whole platform in Python | Everything here is rewritten. The design carries over; the code does not. |
+Everything that was a decision rather than a mechanism. The four-state review
+vocabulary, the confidence rubric and its downward-biased snapping, provenance
+as the immutable record beside a mutable instance row, `seq`-ordered
+append-only history, the two-condition cloud gate, dependency-tracked staleness,
+and the schema-amendment queue. Those were the stack's good ideas, and they are
+all here — several of them, like the rubric and the amendment queue, were
+already re-implemented in Orpheus rather than borrowed.
 
-The middle option is available precisely because the adapter exists, and it is
-worth noting that the two things the stack contributes most — the rubric and the
-schema-amendment pattern — are **ideas already re-implemented here**, in
-`orph_snap_confidence()` and the `schema_amendments` queue. What the stack
-uniquely provides today is `ontologyDiscoverR`'s population prompt-and-validate
-loop and `conceptR`'s version lifecycle.
+The R implementation is preserved in git history, and
+`tests/fixtures/contract-core-0.1.0.json` keeps its bundle so a store built by
+it still opens. A test proves Python opens and migrates an R-built store in
+place.
 
-**What would settle it:** run a real discovery and population pass over a genuine
-contract sample with `ontologyDiscoverR` installed and a live model, and judge
-extraction quality and the friction of `dis_review()`. That is the test the stack
-has not had, and it is the only evidence that matters. Until then, note that
-`conceptR` — the one package that could be exercised — did not cause a single
-problem.
+**What is still not settled** is the question this was all supposed to answer,
+and no language choice touches it: see *Extraction quality is unmeasured* below.
 
 ---
 
@@ -137,15 +113,17 @@ so and the four sites read it. See
 Contracts remain the shipped bundle and the example throughout the docs: it is
 the driving use case, and a general platform documented only in the abstract is
 harder to understand than one with a worked example. But
-`inst/bundles/contract-core-0.1.0.json` is data, and replacing it replaces the
+`orpheus/bundles/contract-core-0.2.0.json` is data, and replacing it replaces the
 domain.
 
-**Kept honest by a test.** `test-domain-neutrality.R` defines a planning-
+**Kept honest by a test.** `tests/test_domain_neutrality.py` defines a planning-
 application bundle — Application, Applicant, Condition, its own decision
-codelist, its own comparable value (floor area in square metres) — and runs
-ingest, extraction, deterministic linking, amendment and codelist reporting
-against it with no code changes. A claim of generality that nothing exercises
-tends to stop being true quietly.
+codelist, its own rule concept, its own comparable value (floor area in square
+metres) — and runs ingest, extraction, deterministic linking, review, concept
+evaluation and codelist reporting against it with no code changes. A claim of
+generality that nothing exercises tends to stop being true quietly, and this one
+had: porting the test found `raise_flag()` hardcoding `instances_Flag`, so any
+bundle without a `Flag` type crashed concept evaluation.
 
 **What is still contract-flavoured, deliberately:** the seed concepts
 (`high_value`, `direct_award`, `uncapped_liability`), the OCDS codelists, and
@@ -156,30 +134,36 @@ configuration, which is exactly where domain knowledge belongs.
 
 ## Datasette as the primary surface
 
-**Status: taken, and partly built.** The decision was to lean into the Datasette
-ecosystem rather than build a bespoke UI, keep the R stack reachable over HTTP,
-and make the central interaction a person and a model working through a document
-together.
+**Status: taken, and now further than "primary surface" — Datasette *is* the
+writer.** The decision was to lean into the Datasette ecosystem rather than
+build a bespoke UI, and to make the central interaction a person and a model
+working through a document together.
 
 **Built:** `plugins/orpheus_datasette.py` — upload a file in the browser, watch
 it ingest, classify and extract, then confirm, amend or reject each fact. The
-two constraints it must not break (never a second writer, never a model caller)
-and how each was verified are in
-[Deployment](deployment.md#the-datasette-ui-plugin).
+API is mounted in the same process at `/-/orpheus/api/`.
+
+The R arrangement had Datasette as a read-only client of a Plumber API that
+owned the only write connection. The Python one inverts that: Datasette holds
+the database, the core is a library it imports, and every write is queued
+through Datasette's own write thread. The invariant that replaces "never opens a
+connection" is stricter and easier to check — *nothing writes except through
+core functions* — and the constraints, plus what running it for real exposed,
+are in [Deployment](deployment.md#the-datasette-ui-plugin).
 
 **Not built: the reading companion.** The plugin reviews a document after
 extraction has run over the whole of it. Annotation *as you read* is a different
 thing, and three problems stand between here and there:
 
-- **Incremental classification.** `orph_classify()` is one-shot over the whole
+- **Incremental classification.** `classify()` is one-shot over the whole
   document. Per-page or per-passage proposals are a different call shape and a
   different unit of provenance.
 - **Latency.** A batch pass can take seconds; a companion reacting to scrolling
   cannot. That is what the local tier is for, with the cloud tier reserved for
   on-demand questions.
-- **Identity.** The plugin resolves an actor from configured tokens. A real
-  deployment needs it to resolve to the same actor the API knows, which makes
-  the identity-provider decision above more pressing rather than less.
+- **Identity.** Partly addressed. The plugin now maps a Datasette actor onto an
+  Orpheus one through `actor_map`, so any Datasette auth plugin supplies the
+  person. Which provider a deployment should use is still open.
 
 This overlaps with what agents.md scopes as Phase 3 and with `ontologyMCP`. The
 difference is the surface: agents.md imagines a bespoke split-view reading pane,
@@ -188,10 +172,11 @@ what remains is the three problems above.
 
 **`datasette-agent` is the most likely vehicle for it** — a chat surface with a
 `register_agent_tools` hook, which is the right seam for handing a model typed
-Orpheus operations rather than raw SQL. It does not remove the need for the R
-core or the API; it needs the API more than the current UI does, because its
-alternative write path is arbitrary SQL approved in a chat window. The
-conditions for adopting it, and the one that has to be tested first, are in
+Orpheus operations rather than raw SQL. It does not remove the need for the
+core; it needs it more than the current UI does, because its alternative write
+path is arbitrary SQL approved in a chat window. Now that the API is mounted
+in-process, registering those tools is a small piece of work: each one is an
+`api.handle()` call. The conditions for adopting it are in
 [Datasette ecosystem](datasette-ecosystem.md#datasette-agent).
 
 ---
@@ -207,7 +192,7 @@ judgments and computes disagreement rates. Orpheus does not need its sampling �
 review here is exhaustive, so every reviewed row is already a labelled example —
 but the underlying point was a real gap: Phase 1 turns on extraction being good
 enough, and nothing measured it. That gap is now closed by
-[`orph_quality_report()`](provenance-and-amendment.md#measuring-extraction-quality),
+[`quality_report()`](provenance-and-amendment.md#measuring-extraction-quality),
 built on data the store already held. The package itself is not a dependency.
 
 **Left, as later phases:**
@@ -228,15 +213,18 @@ and `auditR`, `sqlglotR`, `ontologyAPI`, `ontologyMCP` and `objectExploreR` have
 the list as available ideas rather than as working machinery until something has
 been exercised.
 
-**Two findings that bear on the R-versus-Python question above:**
+**Two findings that fed the R-versus-Python decision above:**
 
 - `ontologyAPI` already exposes ontology queries over plumber, but its auth is a
   **single shared API key with no actor concept**. It could not have backed
   Orpheus's per-document permissions, which need `created_by`, share grants and
-  `amended_by` tied to a real person. Building a separate API was right; mounting
-  ontologyAPI alongside for generic querying is still an option.
-- `sqlglotR` wraps Python SQLGlot through reticulate. The stack is **already not
-  pure R**, so "R or Python" was never the real choice.
+  `amended_by` tied to a real person.
+- `sqlglotR` wraps Python SQLGlot through reticulate. The stack was **already
+  not pure R**, so "R or Python" was never the clean choice it looked like.
+
+`ontologySpecR` is the one that survived the port, and not as a dependency: its
+**bundle format** is what Orpheus now writes, validated against its schema
+unmodified.
 
 ---
 
@@ -275,9 +263,15 @@ information-governance people, not a technical one.
 
 **Deliberately not settled. A provider registry was built instead.**
 
-`orph_set_ocr_provider()` takes any `f(image_path) -> text`. Built-in fallbacks
-are the `tesseract` R package then a `tesseract` binary. With no provider, pages
-are marked `needs_ocr` rather than passed off as empty.
+`set_ocr_backend()` takes any `f(image_path) -> text`. Built-in fallbacks are
+`pytesseract` then a `tesseract` binary. With no backend, pages are marked
+`needs_ocr` rather than passed off as empty.
+
+A third candidate arrived with the port: **Docling** does layout-aware parsing
+and OCR in one pass, giving reading order and table structure rather than a flat
+string. It is wired as an optional text backend and is **untested** — it would
+not install in the build environment (`antlr4-python3-runtime` conflicts) — so
+it is a path, not a recommendation.
 
 **What would settle it:** evaluating candidates against real scanned
 contracts — the accuracy difference on poor-quality government scans is the whole
@@ -287,9 +281,10 @@ question, and it cannot be answered from documentation.
 
 **Deliberately not settled. The bridge was built instead.**
 
-`orph_upsert_actor(con, idp, external_id, ...)` is where any provider lands.
-Tokens work today. `orph_permission_sql()` emits the row-level rule for whichever
-Datasette plugin is chosen.
+`auth.upsert_actor(store, idp, external_id, ...)` is where any provider lands.
+Tokens work today, and the plugin's `actor_map` connects whatever a Datasette
+auth plugin produces to an Orpheus actor. `auth.permission_sql()` emits the
+row-level rule for whichever plugin is chosen.
 
 **What would settle it:** confirming what the deployment target actually runs —
 Entra ID, Okta, a government SSO, or nothing yet.
@@ -297,11 +292,11 @@ Entra ID, Okta, a government SSO, or nothing yet.
 **A candidate has since appeared.** `datasette-accounts` stores accounts in
 Datasette's internal database with PBKDF2 hashing, brute-force lockout,
 revocable sessions and audit logging, and emits stable actor ids — which is
-exactly what `orph_upsert_actor()` was left open for. It would delete token
-minting, revocation and authentication from `R/auth.R`, and with them the shared
-token in the UI plugin's config, which is the one place an amendment can be
-attributed to the wrong person. It is marked experimental and it puts a second
-writer on a second database. See
+exactly what `upsert_actor()` was left open for. It would delete token minting,
+revocation and authentication from `auth.py`. The shared-token problem it was
+also going to solve has since gone away on its own: the plugin no longer holds a
+token at all, because it no longer speaks HTTP. It is marked experimental and it
+puts a second writer on a second database. See
 [Datasette ecosystem](datasette-ecosystem.md#datasette-accounts).
 
 ### Permission boundaries
@@ -318,13 +313,59 @@ department, sensitivity tag, document owner, or a combination.
 
 ### `bundle_diff()` and staging concept versions
 
-**Partly addressed.** `orph_register_bundle(stage = "staging")` stores a bundle
-without activating it, and a staging bundle cannot be activated by accident.
-`conceptR` already versions and deprecates concepts, so an evaluation always
-points at a version that still exists.
+**Partly addressed.** `bundle.register(stage="staging")` stores a bundle without
+activating it, and a staging bundle cannot be activated by accident. Concepts
+are versioned and deprecated rather than edited, so an evaluation always points
+at a version that still exists.
 
-A true `bundle_diff()` is upstream work in the R stack — and whether it lands is
-entangled with the R-vs-Python decision above.
+A true `bundle_diff()` — showing what registering a bundle would change before
+it changes it — is not built. It is now ordinary work in this repository rather
+than upstream work in another project, which is one thing the port bought.
+
+---
+
+## Extraction quality is unmeasured
+
+**Status: open, and it is the only entry here that Phase 1 cannot be called done
+without.**
+
+Phase 1's definition of done is extraction *good enough to trust as a
+foundation*. Everything above is machinery for producing that number and for
+making it honest — provenance preserved beside corrections, grounding computed
+rather than believed, unreviewed rows never counted as correct, rule flags kept
+out of the extraction figures. The machinery works. The number does not exist.
+
+What has not happened, plainly:
+
+| | Status |
+|---|---|
+| A real model has run against a real document | **No.** No API key and no local model were available in the build environment. Every model result in this repository comes from a substitute populator, an echo model, or a test HTTP server |
+| A real corpus has been ingested | **No.** One hand-built two-page PDF fixture |
+| A person has reviewed extractions they did not write | **No** |
+| `gliner2` has run | **No.** Its weights could not be downloaded |
+| `docling` has run | **No.** It would not install |
+
+The deterministic pass *is* exercised for real — it finds four dates and an
+amount in the fixture, grounded to the right pages, through a real browser
+upload. That is the part that needs no model. It is also the smaller part.
+
+**What would settle it:** ingest a few hundred real contracts with a model
+configured, have someone who knows the domain review a sample, and read
+`orpheus report`. The three things to look at, in order:
+
+1. **`calibration.verdict`.** If it is not `monotonic`, the confidence rubric is
+   not ranking reliability and everything built on it — which triage queue a
+   reviewer sees first, which findings are trusted without checking — rests on
+   nothing. That is a finding about the design, not about the corpus.
+2. **`accuracy` at `explicit` and `named`.** These are the levels a person would
+   plausibly skim rather than check. If they are not high, the review burden is
+   the whole cost of the system and the automation is not paying for itself.
+3. **`property_corrections`.** The fields people keep fixing are the prompt's
+   defects, and they are cheap to act on.
+
+Nothing else on this list is worth deciding before that number exists. A
+language, a storage engine and an identity provider are all answerable later; an
+extraction pipeline nobody has measured is answerable only by measuring it.
 
 ---
 
@@ -379,19 +420,27 @@ a freshly written store, with no error raised.
 Measured: 0 documents visible immutable-without-checkpoint, 1 with a read-only
 connection, 1 immutable after `wal_checkpoint(TRUNCATE)`.
 
-Orpheus serves read-only without the flag, and checkpoints after every write. See
+Orpheus serves without the flag, and checkpoints after writes. See
 [Deployment](deployment.md#the-wal-and-immutable-mode-trap).
 
-### Function names in the architecture do not match the packages
+### Concept evaluation does not carry lineage
 
-The architecture refers to `ont_evaluate()` carrying lineage automatically. The
-function is `conceptR::cpt_evaluate()`, and it does **not** carry lineage — it
-evaluates one SQL expression against one table and returns a data frame.
+The architecture refers to `ont_evaluate()` carrying lineage automatically.
+Nothing in the stack did: `conceptR::cpt_evaluate()` evaluates one SQL
+expression against one table and returns a data frame.
 
 Lineage is therefore built here: `concept_evaluation_dependencies` records which
-instances each evaluation read, which is what makes `stale` automatic rather than
-something a person has to notice. Worth knowing when reading the architecture
-alongside the code.
+instances each evaluation read, which is what makes `stale` automatic rather
+than something a person has to notice. Worth knowing when reading the
+architecture alongside the code.
+
+### A model failure must not cost the deterministic findings
+
+Not in the specification at all, and it only shows up once one transaction
+spans a whole request. The deterministic pass needs no model; raising through a
+failed model call rolled its findings back, so the half of the pipeline that
+works offline only ever survived when the half that doesn't also worked. A model
+failure now leaves the run `partial`, keeps what was found, and says so.
 
 ---
 
@@ -404,7 +453,7 @@ and the live reading-pane companion.
 The one deliberate exception is the step 9 corpus escalation, which is
 best-effort naive name matching, labelled `naive_unresolved` on every result. It
 is a stepping stone to Phase 4 resolution, and it should be **replaced** by real
-resolution rather than patched indefinitely. `orph_naive_key()` has a test
+resolution rather than patched indefinitely. `naive_key()` has a test
 asserting its known failure — `"Ernst & Young"` and `"Ernst and Young"` produce
 different keys — so the limitation cannot quietly disappear.
 

@@ -230,6 +230,17 @@ def test_accepting_a_schema_amendment_is_an_administrator_decision(api):
 
 def test_the_quality_report_is_reachable(api):
     _, call, _, _ = api
-    status, report = call("GET", "/quality")
+    status, report = call("GET", "/quality", who="admin")
     assert status == 200
     assert "Not enough to say anything" in report["headline"]
+
+
+def test_the_corpus_quality_report_is_administrator_only(api):
+    """It aggregates over documents the caller may not be able to read.
+
+    The per-document report is the one a reviewer wants, and it needs only
+    `view` on that document.
+    """
+    _, call, document_id, _ = api
+    assert call("GET", "/quality", who="owner")[0] == 403
+    assert call("GET", f"/documents/{document_id}/quality", who="owner")[0] == 200

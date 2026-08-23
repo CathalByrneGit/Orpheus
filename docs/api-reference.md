@@ -2,13 +2,25 @@
 
 # API reference
 
-The Plumber API is the only writer in the system. Everything that changes the
-store enters here.
+One dispatch table, reachable three ways. Everything that changes the store
+enters here — the browser pages call it, `/-/orpheus/api/` exposes it over HTTP,
+and a script can call `api.handle()` directly with no server at all.
 
-- **Base URL** — `http://127.0.0.1:8000` by default (`ORPHEUS_PORT`)
-- **Auth** — `Authorization: Bearer <token>` on every route except `/health`
-- **Bodies** — JSON
-- **Responses** — JSON with scalars unboxed (`{"status":"ok"}`, not `{"status":["ok"]}`)
+```python
+status, payload = api.handle(store, "POST", f"/documents/{doc}/extract",
+                             {"tier": "local"}, actor={"actor_id": "act_…"})
+```
+
+There is no separate API service. The R implementation ran one — a Plumber
+process that owned the only write connection — and the Datasette plugin was an
+HTTP client over it. Datasette is the writer now, so the same handlers run
+in-process on its write thread.
+
+- **Base URL** — `/-/orpheus/api/` on the Datasette server (`:8001` by default)
+- **Auth** — the Datasette actor (any auth plugin), or `Authorization: Bearer <token>`
+  when calling with no session. Every route except `/health` needs one
+- **Bodies** — JSON for `POST`; query string for `GET`
+- **Responses** — JSON
 
 ---
 
@@ -23,7 +35,7 @@ store enters here.
 | `400` | Bad request, or a refused operation (cloud gate, re-run without `force`, undeclared property) |
 | `401` | No token, or a token that is unknown, revoked, expired, or belongs to a disabled actor |
 | `403` | Authenticated but not permitted, including administrator-only routes |
-| `404` | No such edge or evaluation |
+| `404` | No such route, document, edge or evaluation |
 
 ---
 
@@ -47,7 +59,7 @@ documents have no public audience.
 A share cannot be used to widen a share: sharing and deleting stay with the
 owner and administrators.
 
-`orph_permission_sql("view" | "edit")` emits this same rule as SQL for
+`auth.permission_sql("view" | "edit")` emits this same rule as SQL for
 Datasette's `permission_resources_sql` plugin hook, generated from one place so
 the two cannot drift. The test suite asserts the two agree for every actor.
 
@@ -76,7 +88,6 @@ uploads something the server cannot read.
 | `GET` | `/documents/<id>` | view | Metadata plus review progress |
 | `GET` | `/documents/<id>/text` | view | Full text and per-page `text_source` |
 | `GET` | `/documents/<id>/instances` | view | `?type_id=`, `?include_rejected=` |
-| `GET` | `/documents/<id>/edges` | view | Extracted relationships |
 | `GET` | `/documents/<id>/history` | view | The document's audit trail |
 
 Upload takes either a multipart file or a JSON body naming a server-local path —
@@ -84,7 +95,7 @@ which is how a watched drop-directory or a batch load feeds the same code path
 as a browser upload.
 
 ```bash
-curl -X POST localhost:8000/documents \
+curl -X POST localhost:8001/-/orpheus/api/documents \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"path": "/srv/incoming/contract.pdf", "visibility": "private"}'
 ```
@@ -99,15 +110,14 @@ curl -X POST localhost:8000/documents \
 | Method | Path | Permission | Body |
 |---|---|---|---|
 | `POST` | `/documents/<id>/classify` | edit | — |
-| `POST` | `/documents/<id>/extract` | edit | `tier`, `cloud_opt_in`, `deterministic`, `force` |
+| `POST` | `/documents/<id>/extract` | edit | `tier`, `engine`, `cloud_opt_in`, `deterministic`, `force` |
 | `POST` | `/documents/<id>/concepts/evaluate` | edit | — |
-| `POST` | `/documents/<id>/analyse` | edit | `tier`, `cloud_opt_in` |
-| `POST` | `/documents/<id>/corpus-analysis` | view | `narrate`, `tier`, `cloud_opt_in` |
+| `POST` | `/documents/<id>/corpus-analysis` | edit | `narrate`, `tier`, `cloud_opt_in` |
 | `GET` | `/documents/<id>/evaluations` | view | `?kind=`, `?include_stale=` |
 
 ```bash
 # Local extraction — always available
-curl -X POST localhost:8000/documents/$ID/extract \
+curl -X POST localhost:8001/-/orpheus/api/documents/$ID/extract \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"tier": "local"}'
 ```
@@ -115,7 +125,7 @@ curl -X POST localhost:8000/documents/$ID/extract \
 ```json
 { "n_entities": 7, "n_edges": 3, "n_amendments": 1, "dropped_edges": 0,
   "run_id": "run_77a5…", "tier": "local", "n_deterministic": 4,
-  "excerpt_only": false }
+  "engine": "langextract", "model_error": null, "superseded": 0 }
 ```
 
 Cloud needs both conditions. With the policy still `disabled`:
@@ -139,14 +149,21 @@ With the policy set but no `cloud_opt_in`:
 | `POST` | `/instances/<id>/confirm` | edit | — |
 | `POST` | `/instances/<id>/amend` | edit | `changes` (required, non-empty), `note` |
 | `POST` | `/instances/<id>/reject` | edit | `note` |
-| `GET` | `/instances/<id>/history` | view | — |
-| `POST` | `/edges/<id>/review` | edit | `status`, `link_type_id`, `note` |
 | `POST` | `/evaluations/<id>/review` | edit | `status`, `result`, `note` |
-| `GET` | `/documents/<id>/review` | view | Counts by status |
 | `POST` | `/documents/<id>/review` | edit | `reviewed` |
 
+The three instance verbs carry no `document_id`, so the permission is resolved
+through the instance: `locate_instance()` finds its document, and `edit` on that
+document is required. Review counts come back on `GET /documents/<id>` rather
+than a route of their own — a reviewer reading a document wants both together.
+
+An amendment that changes nothing is a `400`, not a no-op write. A browser form
+posts every field it renders, so accepting the unchanged ones would flip
+`source` to `human` on a value the machine got right — and the quality report
+counts amendments as machine errors a human had to fix.
+
 ```bash
-curl -X POST localhost:8000/instances/$IID/amend \
+curl -X POST localhost:8001/-/orpheus/api/instances/$IID/amend \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"changes": {"name": "Meridian Systems Ltd.", "role": "prime_supplier"},
        "note": "Name per the companies register"}'
@@ -175,10 +192,8 @@ separate review from correcting one row.
 | Method | Path | Permission |
 |---|---|---|
 | `POST` | `/documents/<id>/score` | edit |
-| `GET` | `/documents/<id>/risk` | view — the score beside the model's reading |
 | `GET` | `/concept-parameters` | actor — effective thresholds and where each came from |
 | `POST` | `/admin/concept-parameters` | **administrator** |
-| `POST` | `/admin/scores/setup` | **administrator** |
 
 Changing a threshold changes what every document is measured against, so it is
 an administrator action even though it looks like a setting. The response says a
@@ -196,16 +211,21 @@ so they are administrator-only. A per-document report needs only `view` on that
 document.
 
 ```json
-{ "readiness": { "state": "measured",
-                 "note": "67% of instances reviewed; 59% were accepted exactly as extracted." },
-  "by_confidence": [ { "confidence_label": "named", "n_reviewed": 16, "accuracy": 0.812 } ],
-  "calibration": { "verdict": "monotonic" },
-  "concept_precision": [ { "concept_id": "open_ended_term", "precision": 0.125 } ] }
+{ "headline": "81% of reviewed instances were confirmed as extracted, 12% needed correcting and 6% were rejected, over 67% of the population.",
+  "extraction": { "overall": { "n_reviewed": 16, "n_confirmed": 13,
+                               "accuracy": 0.812, "coverage": 0.67 },
+                  "by_type": [], "by_confidence": [], "by_tier": [] },
+  "calibration": { "verdict": "monotonic", "levels": [], "inversions": [] },
+  "concept_precision": [ { "concept_id": "open_ended_term", "precision": 0.125 } ],
+  "property_corrections": [], "codelist_violations": [] }
 ```
 
-`state` is `unmeasured` when nothing has been reviewed, `insufficient_review`
-below 20% coverage, and `measured` above it. Every rate covers reviewed rows
-only — see [Provenance and amendment](provenance-and-amendment.md#measuring-extraction-quality).
+The headline says so in words when nothing has been reviewed, because a rate
+over zero rows is not a low score — it is no measurement, and reporting it as a
+number invites reading it as one. `calibration.verdict` is the finding that
+matters: `monotonic` means the rubric ranks reliability, and any `inversions`
+name a level the machine was more sure about that turned out less often right
+than one below it. Every rate covers reviewed rows only — see [Provenance and amendment](provenance-and-amendment.md#measuring-extraction-quality).
 
 ### Administration
 
@@ -214,6 +234,7 @@ only — see [Provenance and amendment](provenance-and-amendment.md#measuring-ex
 | `GET` | `/audit/llm` | administrator | `?document_id=`, `?tier=` |
 | `POST` | `/admin/settings` | administrator | `key`, `value` |
 | `POST` | `/admin/concepts/setup` | administrator | — |
+| `GET` | `/concept-parameters` | actor | Effective thresholds and their source |
 
 `cloud_ai_policy` is validated against `disabled` / `per_user` / `org_allow`; an
 unrecognised value is rejected rather than stored, so the gate can never be left
@@ -224,7 +245,7 @@ in a state it cannot interpret.
 ## A full session
 
 ```bash
-TOKEN=...; B=http://localhost:8000
+TOKEN=...; B=http://localhost:8001/-/orpheus/api
 
 DOC=$(curl -s -X POST $B/documents -H "Authorization: Bearer $TOKEN" \
       -H 'Content-Type: application/json' -d '{"path":"/srv/in/contract.pdf"}' \
@@ -235,7 +256,7 @@ curl -s -X POST $B/documents/$DOC/extract  -H "Authorization: Bearer $TOKEN" \
      -H 'Content-Type: application/json' -d '{"tier":"local"}'
 
 curl -s -X POST $B/documents/$DOC/concepts/evaluate -H "Authorization: Bearer $TOKEN"
-curl -s     $B/documents/$DOC/instances -H "Authorization: Bearer $TOKEN" | jq '.[0]'
+curl -s     $B/documents/$DOC/instances -H "Authorization: Bearer $TOKEN" | jq '.instances[0]'
 
 curl -s -X POST $B/instances/$IID/confirm -H "Authorization: Bearer $TOKEN"
 curl -s -X POST $B/documents/$DOC/review  -H "Authorization: Bearer $TOKEN" \

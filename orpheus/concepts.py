@@ -282,9 +282,21 @@ def raise_flag(store: Store, bundle: dict, document_id: str,
 
     A parallel queue for rule findings would mean rules never get reviewed, and
     a rule that over-fires would never be visible as over-firing.
+
+    Which object type holds a flag is the bundle's to say, and it may say
+    nothing: a domain with no flag type still evaluates its concepts and still
+    records the evaluations, it just has nowhere to raise an instance. Returning
+    None there is the honest answer -- the alternative, which this once did, was
+    to assume `instances_Flag` and fail on any bundle that is not the contract
+    one.
     """
+    flag_type = bundle_mod.flag_object_type(bundle)
+    if flag_type is None:
+        return None
+    table = bundle_mod.table_name(flag_type)
+
     existing = store.one(
-        "SELECT instance_id FROM instances_Flag WHERE document_id = ? "
+        f'SELECT instance_id FROM "{table}" WHERE document_id = ? '
         "AND target_instance_id = ? AND flag_type = ? AND status != 'rejected'",
         (document_id, target_instance_id, concept_id))
     if existing:
@@ -292,7 +304,7 @@ def raise_flag(store: Store, bundle: dict, document_id: str,
 
     instance_id = new_id("inst")
     written = insert_instance(
-        store, bundle, "Flag", instance_id, document_id,
+        store, bundle, flag_type["id"], instance_id, document_id,
         {"target_instance_id": target_instance_id, "flag_type": concept_id,
          "severity": "medium",
          "rationale": f"Rule concept '{concept_id}' evaluated true.",
@@ -300,7 +312,7 @@ def raise_flag(store: Store, bundle: dict, document_id: str,
         "ai_local", CONFIDENCE["explicit"], actor_id=actor_id)
     if written is None:
         return None
-    record_edit(store, "instances_Flag", instance_id, document_id, "extract",
+    record_edit(store, table, instance_id, document_id, "extract",
                 new={"flag_type": concept_id, "target": target_instance_id},
                 actor_id=actor_id)
     return instance_id
