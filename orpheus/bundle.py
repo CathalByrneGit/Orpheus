@@ -213,13 +213,40 @@ def _normalise_template(template: dict) -> dict:
         out["display"] = display
     params = template.get("parameters") or []
     if isinstance(params, dict):
-        params = [{"id": k, "type": v.get("type", "number") if isinstance(v, dict) else "number"}
-                  for k, v in params.items()]
-    out["parameters"] = [
-        {**p, "type": _data_type(p.get("type"))} if isinstance(p, dict)
-        else {"id": p, "type": "number"}
-        for p in params
-    ]
+        # The R spelling: a mapping of name -> {type, default, description}.
+        # The default is the load-bearing part -- it is what makes the pipeline
+        # run out of the box before anyone sets a policy -- so it survives into
+        # `extensions`, which is where the spec keeps what it does not define.
+        params = [{"id": name, **(spec if isinstance(spec, dict) else {})}
+                  for name, spec in params.items()]
+
+    # A parameterDef takes id, type, required and display and nothing else, so
+    # the defaults go in the template's own extensions block -- which is where
+    # the spec keeps what it does not define, and keeps the file valid.
+    defaults = {}
+    out["parameters"] = []
+    for param in params:
+        if not isinstance(param, dict):
+            out["parameters"].append({"id": param, "type": "number"})
+            continue
+        normalised = {"id": param["id"], "type": _data_type(param.get("type"))}
+        if param.get("description"):
+            normalised["display"] = {"description": param["description"]}
+        elif param.get("display"):
+            normalised["display"] = param["display"]
+        if param.get("default") is not None:
+            defaults[param["id"]] = param["default"]
+        out["parameters"].append(normalised)
+
+    extensions = dict(template.get("extensions") or {})
+    orpheus_ext = dict(extensions.get("orpheus") or {})
+    defaults = {**(orpheus_ext.get("defaults") or {}), **defaults}
+    if defaults:
+        orpheus_ext["defaults"] = defaults
+    if orpheus_ext:
+        extensions["orpheus"] = orpheus_ext
+    if extensions:
+        out["extensions"] = extensions
     return out
 
 

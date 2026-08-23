@@ -2179,9 +2179,19 @@
       "parameters": [
         {
           "id": "threshold",
-          "type": "number"
+          "type": "number",
+          "display": {
+            "description": "Value at or above which a contract is treated as high value, in the contract's own currency."
+          }
         }
-      ]
+      ],
+      "extensions": {
+        "orpheus": {
+          "defaults": {
+            "threshold": 1000000
+          }
+        }
+      }
     }
   ],
   "concepts": [
