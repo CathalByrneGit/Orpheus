@@ -24,6 +24,11 @@ keeping.**
 These matter because the intended direction is Datasette-first, and the Datasette
 team has already built most of the interaction.
 
+Four more — `datasette-accounts`, `datasette-agent`, `datasette-apps` and
+`datasette-paper` — are assessed separately in
+[Datasette ecosystem](datasette-ecosystem.md), because the question of whether
+the agent plugin replaces the R core needed more room than a table row.
+
 ### `datasette-extract`
 
 Upload a PDF, image or text into Datasette; an LLM extracts structured rows into

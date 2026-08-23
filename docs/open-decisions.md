@@ -186,6 +186,14 @@ difference is the surface: agents.md imagines a bespoke split-view reading pane,
 and this puts the same interaction inside Datasette. That choice is now made;
 what remains is the three problems above.
 
+**`datasette-agent` is the most likely vehicle for it** — a chat surface with a
+`register_agent_tools` hook, which is the right seam for handing a model typed
+Orpheus operations rather than raw SQL. It does not remove the need for the R
+core or the API; it needs the API more than the current UI does, because its
+alternative write path is arbitrary SQL approved in a chat window. The
+conditions for adopting it, and the one that has to be tested first, are in
+[Datasette ecosystem](datasette-ecosystem.md#datasette-agent).
+
 ---
 
 ## The rest of the ontology stack: what was taken, what was left
@@ -285,6 +293,16 @@ Datasette plugin is chosen.
 
 **What would settle it:** confirming what the deployment target actually runs —
 Entra ID, Okta, a government SSO, or nothing yet.
+
+**A candidate has since appeared.** `datasette-accounts` stores accounts in
+Datasette's internal database with PBKDF2 hashing, brute-force lockout,
+revocable sessions and audit logging, and emits stable actor ids — which is
+exactly what `orph_upsert_actor()` was left open for. It would delete token
+minting, revocation and authentication from `R/auth.R`, and with them the shared
+token in the UI plugin's config, which is the one place an amendment can be
+attributed to the wrong person. It is marked experimental and it puts a second
+writer on a second database. See
+[Datasette ecosystem](datasette-ecosystem.md#datasette-accounts).
 
 ### Permission boundaries
 
