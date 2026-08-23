@@ -92,6 +92,21 @@ def amend_instance(store: Store, instance_id: str, changes: dict, actor_id: str,
         )
 
     before = read_instance(store, location["table_name"], instance_id)
+
+    # An "amendment" that changes nothing is not an amendment. Recording it as
+    # one would flip source to `human` and status to `amended` on a value the
+    # machine got right, so the row would claim a person supplied what a person
+    # only agreed with -- and the quality report counts amendments as machine
+    # errors a human had to fix. A browser form posts every field it renders,
+    # so most of what arrives here is unchanged; the comparison is on the
+    # stored type, since a form sends everything back as a string.
+    changes = {key: value for key, value in changes.items()
+               if not _same(before.get(key), value)}
+    if not changes:
+        raise OrpheusError(
+            "Nothing was changed. Confirming records that a person checked the "
+            "value and agreed with it; amending is for correcting it."
+        )
     previous = {key: before.get(key) for key in changes}
 
     updates = dict(changes)
@@ -118,6 +133,22 @@ def amend_instance(store: Store, instance_id: str, changes: dict, actor_id: str,
         mark_dependent_evaluations_stale(
             store, instance_id, f"Instance {instance_id} was amended.")
     return instance_id
+
+
+def _same(stored, submitted) -> bool:
+    """Whether a submitted value means the same as what is already stored.
+
+    A form posts strings, so `1480000.0` comes back as `"1480000.0"` and a
+    naive `!=` would read every rendered number as an edit.
+    """
+    if stored is None:
+        return submitted is None or submitted == ""
+    if isinstance(stored, (int, float)) and not isinstance(stored, bool):
+        try:
+            return float(stored) == float(submitted)
+        except (TypeError, ValueError):
+            return False
+    return str(stored) == str(submitted)
 
 
 def reject_instance(store: Store, instance_id: str, actor_id: str,

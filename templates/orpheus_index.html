@@ -10,7 +10,9 @@
   Reads: {% if capabilities.text_extraction.pdf_text %}PDF{% else %}<s>PDF</s>{% endif %},
   docx, text{% if capabilities.text_extraction.ocr %}, scans (OCR){% else %} &mdash; no OCR configured{% endif %}.
   Cloud analysis: <strong>{{ capabilities.cloud.policy }}</strong>.
-  Bundle: {{ capabilities.bundle.bundle_id }} v{{ capabilities.bundle.version }}.
+  {% if capabilities.bundle %}Bundle: {{ capabilities.bundle.bundle_id }}
+  v{{ capabilities.bundle.version }} &mdash; {{ capabilities.bundle.object_types|length }}
+  object types.{% endif %}
 </p>
 {% endif %}
 
@@ -36,6 +38,19 @@
         <option value="cloud">cloud &mdash; sends excerpts off-site</option>
       </select>
     </label>
+  </p>
+  <p>
+    <label>Engine
+      <select name="engine">
+        <option value="auto">auto &mdash; the best one installed</option>
+        {% for name, installed in (capabilities.extraction_engines or {}).items() %}
+        <option value="{{ name }}"{% if not installed %} disabled{% endif %}>
+          {{ name }}{% if not installed %} &mdash; not installed{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label><br>
+    <span style="color:#666">The deterministic pass runs whatever you pick; it
+    finds dates and amounts by pattern and needs no model at all.</span>
   </p>
   <p>
     <label><input type="checkbox" name="cloud_opt_in"> I am opting this document in to cloud processing</label><br>

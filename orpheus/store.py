@@ -213,6 +213,37 @@ class Store:
 
     # -- transactions ------------------------------------------------------
 
+    @classmethod
+    def adopt(cls, conn: sqlite3.Connection, path: str = "",
+              owns_transaction: bool = True) -> "Store":
+        """Wrap a connection somebody else opened, and may already be driving.
+
+        This exists for the Datasette plugin, which runs inside the process
+        that holds the database and is handed a connection off Datasette's own
+        write thread. Opening a second connection there would make a second
+        writer — the exact thing the whole single-writer design is for — so the
+        store borrows the one it is given.
+
+        `owns_transaction=False` says the caller has already issued a BEGIN and
+        will COMMIT or ROLLBACK itself. The store then joins that transaction
+        instead of starting one (SQLite has no nested BEGIN), and never commits:
+        the outer owner decides. Datasette's `execute_write_fn` is exactly that
+        caller — it wraps each task in `BEGIN IMMEDIATE`.
+
+        No advisory lock is taken. The lock exists to stop a *second process*
+        opening the same file for writing; the borrower is by construction
+        already inside the one that did.
+        """
+        store = cls.__new__(cls)
+        store.conn = conn
+        store.path = path
+        store.mode = "write"
+        store._holds_lock = False
+        # Depth 1 means "a transaction is already open, joined not owned".
+        store._tx_depth = 0 if owns_transaction else 1
+        conn.row_factory = sqlite3.Row
+        return store
+
     @contextmanager
     def transaction(self) -> Iterator["Store"]:
         """Re-entrant transaction.

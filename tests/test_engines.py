@@ -185,6 +185,35 @@ def test_the_call_is_audited_even_when_the_endpoint_fails(seeded):
     assert calls[0]["error"]
 
 
+def test_a_backend_that_aborts_the_interpreter_is_still_audited(seeded, monkeypatch):
+    """A native backend can abort through the interpreter rather than raise.
+
+    Observed: langextract importing a broken `cryptography` raised a Rust
+    PanicException, which is a BaseException and slipped past the `finally`'s
+    idea of what a failure looks like. The audit then said the call was clean.
+    A wrong answer to "what left this deployment and what happened to it" is
+    worse than no answer.
+    """
+    import orpheus.engines as engines_mod
+
+    store, document_id = seeded
+    store.set_setting("extraction_engine", "chat")
+
+    class Panic(BaseException):
+        pass
+
+    def panics(*args, **kwargs):
+        raise Panic("the backend aborted")
+
+    monkeypatch.setattr(engines_mod, "_post_chat", panics)
+    with pytest.raises(OrpheusError, match="Extraction failed"):
+        populate(store, document_id, tier="local")
+
+    calls = store.query("SELECT error FROM llm_calls")
+    assert len(calls) == 1
+    assert "the backend aborted" in calls[0]["error"]
+
+
 def test_the_cloud_gate_still_applies_to_the_chat_engine(seeded, chat_server):
     store, document_id = seeded
     store.set_setting("extraction_engine", "chat")

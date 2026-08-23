@@ -1,177 +1,127 @@
-"""Orpheus UI for Datasette.
+"""The Orpheus UI, running inside Datasette.
 
-Adds an upload page and per-row review actions, so a person can drop a document
-in and correct what came out without leaving Datasette.
+The R implementation made this a thin HTTP client over a Plumber API, because
+the API was the single writer and a plugin opening its own SQLite connection
+would have been a second one. In Python that arrangement is inverted on purpose:
+**Datasette is the writer**, the core is a library it imports, and there is one
+process rather than two.
 
-The whole plugin is a thin client over the Orpheus HTTP API. That is a
-deliberate constraint, not an accident of how it grew:
+The invariant that replaces "never opens a connection" is stricter and easier to
+check: **nothing writes except through `orpheus` core functions.** No SQL is
+written here. Every write goes through `api.handle()`, which applies provenance,
+the confidence rubric, the amendment history and per-document permissions on the
+way in — and every write is queued through `database.execute_write_fn`, so
+Datasette's own write thread serialises them.
 
-  * It never opens its own SQLite connection. Datasette writing to the store
-    directly would make it a second writer, and the single-writer guarantee the
-    storage design rests on would stop holding.
-
-  * It never calls a model. Doing so would bypass the cloud opt-in gate, the
-    org policy, the per-request consent and the llm_calls audit log in one
-    step -- a document reaching a cloud model with no record that it did, which
-    is the exact failure the opt-in exists to prevent.
-
-Everything below therefore goes through the API, which enforces provenance, the
-confidence rubric, the amendment history and permissions on the way in.
+It still never calls a model directly. Doing so would bypass the cloud opt-in
+gate, the org policy and the `llm_calls` audit in one step; the tier a person
+picks on the form is passed to the core, which decides.
 """
 
-import hashlib
+from __future__ import annotations
+
 import json
-import os
-import urllib.error
 import urllib.parse
-import urllib.request
 
 from datasette import hookimpl
 from datasette.utils.asgi import Response
 
 try:  # Datasette 1.0+
     from datasette.utils.asgi import BadRequest
-except ImportError:  # pragma: no cover - older Datasette has no file uploads
+except ImportError:  # pragma: no cover
     class BadRequest(Exception):
         pass
 
+from orpheus import api as orpheus_api
+from orpheus.store import Store
+
 PLUGIN = "orpheus-datasette"
-DEFAULT_API = "http://127.0.0.1:8000"
-TIMEOUT = 120
+DEFAULT_DATABASE = "orpheus"
 
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Reaching the store
 # ---------------------------------------------------------------------------
 
-def _config(datasette):
-    return (datasette.plugin_config(PLUGIN) or {})
+def _config(datasette) -> dict:
+    return datasette.plugin_config(PLUGIN) or {}
 
 
-def _api_base(datasette):
-    """Where the API lives, environment first.
+def _database(datasette):
+    name = _config(datasette).get("database", DEFAULT_DATABASE)
+    try:
+        return datasette.get_database(name)
+    except KeyError:
+        return datasette.get_database()
 
-    The config file is generated and committed, so it cannot name a host that
-    is only right in one deployment. Under compose the API is reachable as
-    `http://api:8000` and locally as `http://127.0.0.1:8000`; the environment
-    settles which without a second copy of the file.
+
+def _actor_for(datasette, request) -> dict | None:
+    """Map a Datasette actor onto an Orpheus one.
+
+    Datasette answers "who is this"; Orpheus answers "what may they see". The
+    two meet here, on the actor id, which is the seam `datasette-accounts` would
+    slot into.
     """
-    url = os.environ.get("ORPHEUS_API_URL") or _config(datasette).get("api_url")
-    return (url or DEFAULT_API).rstrip("/")
+    actor = request.actor
+    if not actor:
+        return None
+    mapped = _config(datasette).get("actor_map", {}).get(actor.get("id"))
+    return {"actor_id": mapped or actor.get("id"),
+            "display_name": actor.get("name") or actor.get("id"),
+            "is_admin": bool(actor.get("is_admin")
+                             or actor.get("id") == _config(datasette).get("admin_id")
+                             or actor.get("id") == "root")}
 
 
-def _token(datasette, actor):
-    """Resolve the Orpheus API token for this viewer.
+class _Rollback(Exception):
+    """Carries a failed API result out through Datasette's transaction."""
 
-    Two modes. A per-actor mapping is the honest one: the API then sees the
-    real person, so `amended_by` names them and per-document permissions apply
-    to them. A single shared token is offered for a single-user deployment and
-    is called out as such, because with it every amendment is attributed to one
-    identity and the audit trail stops distinguishing people.
-    """
-    config = _config(datasette)
-    tokens = config.get("actor_tokens") or {}
-    if actor and actor.get("id") in tokens:
-        return tokens[actor["id"]]
-    return config.get("token")
-
-
-def _multipart_body(filename, content_type, data):
-    """Build a multipart/form-data body for one file.
-
-    Hand-built rather than pulled from a library because the plugin has no
-    dependencies beyond Datasette itself, and this is the only multipart it
-    ever needs to produce. The boundary is derived from the payload so it
-    cannot collide with the content.
-    """
-    boundary = "orpheus" + hashlib.sha256(data[:4096] + filename.encode()).hexdigest()[:24]
-    head = (
-        "--{}\r\n"
-        'Content-Disposition: form-data; name="file"; filename="{}"\r\n'
-        "Content-Type: {}\r\n\r\n"
-    ).format(boundary, filename.replace('"', ""), content_type or "application/octet-stream")
-    body = head.encode() + data + "\r\n--{}--\r\n".format(boundary).encode()
-    return body, "multipart/form-data; boundary=" + boundary
-
-
-class ApiError(Exception):
-    def __init__(self, status, message):
-        super().__init__(message)
+    def __init__(self, status: int, payload: object):
+        super().__init__(f"API returned {status}")
         self.status = status
-        self.message = message
+        self.payload = payload
 
 
-def _call_upload(datasette, actor, filename, content_type, data):
-    """Forward an uploaded file to the API as multipart.
+async def _call(datasette, request, method: str, path: str,
+                body: dict | None = None) -> tuple[int, object]:
+    """One API call, on Datasette's write thread when it writes.
 
-    Forwarded rather than written to a shared temp directory, so the plugin
-    keeps working when Datasette and the API are on different hosts -- which is
-    the realistic deployment, not the demo one.
+    Reads go straight through; writes are queued, which is what makes Datasette
+    a safe single writer rather than merely the only one that happens to be
+    running. `execute_write_fn` opens `BEGIN IMMEDIATE` around the task and
+    commits when it returns, so the store is told to join that transaction
+    rather than start one of its own.
+
+    That commit-on-return is why a failed write has to be raised rather than
+    returned. `api.handle()` turns core exceptions into `(4xx, {"error": ...})`
+    — correct over HTTP, where the R implementation's own connection had
+    already rolled back before the error was rendered. Here, returning normally
+    *is* the instruction to commit, so an ingest that failed halfway would be
+    committed halfway. The status comes back out through an exception instead,
+    and is unwrapped on the far side.
     """
-    token = _token(datasette, actor)
-    if not token:
-        raise ApiError(500, "No Orpheus API token is configured for this user.")
+    actor = _actor_for(datasette, request)
+    database = _database(datasette)
+    writing = method != "GET"
 
-    body, content_type_header = _multipart_body(filename, content_type, data)
-    request = urllib.request.Request(_api_base(datasette) + "/documents", data=body,
-                                     method="POST")
-    request.add_header("Authorization", "Bearer " + token)
-    request.add_header("Content-Type", content_type_header)
+    def run(conn):
+        store = Store.adopt(conn, path=database.path, owns_transaction=not writing)
+        status, payload = orpheus_api.handle(store, method, path, body or {},
+                                             actor=actor)
+        if writing and status >= 400:
+            raise _Rollback(status, payload)
+        return status, payload
+
+    if not writing:
+        return await database.execute_fn(run)
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            raw = response.read().decode()
-            return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode()
-        message = raw
-        try:
-            message = json.loads(raw)["error"]["message"]
-        except Exception:
-            pass
-        raise ApiError(exc.code, message)
-    except urllib.error.URLError as exc:
-        raise ApiError(503, "Could not reach the Orpheus API: {}".format(exc.reason))
-
-
-def _call(datasette, actor, method, path, payload=None):
-    """Make one API call, surfacing the API's own error message.
-
-    The API's errors are written for a person -- "Cloud processing needs an
-    explicit per-request opt-in", not "400" -- so they are passed through
-    rather than replaced with something generic.
-    """
-    token = _token(datasette, actor)
-    if not token:
-        raise ApiError(500, "No Orpheus API token is configured for this user.")
-
-    url = _api_base(datasette) + path
-    data = json.dumps(payload).encode() if payload is not None else None
-    request = urllib.request.Request(url, data=data, method=method)
-    request.add_header("Authorization", "Bearer " + token)
-    if data:
-        request.add_header("Content-Type", "application/json")
-
-    try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            body = response.read().decode()
-            return json.loads(body) if body else {}
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode()
-        message = raw
-        try:
-            message = json.loads(raw)["error"]["message"]
-        except Exception:
-            pass
-        raise ApiError(exc.code, message)
-    except urllib.error.URLError as exc:
-        raise ApiError(
-            503,
-            "Could not reach the Orpheus API at {}: {}".format(_api_base(datasette), exc.reason),
-        )
+        return await database.execute_write_fn(run)
+    except _Rollback as failed:
+        return failed.status, failed.payload
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Datasette hooks
 # ---------------------------------------------------------------------------
 
 @hookimpl
@@ -181,6 +131,7 @@ def register_routes():
         (r"^/-/orpheus/upload$", upload),
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)$", document_page),
         (r"^/-/orpheus/review$", review),
+        (r"^/-/orpheus/api/(?P<rest>.*)$", api_route),
     ]
 
 
@@ -200,195 +151,198 @@ def table_actions(datasette, actor, database, table):
     """
     if not actor or not table.startswith("instances_"):
         return []
-    return [{
-        "href": datasette.urls.path("/-/orpheus"),
-        "label": "Add a document",
-        "description": "Ingest and extract a new document through the Orpheus API",
-    }]
+    return [{"href": datasette.urls.path("/-/orpheus"),
+             "label": "Add a document",
+             "description": "Ingest and extract a new document"}]
 
+
+# ---------------------------------------------------------------------------
+# The JSON API, mounted rather than served separately
+# ---------------------------------------------------------------------------
+
+async def api_route(datasette, request):
+    """`/-/orpheus/api/...` — the same dispatch table, over HTTP.
+
+    Here so that a script, a CLI or an agent tool has a surface, without a
+    second process to deploy and a second writer to reason about.
+    """
+    rest = request.url_vars["rest"]
+    body: dict = {}
+    if request.method == "POST":
+        raw = await request.post_body()
+        if raw:
+            try:
+                body = json.loads(raw)
+            except json.JSONDecodeError:
+                return Response.json(
+                    {"error": {"message": "Body must be JSON."}}, status=400)
+    else:
+        # MultiParams is not a Mapping: it exposes keys()/get()/getlist() and
+        # nothing else.
+        body = {key: request.args.get(key) for key in request.args.keys()}
+
+    status, payload = await _call(datasette, request, request.method,
+                                  "/" + rest, body)
+    return Response.json(payload, status=status)
+
+
+# ---------------------------------------------------------------------------
+# Pages
+# ---------------------------------------------------------------------------
 
 async def _render(datasette, request, template, context, status=200):
     return Response.html(
         await datasette.render_template(template, context, request=request),
-        status=status,
-    )
+        status=status)
+
+
+def _redirect(datasette, path: str, **params) -> Response:
+    query = urllib.parse.urlencode({k: v for k, v in params.items() if v})
+    return Response.redirect(datasette.urls.path(path) + (f"?{query}" if query else ""))
 
 
 async def index_page(datasette, request):
-    actor = request.actor
-    if not actor:
+    if not request.actor:
         return Response.text("Sign in to use Orpheus.", status=403)
 
-    error = request.args.get("error")
-    context = {"documents": [], "capabilities": None, "error": error,
-               "uploaded": request.args.get("uploaded")}
-    try:
-        context["documents"] = _call(datasette, actor, "GET", "/documents")
-        context["capabilities"] = _call(datasette, actor, "GET", "/capabilities")
-    except ApiError as exc:
-        context["error"] = context["error"] or exc.message
-    return await _render(datasette, request, "orpheus_index.html", context)
+    _, documents = await _call(datasette, request, "GET", "/documents")
+    _, capabilities = await _call(datasette, request, "GET", "/capabilities")
+    return await _render(datasette, request, "orpheus_index.html", {
+        "documents": (documents or {}).get("documents", []),
+        "capabilities": capabilities,
+        "error": request.args.get("error"),
+        "uploaded": request.args.get("uploaded"),
+        "note": request.args.get("note"),
+    })
 
 
 async def upload(datasette, request):
-    """Ingest a document, then extract from it.
-
-    Two API calls rather than one, because they fail differently and a person
-    needs to know which happened. A document that ingested but failed to
-    extract is still there and still worth retrying; saying only "upload
-    failed" would send them to re-upload a file that is already stored.
-    """
-    actor = request.actor
-    if not actor:
+    """Ingest a document, then classify and extract from it."""
+    if not request.actor:
         return Response.text("Sign in to use Orpheus.", status=403)
     if request.method != "POST":
-        return Response.redirect(datasette.urls.path("/-/orpheus"))
+        return _redirect(datasette, "/-/orpheus")
 
-    if hasattr(request, "form"):  # Datasette 1.0+
-        max_bytes = int(_config(datasette).get("max_file_size", 50 * 1024 * 1024))
+    max_bytes = int(_config(datasette).get("max_file_size", 50 * 1024 * 1024))
+    if hasattr(request, "form"):
         try:
             # Datasette parses the multipart itself, with limits on file size,
             # request size and free disk. Reimplementing that would mean
             # reimplementing its guards too, badly.
             form = await request.form(files=True, max_file_size=max_bytes)
         except BadRequest as exc:
-            # Request.form() turns every parse and limit failure - file too
-            # large, request too large, disk too full - into BadRequest, which
-            # Datasette would otherwise render as a bare 400 page. Say it on
-            # the form instead.
-            return Response.redirect(
-                datasette.urls.path("/-/orpheus") + "?error=" + urllib.parse.quote(
-                    "Upload rejected: {}".format(exc)))
+            # Request.form() turns every limit failure into BadRequest, which
+            # Datasette would otherwise render as a bare 400 page.
+            return _redirect(datasette, "/-/orpheus", error=f"Upload rejected: {exc}")
         uploaded = form.get("file")
     else:
-        # An older Datasette has no multipart parser. The path field still
-        # works, so the page degrades rather than breaking.
         form = await request.post_vars()
         uploaded = None
 
     path = (form.get("path") or "").strip()
     tier = form.get("tier") or "local"
+    engine = form.get("engine") or "auto"
     cloud_opt_in = form.get("cloud_opt_in") == "on"
-
     has_file = uploaded is not None and getattr(uploaded, "filename", "")
+
     if not has_file and not path:
-        return Response.redirect(
-            datasette.urls.path("/-/orpheus") + "?error=" + urllib.parse.quote(
-                "Choose a file, or give a path already on the server."
-                if hasattr(request, "form") else
-                "Give the server-side path of a document to ingest; "
-                "file upload needs Datasette 1.0 or newer."))
+        return _redirect(datasette, "/-/orpheus",
+                         error="Choose a file, or give a path already on the server.")
 
-    try:
-        if has_file:
-            data = await uploaded.read()
-            await uploaded.close()
-            document = _call_upload(datasette, actor, uploaded.filename,
-                                    uploaded.content_type, data)
-        else:
-            # Still supported: a watched drop-directory hands the API a path
-            # rather than pushing bytes through a browser.
-            document = _call(datasette, actor, "POST", "/documents", {"path": path})
-    except ApiError as exc:
-        return Response.redirect(
-            datasette.urls.path("/-/orpheus") + "?error=" + urllib.parse.quote(
-                "Ingest failed: " + exc.message))
+    if has_file:
+        # Written to the store's own storage root rather than kept in memory:
+        # ingest hashes and content-addresses the original, and it needs a file.
+        import tempfile
+        from pathlib import Path
+        data = await uploaded.read()
+        await uploaded.close()
+        tmp = Path(tempfile.mkdtemp()) / uploaded.filename
+        tmp.write_bytes(data)
+        payload = {"path": str(tmp), "filename": uploaded.filename}
+    else:
+        # Still supported: a watched drop-directory hands over a path rather
+        # than pushing bytes through a browser.
+        payload = {"path": path}
 
-    document_id = document.get("document_id")
-    target = datasette.urls.path("/-/orpheus/document/" + document_id)
+    payload["storage_root"] = _config(datasette).get("storage_root", "storage")
+    status, document = await _call(datasette, request, "POST", "/documents", payload)
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus",
+                         error="Ingest failed: " + document["error"]["message"])
 
+    document_id = document["document_id"]
+    target = f"/-/orpheus/document/{document_id}"
     if document.get("duplicate"):
-        return Response.redirect(target + "?note=" + urllib.parse.quote(
-            "That content was already ingested; showing the existing document."))
+        return _redirect(datasette, target,
+                         note="That content was already ingested; showing the "
+                              "existing document.")
 
-    try:
-        _call(datasette, actor, "POST", "/documents/{}/classify".format(document_id))
-    except ApiError:
-        # Classification is a convenience. Losing it should not stop the user
-        # reaching a document that ingested successfully.
-        pass
+    # Classification is a convenience; losing it should not stop the person
+    # reaching a document that ingested successfully.
+    await _call(datasette, request, "POST", f"/documents/{document_id}/classify",
+                {"tier": "local"})
 
-    try:
-        _call(datasette, actor, "POST", "/documents/{}/extract".format(document_id),
-              {"tier": tier, "cloud_opt_in": cloud_opt_in})
-    except ApiError as exc:
-        return Response.redirect(target + "?error=" + urllib.parse.quote(
-            "Ingested, but extraction failed: " + exc.message))
-
-    return Response.redirect(target + "?uploaded=1")
+    status, extracted = await _call(
+        datasette, request, "POST", f"/documents/{document_id}/extract",
+        {"tier": tier, "engine": engine, "cloud_opt_in": cloud_opt_in})
+    if status != 200:
+        return _redirect(datasette, target,
+                         error="Ingested, but extraction failed: "
+                               + extracted["error"]["message"])
+    return _redirect(datasette, target, uploaded="1")
 
 
 async def document_page(datasette, request):
-    actor = request.actor
-    if not actor:
+    if not request.actor:
         return Response.text("Sign in to use Orpheus.", status=403)
-    # Route captures arrive on request.url_vars rather than as handler
-    # parameters; declaring them as parameters makes Datasette refuse to call
-    # the handler at all.
-    document_id = request.url_vars.get("document_id")
-    if not document_id:
-        return Response.redirect(datasette.urls.path("/-/orpheus"))
+    document_id = request.url_vars["document_id"]
 
-    context = {"document_id": document_id, "note": request.args.get("note"),
-               "error": request.args.get("error"), "uploaded": request.args.get("uploaded"),
-               "document": None, "instances": [], "review": None}
-    try:
-        context["document"] = _call(datasette, actor, "GET", "/documents/" + document_id)
-        context["instances"] = _call(
-            datasette, actor, "GET", "/documents/{}/instances".format(document_id))
-        context["review"] = _call(
-            datasette, actor, "GET", "/documents/{}/review".format(document_id))
-    except ApiError as exc:
-        context["error"] = context["error"] or exc.message
-        return await _render(datasette, request, "orpheus_document.html", context,
-                             status=exc.status if exc.status in (403, 404) else 200)
+    status, document = await _call(datasette, request, "GET",
+                                   f"/documents/{document_id}")
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus", error=document["error"]["message"])
+    _, instances = await _call(datasette, request, "GET",
+                               f"/documents/{document_id}/instances")
 
-    for instance in context["instances"]:
-        # Properties arrive as a JSON string so one payload can carry rows from
-        # differently-shaped tables. Parsed here so the template stays simple.
-        try:
-            instance["parsed"] = json.loads(instance.get("properties") or "{}")
-        except (TypeError, ValueError):
-            instance["parsed"] = {}
-    return await _render(datasette, request, "orpheus_document.html", context)
+    return await _render(datasette, request, "orpheus_document.html", {
+        "document": document,
+        "review": document.get("review", {}),
+        "instances": (instances or {}).get("instances", []),
+        "error": request.args.get("error"),
+        "note": request.args.get("note"),
+        "uploaded": request.args.get("uploaded"),
+    })
 
 
 async def review(datasette, request):
-    """Confirm, amend or reject one extracted instance."""
-    actor = request.actor
-    if not actor:
+    """Confirm, amend or reject one instance."""
+    if not request.actor:
         return Response.text("Sign in to use Orpheus.", status=403)
     if request.method != "POST":
-        return Response.redirect(datasette.urls.path("/-/orpheus"))
+        return _redirect(datasette, "/-/orpheus")
 
-    post = await request.post_vars()
-    instance_id = post.get("instance_id")
-    document_id = post.get("document_id")
-    action = post.get("action")
-    target = datasette.urls.path("/-/orpheus/document/" + (document_id or ""))
+    form = await request.post_vars()
+    instance_id = form.get("instance_id")
+    document_id = form.get("document_id")
+    action = form.get("action")
+    target = f"/-/orpheus/document/{document_id}"
 
     if action not in ("confirm", "amend", "reject"):
-        return Response.redirect(target + "?error=" + urllib.parse.quote(
-            "Unknown review action."))
+        return _redirect(datasette, target, error=f"Unknown action {action!r}.")
 
-    payload = None
+    body: dict = {"note": form.get("note") or None}
     if action == "amend":
-        changes = {}
-        for key, value in post.items():
-            if key.startswith("change_") and value != "":
-                changes[key[len("change_"):]] = value
-        if not changes:
-            return Response.redirect(target + "?error=" + urllib.parse.quote(
-                "Nothing was changed."))
-        payload = {"changes": changes, "note": post.get("note") or None}
-    elif action == "reject":
-        payload = {"note": post.get("note") or None}
+        # Every rendered field comes back, changed or not; the core drops the
+        # ones that match what is stored and refuses an amendment that turns
+        # out to be empty, so there is no second opinion about it here. A blank
+        # field is skipped rather than sent: it means the person cleared the
+        # box, not that they meant to store an empty string.
+        body["changes"] = {key[len("change_"):]: value
+                           for key, value in form.items()
+                           if key.startswith("change_") and value != ""}
 
-    try:
-        _call(datasette, actor, "POST",
-              "/instances/{}/{}".format(instance_id, action), payload)
-    except ApiError as exc:
-        return Response.redirect(target + "?error=" + urllib.parse.quote(exc.message))
-
-    return Response.redirect(target + "?note=" + urllib.parse.quote(
-        "Marked {}.".format(action + "ed" if action != "amend" else "amended")))
+    status, result = await _call(datasette, request, "POST",
+                                 f"/instances/{instance_id}/{action}", body)
+    if status != 200:
+        return _redirect(datasette, target, error=result["error"]["message"])
+    return _redirect(datasette, target, note=f"Marked {action}ed.")

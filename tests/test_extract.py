@@ -115,7 +115,22 @@ def test_the_run_is_recorded_whether_it_succeeds_or_fails(ready):
     assert run["finished_at"]
 
 
-def test_a_failed_run_is_recorded_as_failed(ready):
+def test_a_model_failure_leaves_the_run_partial_not_failed(ready):
+    store, document_id = ready
+
+    def broken(**kwargs):
+        raise RuntimeError("the model fell over")
+
+    set_populator(broken)
+    result = extract(store, document_id, tier="local", actor_id="act_test")
+    run = store.one("SELECT status, error FROM extraction_runs")
+    assert run["status"] == "partial"
+    assert "fell over" in run["error"]
+    assert "fell over" in result["model_error"]
+
+
+def test_a_run_that_salvages_nothing_still_fails(ready):
+    # Nothing to keep, so nothing to be partial about: the caller is told.
     store, document_id = ready
 
     def broken(**kwargs):
@@ -123,41 +138,73 @@ def test_a_failed_run_is_recorded_as_failed(ready):
 
     set_populator(broken)
     with pytest.raises(RuntimeError):
-        extract(store, document_id, tier="local", actor_id="act_test")
-    run = store.one("SELECT status, error FROM extraction_runs")
-    assert run["status"] == "failed"
-    assert "fell over" in run["error"]
+        extract(store, document_id, tier="local", actor_id="act_test",
+                deterministic=False)
+    assert store.one("SELECT status FROM extraction_runs")["status"] == "failed"
 
 
-def test_deterministic_findings_survive_a_failed_model_call(ready):
-    # The deterministic pass commits in its own transaction, before the model
-    # runs. A pattern-matched date is worth keeping even when the model call
-    # then fails.
+def test_a_native_backend_that_aborts_the_interpreter_is_survived(ready):
+    """A Rust panic arrives as BaseException, not Exception.
+
+    Under Datasette the extracting process holds the only write connection to
+    the store, so letting one escape would take the service down over an
+    optional dependency.
+    """
     store, document_id = ready
 
-    def broken(**kwargs):
-        raise RuntimeError("no model")
+    class Panic(BaseException):
+        pass
 
-    set_populator(broken)
-    with pytest.raises(RuntimeError):
-        extract(store, document_id, tier="local", actor_id="act_test")
+    def panics(**kwargs):
+        raise Panic("backend aborted")
+
+    set_populator(panics)
+    result = extract(store, document_id, tier="local", actor_id="act_test")
+    assert "backend aborted" in result["model_error"]
     assert store.scalar("SELECT COUNT(*) FROM instances_KeyDate") == 4
 
 
-def test_a_retry_after_a_failure_does_not_duplicate_findings(ready):
+def test_a_refused_cloud_request_never_starts_a_run(ready):
+    # Being refused is not a backend failure, and must not read as a partial
+    # success. The gate is checked before the run row exists, so there is
+    # nothing to salvage and nothing recorded as having tried.
+    store, document_id = ready
+    store.set_setting("cloud_ai_policy", "disabled", "act_test")
+    with pytest.raises(OrpheusError):
+        extract(store, document_id, tier="cloud", actor_id="act_test", opt_in=True)
+    assert store.scalar("SELECT COUNT(*) FROM extraction_runs") == 0
+
+
+def test_deterministic_findings_survive_a_failed_model_call(ready):
+    # The deterministic pass finds dates and amounts by pattern and needs no
+    # model at all. A pattern-matched date is worth keeping when the model call
+    # then fails -- and under Datasette, where the whole request is one
+    # transaction, keeping it means not raising through it.
     store, document_id = ready
 
     def broken(**kwargs):
         raise RuntimeError("no model")
 
     set_populator(broken)
-    with pytest.raises(RuntimeError):
-        extract(store, document_id, tier="local", actor_id="act_test")
+    extract(store, document_id, tier="local", actor_id="act_test")
+    assert store.scalar("SELECT COUNT(*) FROM instances_KeyDate") == 4
+
+
+def test_a_retry_after_a_partial_run_needs_no_force_and_does_not_duplicate(ready):
+    store, document_id = ready
+
+    def broken(**kwargs):
+        raise RuntimeError("no model")
+
+    set_populator(broken)
+    extract(store, document_id, tier="local", actor_id="act_test")
 
     set_populator(populator([CONTRACT]))
+    # The guard refuses a tier that already *succeeded*; a partial run is
+    # exactly the case a retry is for, so it is not in its way.
     extract(store, document_id, tier="local", actor_id="act_test")
-    # The guard in extract() does not catch this -- it only refuses a tier that
-    # already succeeded -- so findings are matched on what they are.
+    # Findings are matched on what they are, so the deterministic pass running
+    # twice does not write them twice.
     assert store.scalar("SELECT COUNT(*) FROM instances_KeyDate") == 4
 
 

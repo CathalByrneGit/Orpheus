@@ -453,8 +453,12 @@ def extract(store: Store, document_id: str, tier: str = "local",
         "status": "running",
     })
 
+    n_deterministic = 0
+    model_error: str | None = None
+    population: dict = {}
+    written = {"n_entities": 0, "n_edges": 0, "n_amendments": 0}
+
     try:
-        n_deterministic = 0
         if tier == "local" and deterministic:
             n_deterministic = run_deterministic_pass(store, document_id, bundle, actor_id)
 
@@ -464,17 +468,35 @@ def extract(store: Store, document_id: str, tier: str = "local",
                 "may need OCR — check text_source on document_pages."
             )
 
-        population = populate(store, document_id, bundle=bundle, tier=tier,
-                              opt_in=opt_in, actor_id=actor_id,
-                              engine_name=engine_name)
-        written = persist_population(store, document_id, bundle, population,
-                                     source, actor_id)
+        # The model pass gets its own failure handling. The deterministic pass
+        # finds dates and amounts by pattern and needs no model at all, so a
+        # missing key, an unreachable Ollama or a backend that will not import
+        # should cost the model's findings and nothing else. Discarding the
+        # deterministic instances too would mean that the one part of the
+        # pipeline guaranteed to work offline only ever survives when the part
+        # that isn't also worked.
+        try:
+            population = populate(store, document_id, bundle=bundle, tier=tier,
+                                  opt_in=opt_in, actor_id=actor_id,
+                                  engine_name=engine_name)
+            written = persist_population(store, document_id, bundle, population,
+                                         source, actor_id)
+        except BaseException as exc:  # noqa: BLE001
+            # BaseException, not Exception: a native extraction backend can
+            # abort through the interpreter (a Rust panic surfaces as
+            # BaseException), and this process holds the only write connection
+            # to the store. Losing it would take the whole service down over an
+            # optional dependency.
+            if not n_deterministic:
+                raise
+            model_error = f"{type(exc).__name__}: {exc}"
 
+        status = "partial" if model_error else "succeeded"
         store.execute(
-            "UPDATE extraction_runs SET finished_at = ?, status = 'succeeded', "
+            "UPDATE extraction_runs SET finished_at = ?, status = ?, error = ?, "
             "n_entities = ?, n_edges = ?, n_amendments = ? WHERE run_id = ?",
-            (now(), written["n_entities"] + n_deterministic, written["n_edges"],
-             written["n_amendments"], run_id))
+            (now(), status, model_error, written["n_entities"] + n_deterministic,
+             written["n_edges"], written["n_amendments"], run_id))
     except Exception as exc:
         store.execute(
             "UPDATE extraction_runs SET finished_at = ?, status = 'failed', "
@@ -483,7 +505,7 @@ def extract(store: Store, document_id: str, tier: str = "local",
 
     return {**written, "run_id": run_id, "tier": tier, "document_id": document_id,
             "n_deterministic": n_deterministic, "superseded": superseded,
-            "engine": population.get("engine")}
+            "engine": population.get("engine"), "model_error": model_error}
 
 
 # ---------------------------------------------------------------------------

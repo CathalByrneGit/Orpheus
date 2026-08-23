@@ -102,10 +102,18 @@ def test_closed_tables_stay_closed(generated):
     assert config["allow"] == {"id": "*"}      # no anonymous access at all
 
 
-def test_the_api_token_is_named_not_written(generated):
+def test_the_plugin_is_told_where_to_write_not_where_to_call(generated):
+    """No base URL, no token: the plugin is in the process that holds the store.
+
+    The R plugin was an HTTP client and needed both. Carrying them forward would
+    have left a config knob that pointed nowhere, and a named secret nobody
+    reads.
+    """
     config, _, _ = generated
     plugin = config["plugins"]["orpheus-datasette"]
-    assert plugin["token"] == {"$env": "ORPHEUS_API_TOKEN"}
+    assert "token" not in plugin and "api_url" not in plugin
+    assert plugin["database"] == "orpheus"
+    assert plugin["storage_root"] == "storage"
 
 
 def test_the_permission_rule_is_emitted_for_the_datasette_hook(tmp_path):

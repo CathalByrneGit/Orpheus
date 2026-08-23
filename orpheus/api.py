@@ -24,7 +24,7 @@ from typing import Any, Callable
 
 from . import analysis, auth, bundle as bundle_mod, classify, concepts
 from . import engines, extract as extract_mod, ingest as ingest_mod
-from . import llm, quality, review, textract
+from . import llm, quality, review, rubric, textract
 from .store import Store
 from .utils import NotFound, OrpheusError, PermissionDenied
 
@@ -120,13 +120,33 @@ def health(**_):
 
 @route("GET", "/capabilities")
 def capabilities(store, **_):
+    """What this install can do, without doing any of it.
+
+    Includes the active bundle, because "what can this store do" is only half
+    answered by the engines: the other half is which ontology is loaded, and a
+    store serving a planning bundle answers different questions from one
+    serving contracts.
+    """
+    active = bundle_mod.active(store)
     return {
         "text_extraction": textract.capabilities(),
         "models": llm.status(store),
         "cloud": llm.cloud_policy(store),
         "extraction_engines": engines.available_engines(),
-        "confidence_rubric": __import__("orpheus.rubric", fromlist=["CONFIDENCE"]).CONFIDENCE,
+        "bundle": _bundle_summary(active),
+        "confidence_rubric": rubric.CONFIDENCE,
     }
+
+
+def _bundle_summary(active: dict | None) -> dict | None:
+    if not active:
+        return None
+    metadata = active.get("metadata") or {}
+    return {"bundle_id": active.get("bundleId"),
+            "version": active.get("bundleVersion"),
+            "name": metadata.get("name"),
+            "object_types": [o["id"] for o in
+                             bundle_mod.managed_object_types(active)]}
 
 
 @route("GET", "/bundle")
@@ -160,7 +180,16 @@ def get_document(store, document_id, **_):
     document = ingest_mod.get_document(store, document_id)
     if document is None:
         raise NotFound(f"No document {document_id!r}.")
-    return {**document, "review": review.review_progress(store, document_id)}
+    # The runs come with the document because "what has been tried on this, and
+    # did any of it fail" is part of reading it. A partial run -- deterministic
+    # findings kept, model pass failed -- is otherwise invisible to anyone who
+    # arrives after the person who started it.
+    runs = store.query(
+        "SELECT run_id, tier, status, error, n_entities, started_at, finished_at "
+        "FROM extraction_runs WHERE document_id = ? ORDER BY started_at DESC",
+        (document_id,))
+    return {**document, "review": review.review_progress(store, document_id),
+            "runs": [dict(r) for r in runs]}
 
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/text", permission="view")

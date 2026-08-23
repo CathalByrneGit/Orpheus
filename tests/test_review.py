@@ -21,7 +21,7 @@ from orpheus.review import (amend_instance, bump_patch, confirm_instance,
                             review_progress, review_schema_amendment,
                             schema_amendments)
 from orpheus.rubric import CONFIDENCE
-from orpheus.utils import NotFound, OrpheusError
+from orpheus.utils import NotFound, OrpheusError, from_json
 
 PDF = Path(__file__).parent / "fixtures" / "services-agreement.pdf"
 
@@ -271,3 +271,38 @@ def test_version_bumping():
     assert bump_patch("0.2.0") == "0.2.1"
     assert bump_patch("1.0.9") == "1.0.10"
     assert bump_patch("weird") == "weird.1"
+
+
+def test_an_amendment_that_changes_nothing_is_refused(extracted):
+    """A browser form posts every field it renders, changed or not.
+
+    Accepting the unchanged ones would flip `source` to `human` on a value the
+    machine got right, and the quality report counts amendments as machine
+    errors a human had to fix.
+    """
+    store, _, instance_id = extracted
+    current = store.one("SELECT * FROM instances_Company WHERE instance_id = ?",
+                        (instance_id,))
+    with pytest.raises(OrpheusError, match="Nothing was changed"):
+        amend_instance(store, instance_id, {"name": current["name"]}, "act_test")
+    after = store.one("SELECT source, status FROM instances_Company "
+                      "WHERE instance_id = ?", (instance_id,))
+    assert after["source"] == current["source"]
+    assert after["status"] == current["status"]
+    assert store.scalar("SELECT COUNT(*) FROM edit_history WHERE action = 'amend'") == 0
+
+
+def test_unchanged_fields_are_dropped_from_a_real_amendment(extracted):
+    # The history should read as what the person actually corrected, not as
+    # every field the form happened to contain.
+    store, _, instance_id = extracted
+    current = store.one("SELECT * FROM instances_Company WHERE instance_id = ?",
+                        (instance_id,))
+    amend_instance(store, instance_id,
+                   {"name": "Ardmore Digital Ltd",
+                    "registration_number": current["registration_number"]},
+                   "act_test")
+    row = store.one("SELECT previous_value, new_value FROM edit_history "
+                    "WHERE action = 'amend' ORDER BY seq DESC LIMIT 1")
+    assert set(from_json(row["new_value"])) == {"name"}
+    assert set(from_json(row["previous_value"])) == {"name"}

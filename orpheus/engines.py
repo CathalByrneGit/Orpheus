@@ -251,9 +251,14 @@ def langextract_extract(*, store: Store, document: dict, bundle: dict, text: str
         kwargs["api_key"] = config["api_key"]
 
     error, annotated = None, None
+    # BaseException, not Exception: a native backend can abort through the
+    # interpreter rather than raise, and `llm_calls` is the audit of what was
+    # sent. A call that failed and was recorded as clean is worse than no
+    # record at all -- it is a wrong answer to "did this document's text leave
+    # the building, and what happened to it".
     try:
         annotated = lx.extract(**kwargs)
-    except Exception as exc:
+    except BaseException as exc:  # noqa: BLE001
         error = f"{type(exc).__name__}: {exc}"
     finally:
         llm.record_llm_call(
@@ -364,11 +369,16 @@ def llm_extract(*, store: Store, document: dict, bundle: dict, text: str,
         kwargs["key"] = config["api_key"]
 
     error, content, usage = None, "", None
+    # BaseException, not Exception: a native backend can abort through the
+    # interpreter rather than raise, and `llm_calls` is the audit of what was
+    # sent. A call that failed and was recorded as clean is worse than no
+    # record at all -- it is a wrong answer to "did this document's text leave
+    # the building, and what happened to it".
     try:
         response = model.prompt(text, **kwargs)
         content = response.text()
         usage = response.usage()
-    except Exception as exc:
+    except BaseException as exc:  # noqa: BLE001
         error = f"{type(exc).__name__}: {exc}"
     finally:
         llm.record_llm_call(
@@ -453,9 +463,14 @@ def chat_extract(*, store: Store, document: dict, bundle: dict, text: str,
     }
 
     error, content = None, ""
+    # BaseException, not Exception: a native backend can abort through the
+    # interpreter rather than raise, and `llm_calls` is the audit of what was
+    # sent. A call that failed and was recorded as clean is worse than no
+    # record at all -- it is a wrong answer to "did this document's text leave
+    # the building, and what happened to it".
     try:
         content = _post_chat(base_url, config.get("api_key"), payload)
-    except Exception as exc:
+    except BaseException as exc:  # noqa: BLE001
         error = f"{type(exc).__name__}: {exc}"
     finally:
         llm.record_llm_call(

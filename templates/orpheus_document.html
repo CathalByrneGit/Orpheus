@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ document.filename if document else document_id }}{% endblock %}
+{% block title %}{{ document.filename if document else "Document" }}{% endblock %}
 {% block content %}
 <p><a href="{{ urls.path('/-/orpheus') }}">&larr; Documents</a></p>
 
@@ -15,6 +15,19 @@
   {%- if document.jurisdiction %} &middot; {{ document.jurisdiction }}{% endif %}
   &middot; {{ document.n_pages }} page(s) &middot; {{ document.review_status }}
 </p>
+
+{% for run in document.runs or [] %}
+  {% if run.status == "partial" %}
+  <p class="message-warning" style="border-left:3px solid #d90;padding-left:1em">
+    The {{ run.tier }} model pass failed, so only what could be found without a
+    model is below. Re-running the {{ run.tier }} tier will try the model again;
+    nothing here is lost by doing so.<br>
+    <span style="color:#666">{{ run.error }}</span>
+  </p>
+  {% elif run.status == "failed" %}
+  <p class="message-error">The {{ run.tier }} extraction failed: {{ run.error }}</p>
+  {% endif %}
+{% endfor %}
 
 {% if review %}
 <p>
@@ -50,10 +63,10 @@
   <form action="{{ urls.path('/-/orpheus/review') }}" method="post">
     <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
     <input type="hidden" name="instance_id" value="{{ i.instance_id }}">
-    <input type="hidden" name="document_id" value="{{ document_id }}">
+    <input type="hidden" name="document_id" value="{{ document.document_id }}">
     <table class="rows-and-columns">
       <tbody>
-      {% for key, value in i.parsed.items() %}
+      {% for key, value in i.properties.items() %}
         {% if key not in ("document_id", "source", "confidence", "status",
                           "amended_by", "amended_at", "created_at", "naive_key")
               and value is not none %}
