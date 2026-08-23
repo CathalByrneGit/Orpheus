@@ -50,7 +50,12 @@ def capabilities() -> dict:
     something it cannot.
     """
     return {
-        "pdf_text": _have_module("pdfminer") or _have("pdftotext"),
+        "pdf_text": (_have_module("docling") or _have_module("pdfminer")
+                     or _have("pdftotext")),
+        "pdf_backend": ("docling" if _have_module("docling")
+                        else "pdfminer" if _have_module("pdfminer")
+                        else "pdftotext" if _have("pdftotext") else None),
+        "layout_aware": _have_module("docling"),
         "pdf_render": _have("pdftoppm"),
         "docx": True,
         "plain_text": True,
@@ -130,6 +135,51 @@ def mime_for(kind: str, filename: str) -> str:
     return _MIME.get(kind, "application/octet-stream")
 
 
+def _docling_pages(path: str | Path) -> list[str] | None:
+    """Page texts via Docling, or None if it is not installed or cannot read it.
+
+    Docling understands page layout, reading order, tables and formulas, and
+    OCRs scanned pages itself -- all of which pdftotext does not, and all of
+    which change how much of a document survives into the store. It also carries
+    bounding boxes, which is what a reading companion needs to highlight a
+    clause rather than merely name its page. Only the text is taken here; the
+    boxes are the next thing to plumb through, alongside LangExtract's character
+    intervals.
+
+    It is heavy -- machine-learning models, downloaded on first run -- so it is
+    optional and tried first only when present, never installed by default.
+
+    NOT EXERCISED IN CI. Docling would not build in the environment this was
+    written in (antlr4-python3-runtime fails to compile), so this path has been
+    written against the documented API and never run. Treat it as untested until
+    someone has.
+    """
+    if not _have_module("docling"):
+        return None
+    try:
+        from docling.document_converter import DocumentConverter
+        document = DocumentConverter().convert(str(path)).document
+        pages: dict[int, list[str]] = {}
+        for item, _level in document.iterate_items():
+            text = getattr(item, "text", None)
+            if not text:
+                continue
+            for provenance in (getattr(item, "prov", None) or []):
+                page_no = getattr(provenance, "page_no", None)
+                if page_no is not None:
+                    pages.setdefault(page_no, []).append(text)
+                    break
+            else:
+                pages.setdefault(1, []).append(text)
+        if not pages:
+            return None
+        return ["\n".join(pages[n]) for n in sorted(pages)]
+    except Exception:
+        # A parser that cannot read this file is not a reason to fail the
+        # ingest; the simpler backend below may manage it.
+        return None
+
+
 def pdf_pages(path: str | Path) -> list[str]:
     """Page texts from a PDF, in order.
 
@@ -137,6 +187,9 @@ def pdf_pages(path: str | Path) -> list[str]:
     splitting below relies on.
     """
     path = str(path)
+    docling = _docling_pages(path)
+    if docling is not None:
+        return docling
     if _have_module("pdfminer"):
         try:
             from pdfminer.high_level import extract_text

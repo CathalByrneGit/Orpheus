@@ -17,10 +17,17 @@ dependencies = [
 # Datasette is the surface and the writer, but the core does not import it, so
 # a script or a test can use the store without it.
 server = ["datasette>=1.0a32"]
+# The extraction engine. Optional only in the sense that a deployment may
+# register its own populator; without one of the two there is no model pass.
+llm = ["langextract>=1.6"]
+# Layout-aware parsing: page structure, reading order, tables, and OCR for
+# scanned pages. Heavy (ML models fetched on first run), so it is opt-in and
+# the pdftotext path stays as the fallback.
+layout = ["docling>=2"]
 pdf = ["pdfminer.six"]
 ocr = ["pytesseract", "pillow"]
-llm = ["llm"]
-dev = ["pytest>=7", "datasette>=1.0a32", "httpx", "pyyaml"]
+dev = ["pytest>=7", "datasette>=1.0a32", "httpx", "pyyaml", "jsonschema",
+       "langextract>=1.6"]
 
 [project.scripts]
 orpheus = "orpheus.cli:cli"

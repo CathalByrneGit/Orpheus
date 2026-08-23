@@ -27,7 +27,7 @@ EXCLUDED_STATUSES = ("rejected",)
 ACTIONS = ("view", "edit", "share", "delete")
 SHARE_ROLES = ("viewer", "editor")
 VISIBILITY = ("private", "department", "organisation")
-CLOUD_POLICIES = ("disabled", "opt_in", "enabled")
+CLOUD_POLICIES = ("disabled", "per_user", "org_allow")
 
 # Every naive-matched corpus result carries this, so nothing downstream can
 # mistake name matching for entity resolution.

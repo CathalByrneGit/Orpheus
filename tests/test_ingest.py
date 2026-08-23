@@ -89,9 +89,22 @@ def test_a_file_that_is_not_a_docx_says_so(tmp_path):
 
 def test_capabilities_reports_what_this_server_can_read():
     caps = textract.capabilities()
-    assert set(caps) == {"pdf_text", "pdf_render", "docx", "plain_text",
-                         "ocr", "ocr_backend"}
+    assert set(caps) == {"pdf_text", "pdf_backend", "layout_aware", "pdf_render",
+                         "docx", "plain_text", "ocr", "ocr_backend"}
     assert caps["docx"] is True and caps["plain_text"] is True
+    # Which PDF backend is in use is worth naming: docling reads layout, tables
+    # and scanned pages, and pdftotext reads none of those, so the same file
+    # yields materially different text depending on what is installed.
+    assert caps["pdf_backend"] in ("docling", "pdfminer", "pdftotext", None)
+    assert caps["layout_aware"] is (caps["pdf_backend"] == "docling")
+
+
+def test_the_pdf_backend_falls_back_rather_than_failing(monkeypatch):
+    # Docling is optional and heavy. When it is absent, or present and unable to
+    # read a particular file, ingest continues on the simpler backend instead of
+    # refusing the document.
+    monkeypatch.setattr(textract, "_docling_pages", lambda path: None)
+    assert len(textract.page_texts(PDF, "pdf")) == 2
 
 
 # -- ingest -----------------------------------------------------------------

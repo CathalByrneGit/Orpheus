@@ -12,8 +12,8 @@ keeping.**
 
 | Layer | Orpheus today | Prior art | Verdict |
 |---|---|---|---|
-| Parse | `orph_ingest()` — pdftools/pdftotext, page text | Docling | Replaceable, and Docling is better |
-| Extract | `orph_populate()` → ontologyDiscoverR | LangExtract | Replaceable, and LangExtract is better |
+| Parse | `ingest()` — pdftotext, with Docling when installed | Docling | **Adopted**, optional and untested in CI |
+| Extract | `populate()` → LangExtract | LangExtract | **Adopted** on the Python branch |
 | **Review, amend, audit, measure** | The amendment model | **nothing equivalent found** | **Keep** |
 | Surface | Plumber API + read-only Datasette | `datasette-extract`, `datasette-comments`, `datasette-enrichments` | Mostly already built |
 
@@ -78,9 +78,20 @@ only search for it and hope it appears once.
 It also handles chunking, parallel workers and multi-pass extraction for recall,
 all of which Orpheus would have to write.
 
-**What it lacks:** confidence scores. The rubric would have to be applied on top
-— which is what `orph_snap_confidence()` already does at the persistence
-boundary, so the seam exists.
+**What it lacks:** confidence scores. That reads like a gap and turned out to be
+closer to a virtue. It reports `alignment_status` instead — `match_exact`,
+`match_greater`, `match_lesser`, `match_fuzzy`, or nothing when a span cannot be
+located at all. That is a fact about the text rather than a model's opinion of
+its own certainty, which is the thing the rubric exists to avoid storing, and it
+maps onto the rubric without being bent: located verbatim is *explicit*,
+boundary-shifted is *named*, fuzzy is *implied*, and unlocatable is *inferred* —
+a model asserting something the document does not say.
+
+**Adopted on the Python branch.** See `orpheus/population.py`. The gate is not
+delegated with it: LangExtract would resolve its own API key and call its own
+provider, which routes around the org policy, the per-request opt-in and the
+`llm_calls` audit together — the same failure identified for `datasette-llm` in
+[Datasette ecosystem](datasette-ecosystem.md).
 
 ### Docling
 
@@ -88,6 +99,19 @@ Converts PDFs into a structured document preserving **page numbers and bounding
 boxes**. Paired with LangExtract, an extraction can be traced to a box on a page
 rather than to a page. That is what a reading companion needs to highlight a
 clause as someone scrolls past it.
+
+**Adopted on the Python branch as an optional backend**, tried ahead of
+`pdftotext` when installed and falling back to it when not — including when
+Docling is present but cannot read a particular file, because a parser that
+chokes on one document is not a reason to refuse the document.
+
+**Not exercised.** Docling would not build in the environment this was written
+in (`antlr4-python3-runtime` fails to compile), so the adapter is written
+against the documented API and has never run. It is behind a capability flag
+(`layout_aware`) and an extra (`pip install 'orpheus[layout]'`), and it should be
+treated as untested until someone has run it. Only text is taken from it so far;
+the bounding boxes are the next thing to plumb through, alongside LangExtract's
+character intervals.
 
 ---
 
