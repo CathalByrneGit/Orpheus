@@ -158,7 +158,7 @@ def build_config(bundle: dict, database_name: str = "orpheus",
     }
 
 
-def write_config(path: str | Path = "inst/datasette/datasette.yml",
+def write_config(path: str | Path = "config/datasette.yml",
                  database_name: str = "orpheus", bundle: dict | None = None,
                  storage_root: str = "storage",
                  max_file_size: int = 50 * 1024 * 1024,
@@ -200,8 +200,8 @@ def write_config(path: str | Path = "inst/datasette/datasette.yml",
 
 
 def serve_command(db_path: str = "data/orpheus.sqlite",
-                  metadata_path: str = "inst/datasette/metadata.yml",
-                  config_path: str = "inst/datasette/datasette.yml",
+                  metadata_path: str = "config/metadata.yml",
+                  config_path: str = "config/datasette.yml",
                   port: int = 8001, ui: bool = True,
                   immutable: bool = False) -> str:
     """The command to serve the store.

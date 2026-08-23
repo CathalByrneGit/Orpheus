@@ -20,7 +20,10 @@ from orpheus.bundle import (DEFAULT_BUNDLE, SPEC_SCHEMA, ddl, domain, load,
 from orpheus.utils import OrpheusError
 
 FIXTURES = Path(__file__).parent / "fixtures"
-LEGACY = Path(__file__).parent.parent / "inst" / "bundles" / "contract-core-0.1.0.json"
+# The bundle as the R implementation wrote it. Kept as a fixture rather than
+# shipped, because it is not a bundle anyone should load on purpose -- it is the
+# shape the loader has to keep reading for anyone with a store built by it.
+LEGACY = Path(__file__).parent / "fixtures" / "contract-core-0.1.0.json"
 
 
 @pytest.fixture
@@ -74,7 +77,7 @@ def test_normalising_is_idempotent(bundle):
 
 def test_the_legacy_double_spelling_is_gone(bundle):
     raw = json.loads(LEGACY.read_text())
-    # The R file carried each list twice, once per consuming package.
+    # The R file carried each list twice, once per consuming R package.
     assert raw["objects"] == raw["object_types"]
     # The canonical one carries each exactly once.
     for gone in ("object_types", "link_types", "concept_defs", "interfaceTypes",

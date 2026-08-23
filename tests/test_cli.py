@@ -292,3 +292,32 @@ def test_config_regenerates_from_the_bundle_in_the_store(initialised, capsys,
 def test_an_unknown_subcommand_is_refused(capsys):
     with pytest.raises(SystemExit):
         cli(["nonsense"])
+
+
+# -- the flags themselves ----------------------------------------------------
+
+def test_a_global_flag_works_on_either_side_of_the_subcommand(capsys):
+    # Argparse only accepts a top-level flag before the subcommand, and that is
+    # not where anyone types it.
+    before = out_json(capsys, "--json", "bundle")
+    after = out_json(capsys, "bundle", "--json")
+    assert before == after
+
+
+def test_validating_a_bundle_says_which_checks_actually_ran(capsys, monkeypatch):
+    """"valid" without jsonschema means only the semantic checks passed.
+
+    Schema validation is optional on purpose -- a store opens without it -- but
+    reporting a verdict that does not say which half ran is an overclaim.
+    """
+    import orpheus.bundle as bundle_mod
+
+    assert out_json(capsys, "--json", "bundle")["schema_checked"] is True
+
+    monkeypatch.setattr(bundle_mod, "schema_validation_available", lambda: False)
+    result = out_json(capsys, "--json", "bundle")
+    assert result["schema_checked"] is False
+
+    code, _, err = run(capsys, "bundle", "--strict")
+    assert code == 1
+    assert "jsonschema" in err

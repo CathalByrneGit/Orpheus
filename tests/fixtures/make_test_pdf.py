@@ -1,6 +1,6 @@
 """Build the two-page PDF fixture the ingest tests run against.
 
-    python3 data-raw/make_test_pdf.py tests/testthat/fixtures/services-agreement.pdf
+    python3 tests/fixtures/make_test_pdf.py tests/fixtures/services-agreement.pdf
 
 Written by hand rather than exported from a word processor for three reasons:
 the result is 2.4KB rather than 30KB, it is deterministic byte-for-byte so it

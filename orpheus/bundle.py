@@ -356,6 +356,17 @@ def load(source: str | Path | dict | None = None) -> dict:
     return normalise(raw)
 
 
+def schema_validation_available() -> bool:
+    """Whether the JSON Schema half of validate() can actually run.
+
+    It is optional on purpose -- a store should open without jsonschema
+    installed -- but "valid" then means only that the semantic checks passed,
+    and anything reporting a verdict has to be able to say which checks it ran.
+    """
+    import importlib.util
+    return importlib.util.find_spec("jsonschema") is not None
+
+
 def _schema_problems(bundle: dict) -> list[str]:
     try:
         import jsonschema

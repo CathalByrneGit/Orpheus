@@ -9,9 +9,11 @@ description = "Document intelligence with provenance, review and measurable extr
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = [
-    "click>=8.1",
-]
+# None. The core is standard library only -- sqlite3, json, re, urllib -- so a
+# store can be opened, migrated, read and written by a script with nothing
+# installed. Everything below is a capability you opt into, and the code says
+# which install is missing when you reach for one you did not.
+dependencies = []
 
 [project.optional-dependencies]
 # Datasette is the surface and the writer, but the core does not import it, so
@@ -42,7 +44,9 @@ orpheus = "orpheus.cli:cli"
 include = ["orpheus*"]
 
 [tool.setuptools.package-data]
-orpheus = ["bundles/*.json", "benchmarks/*.json"]
+# schemas/ included deliberately: validate() reads the vendored ontologySpecR
+# schema at runtime, so an installed copy without it cannot validate a bundle.
+orpheus = ["bundles/*.json", "benchmarks/*.json", "schemas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

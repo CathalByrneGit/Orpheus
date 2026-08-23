@@ -321,10 +321,20 @@ def cmd_config(args) -> int:
 
 def cmd_bundle(args) -> int:
     """Validate a bundle without touching a store."""
+    schema_checked = bundle_mod.schema_validation_available()
+    if args.strict and not schema_checked:
+        raise OrpheusError(
+            "--strict needs jsonschema, which is not installed, so only the "
+            "semantic checks would run. `pip install jsonschema`."
+        )
     bundle = bundle_mod.load(args.path) if args.path else bundle_mod.load()
     bundle_mod.validate(bundle)
+    if not (args.json or schema_checked):
+        print("note: jsonschema is not installed, so only the semantic checks "
+              "ran. `pip install jsonschema` to check the shape too.",
+              file=sys.stderr)
     emit({"bundle_id": bundle["bundleId"], "version": bundle["bundleVersion"],
-          "valid": True,
+          "valid": True, "schema_checked": schema_checked,
           "object_types": [o["id"] for o in
                            bundle_mod.managed_object_types(bundle)],
           "tables": [bundle_mod.table_name(o) for o in
@@ -337,18 +347,34 @@ def cmd_bundle(args) -> int:
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="orpheus", description=__doc__.split("\n")[0],
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--db", default=DEFAULT_DB, help="path to the store")
-    parser.add_argument("--json", action="store_true",
+    # The global flags are declared once and inherited by every subcommand, so
+    # `orpheus --db x bundle` and `orpheus bundle --db x` both work. Argparse
+    # only accepts a top-level flag *before* the subcommand, and that is not
+    # where anyone types it.
+    #
+    # SUPPRESS rather than a default on each copy: a subparser parses into its
+    # own namespace and copies every attribute back, so a plain default here
+    # would have the subcommand quietly overwrite the value the top-level flag
+    # just parsed. The defaults are filled in after parsing instead --
+    # set_defaults() cannot do it, because it reaches into the shared action
+    # objects and replaces the SUPPRESS this depends on.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--db", default=argparse.SUPPRESS,
+                        help="path to the store")
+    common.add_argument("--json", action="store_true",
+                        default=argparse.SUPPRESS,
                         help="machine-readable output")
-    parser.add_argument("--force-lock", action="store_true",
+    common.add_argument("--force-lock", action="store_true",
+                        default=argparse.SUPPRESS,
                         help="take over a writer lock left by a dead process")
+
+    parser = argparse.ArgumentParser(
+        prog="orpheus", description=__doc__.split("\n")[0], parents=[common],
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add(name, fn, help_text):
-        sub = subparsers.add_parser(name, help=help_text,
+        sub = subparsers.add_parser(name, help=help_text, parents=[common],
                                     description=fn.__doc__ or help_text)
         sub.set_defaults(func=fn)
         return sub
@@ -359,12 +385,12 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--admin-email")
     init.add_argument("--cloud-policy",
                       choices=("disabled", "per_user", "org_allow"))
-    init.add_argument("--config", default="inst/datasette/datasette.yml")
+    init.add_argument("--config", default="config/datasette.yml")
     init.add_argument("--storage-root", default="storage")
 
     serve = add("serve", cmd_serve, "serve the store with Datasette")
-    serve.add_argument("--metadata", default="inst/datasette/metadata.yml")
-    serve.add_argument("--config", default="inst/datasette/datasette.yml")
+    serve.add_argument("--metadata", default="config/metadata.yml")
+    serve.add_argument("--config", default="config/datasette.yml")
     serve.add_argument("--port", type=int, default=8001)
     serve.add_argument("--no-ui", action="store_true",
                        help="omit the plugin and template directories")
@@ -421,17 +447,25 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--min-reviewed", type=int, default=5)
 
     config = add("config", cmd_config, "regenerate the Datasette files")
-    config.add_argument("--config", default="inst/datasette/datasette.yml")
+    config.add_argument("--config", default="config/datasette.yml")
     config.add_argument("--storage-root", default="storage")
 
     bundle = add("bundle", cmd_bundle, "validate a bundle")
     bundle.add_argument("path", nargs="?")
+    bundle.add_argument("--strict", action="store_true",
+                        help="fail rather than skip the JSON Schema checks")
 
     return parser
 
 
+GLOBAL_DEFAULTS = {"db": DEFAULT_DB, "json": False, "force_lock": False}
+
+
 def cli(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    for name, default in GLOBAL_DEFAULTS.items():
+        if not hasattr(args, name):
+            setattr(args, name, default)
     try:
         return args.func(args) or 0
     except OrpheusError as exc:
