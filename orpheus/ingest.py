@@ -1,0 +1,213 @@
+"""Step 1: a file goes in, text and page records come out.
+
+The original is kept content-addressed by SHA-256, so an extraction can always
+be re-run against exactly the bytes it was derived from, and the same file
+ingested twice occupies one copy.
+
+**Dedup is on content, not filename.** The same contract mailed round twice
+under two names is one document, and treating it as two would quietly double
+every corpus statistic computed over it.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import shutil
+from pathlib import Path
+
+from . import textract
+from .audit import record_edit
+from .rubric import VISIBILITY
+from .store import Store
+from .utils import OrpheusError, new_id, now, require_choice
+
+
+def storage_path_for(root: str | Path, file_hash: str, extension: str) -> Path:
+    """Where an original lives. Fanned out by hash prefix so no one directory
+    accumulates every document ever ingested."""
+    directory = Path(root) / "documents" / file_hash[:2]
+    directory.mkdir(parents=True, exist_ok=True)
+    suffix = f".{extension}" if extension else ""
+    return directory / f"{file_hash}{suffix}"
+
+
+def hash_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _build_pages(page_texts: list[str]) -> list[dict]:
+    pages = []
+    for index, text in enumerate(page_texts, start=1):
+        text = text or ""
+        pages.append({
+            "page_no": index,
+            "text": text,
+            "char_count": len(text),
+            "text_source": ("native" if len(text.strip()) >= textract.OCR_CHAR_THRESHOLD
+                            else "pending_ocr"),
+            "image_path": None,
+        })
+    return pages
+
+
+def ingest(store: Store, path: str | Path, actor_id: str | None = None,
+           storage_root: str | Path = "storage", filename: str | None = None,
+           visibility: str = "private") -> dict:
+    """Ingest one file.
+
+    Pages that yield too little text to be text are rendered to images and sent
+    to the configured OCR provider. With no provider available they are recorded
+    as `needs_ocr` rather than passed off as empty pages — a gap review can see
+    is worth more than a blank a reader would assume was blank.
+    """
+    store.assert_writable()
+    require_choice(visibility, VISIBILITY, "visibility")
+    path = Path(path)
+    if not path.exists():
+        raise OrpheusError(f"No file at {path}.")
+
+    filename = filename or path.name
+    kind = textract.detect_kind(filename)
+    if kind == "unsupported_doc":
+        raise OrpheusError(
+            "Legacy .doc files are not supported. Convert to .docx or PDF first."
+        )
+    if kind == "unknown":
+        raise OrpheusError(f"Cannot ingest {filename}: unrecognised file type.")
+
+    file_hash = hash_file(path)
+    existing = store.one(
+        "SELECT document_id, filename FROM documents WHERE file_hash = ?", (file_hash,))
+    if existing:
+        return {
+            "document_id": existing["document_id"],
+            "duplicate": True,
+            "filename": existing["filename"],
+            "n_pages": store.scalar(
+                "SELECT n_pages FROM documents WHERE document_id = ?",
+                (existing["document_id"],)),
+            "message": (f"Identical content already ingested as "
+                        f"'{existing['filename']}'."),
+        }
+
+    extension = Path(filename).suffix.lower().lstrip(".")
+    stored = storage_path_for(storage_root, file_hash, extension)
+    shutil.copyfile(path, stored)
+
+    pages = _build_pages(textract.page_texts(stored, kind))
+    document_id = new_id("doc")
+
+    needs_ocr = [p["page_no"] for p in pages if p["text_source"] == "pending_ocr"]
+    if needs_ocr:
+        _apply_ocr(pages, needs_ocr, stored, kind, storage_root, document_id)
+
+    sources = {p["text_source"] for p in pages}
+    text_source = sources.pop() if len(sources) == 1 else "mixed"
+
+    with store.transaction():
+        store.insert("documents", {
+            "document_id": document_id,
+            "filename": filename,
+            "file_hash": file_hash,
+            "mime_type": textract.mime_for(kind, filename),
+            "byte_size": stored.stat().st_size,
+            "storage_path": str(stored),
+            "n_pages": len(pages),
+            "text_source": text_source,
+            "date_added": now(),
+            "created_by": actor_id,
+            "visibility": visibility,
+            "review_status": "unreviewed",
+        })
+        for page in pages:
+            store.insert("document_pages", {
+                "document_id": document_id,
+                "page_no": page["page_no"],
+                "text": page["text"],
+                "text_source": page["text_source"],
+                "image_path": page["image_path"],
+                "char_count": page["char_count"],
+            })
+        record_edit(store, "documents", document_id, document_id, "ingest",
+                    new={"filename": filename, "file_hash": file_hash},
+                    actor_id=actor_id)
+
+    return {
+        "document_id": document_id,
+        "duplicate": False,
+        "filename": filename,
+        "n_pages": len(pages),
+        "text_source": text_source,
+        "needs_ocr": [p["page_no"] for p in pages if p["text_source"] == "needs_ocr"],
+    }
+
+
+def _apply_ocr(pages: list[dict], page_numbers: list[int], stored: Path,
+               kind: str, storage_root: str | Path, document_id: str) -> None:
+    image_dir = Path(storage_root) / "pages" / document_id
+    if kind == "pdf":
+        images = textract.render_pdf_pages(stored, image_dir, page_numbers)
+    elif kind == "image":
+        images = {page_numbers[0]: str(stored)} if page_numbers else {}
+    else:
+        images = {}
+
+    provider = textract.ocr_provider()
+    for page_no in page_numbers:
+        page = pages[page_no - 1]
+        image = images.get(page_no)
+        page["image_path"] = image
+        if provider is None or not image or not Path(image).exists():
+            page["text_source"] = "needs_ocr"
+            continue
+        try:
+            text = provider(image) or ""
+        except Exception:
+            text = ""
+        page["text"] = text
+        page["char_count"] = len(text)
+        page["text_source"] = "ocr" if text.strip() else "needs_ocr"
+
+
+# ---------------------------------------------------------------------------
+# Reading a document back
+# ---------------------------------------------------------------------------
+
+def get_document(store: Store, document_id: str) -> dict | None:
+    return store.one("SELECT * FROM documents WHERE document_id = ?", (document_id,))
+
+
+def document_pages(store: Store, document_id: str) -> list[dict]:
+    return store.query(
+        "SELECT page_no, text, text_source, image_path, char_count "
+        "FROM document_pages WHERE document_id = ? ORDER BY page_no",
+        (document_id,),
+    )
+
+
+def document_text(store: Store, document_id: str, with_markers: bool = True) -> str:
+    """The document as one string.
+
+    Page markers are included by default because every downstream excerpt is
+    traced back to a page number, and the marker is how a model's excerpt can be
+    attributed to one. `has_text()` exists because those markers mean an empty
+    document is not an empty string.
+    """
+    pages = document_pages(store, document_id)
+    if with_markers:
+        return "\n\n".join(f"--- Page {p['page_no']} ---\n{p['text'] or ''}"
+                           for p in pages)
+    return "\n\n".join(p["text"] or "" for p in pages)
+
+
+def has_text(store: Store, document_id: str) -> bool:
+    """Whether there is any text at all, page markers not counting.
+
+    Without this a document of blank scanned pages looks like it has content,
+    because the markers alone are hundreds of characters.
+    """
+    return any((p["text"] or "").strip() for p in document_pages(store, document_id))
