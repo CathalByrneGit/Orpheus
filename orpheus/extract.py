@@ -489,7 +489,10 @@ def extract(store: Store, document_id: str, tier: str = "local",
             # optional dependency.
             if not n_deterministic:
                 raise
-            model_error = f"{type(exc).__name__}: {exc}"
+            # The core writes its messages for a person, so an OrpheusError
+            # is passed on as written rather than prefixed with its class.
+            model_error = (str(exc) if isinstance(exc, OrpheusError)
+                           else f"{type(exc).__name__}: {exc}")
 
         status = "partial" if model_error else "succeeded"
         store.execute(
