@@ -20,6 +20,8 @@ server = ["datasette>=1.0a32"]
 # The extraction engine. Optional only in the sense that a deployment may
 # register its own populator; without one of the two there is no model pass.
 llm = ["langextract>=1.6"]
+# A local encoder: CPU-only, no API key, no network. Pulls in PyTorch.
+gliner = ["gliner2"]
 # Layout-aware parsing: page structure, reading order, tables, and OCR for
 # scanned pages. Heavy (ML models fetched on first run), so it is opt-in and
 # the pdftotext path stays as the fallback.

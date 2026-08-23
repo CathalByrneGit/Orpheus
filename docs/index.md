@@ -30,6 +30,7 @@ views and the live reading-companion UI are deliberately out of scope — see
 | [Developer guide](developer-guide.md) | Setup, tests, troubleshooting, project structure |
 | [Open decisions](open-decisions.md) | What Phase 1 deliberately did not decide, and what the build corrected |
 | [Prior art](prior-art.md) | Open-source tools that already do parts of this, and what that means |
+| [Extraction engines](extraction-engines.md) | Choosing between a local encoder, LangExtract and a general LLM — and why the choice does not change what the data means |
 | [Datasette ecosystem](datasette-ecosystem.md) | Four Datasette plugins, what each is worth here, and why the agent must not be the writer |
 | [OCDS alignment](ocds-alignment.md) | Mapping the bundle onto the Open Contracting Data Standard |
 

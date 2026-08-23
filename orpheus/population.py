@@ -33,7 +33,9 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from . import bundle as bundle_mod
+from . import engines
 from . import llm
+from .align import align as align_span
 from .ingest import document_pages, document_text, get_document
 from .rubric import CONFIDENCE, RESERVED_PROPS, snap_confidence
 from .store import Store
@@ -209,8 +211,15 @@ def examples_for(bundle: dict) -> list:
 
 def populate(store: Store, document_id: str, bundle: dict | None = None,
              tier: str = "local", opt_in: bool = False,
-             actor_id: str | None = None) -> dict:
-    """Run one population pass and return the normalised shape."""
+             actor_id: str | None = None,
+             engine_name: str | None = None) -> dict:
+    """Run one population pass and return the normalised shape.
+
+    Which engine runs is configuration — see `orpheus.engines` for what each
+    one is good at and what it costs you. Whichever it is, the output leaves
+    here in the same shape, with every span located in the document and its
+    rubric level assigned from how well it matched.
+    """
     bundle = bundle or bundle_mod.load()
     document = get_document(store, document_id)
     if document is None:
@@ -219,61 +228,18 @@ def populate(store: Store, document_id: str, bundle: dict | None = None,
     text = document_text(store, document_id)
     spans = page_offsets(store, document_id)
 
-    engine = _populator or _langextract_populate
+    if _populator is not None:
+        engine_name, engine = "custom", _populator
+    else:
+        engine_name = engines.resolve_engine(store, engine_name)
+        engine = engines.get_engine(engine_name)
+
     raw = engine(store=store, document=document, bundle=bundle, text=text,
                  tier=tier, opt_in=opt_in, actor_id=actor_id)
-    return normalise_population(raw, spans=spans,
-                                source_label=document.get("filename"))
-
-
-def _langextract_populate(*, store: Store, document: dict, bundle: dict,
-                          text: str, tier: str, opt_in: bool,
-                          actor_id: str | None) -> dict:
-    try:
-        import langextract as lx
-    except ImportError as exc:      # pragma: no cover - depends on the install
-        raise OrpheusError(
-            "LangExtract is not installed, and it is the extraction engine. "
-            "Install it with `pip install 'orpheus[llm]'`, or register another "
-            "engine with orpheus.population.set_populator()."
-        ) from exc
-
-    # The gate, before any text leaves. Local needs no permission; cloud needs
-    # both the org policy and this request's opt-in.
-    if tier == "cloud":
-        llm.assert_cloud_allowed(store, opt_in=opt_in, actor_id=actor_id)
-
-    config = llm.model_config(store, tier)
-    kwargs: dict[str, Any] = {
-        "text_or_documents": text,
-        "prompt_description": prompt_for(bundle),
-        "examples": examples_for(bundle),
-        "model_id": config["model_id"],
-    }
-    if config.get("model_url"):
-        kwargs["model_url"] = config["model_url"]
-    if config.get("api_key"):
-        kwargs["api_key"] = config["api_key"]
-
-    error = None
-    annotated = None
-    try:
-        annotated = lx.extract(**kwargs)
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
-    finally:
-        # Recorded either way: the question the log answers is what left this
-        # deployment, and a call that failed sent the payload just the same.
-        llm.record_llm_call(
-            store, tier=tier, purpose="populate", prompt_chars=len(text),
-            provider=config["provider"], model=config["model_id"],
-            document_id=document["document_id"], actor_id=actor_id,
-            excerpt_only=False, payload=text, error=error,
-        )
-    if error:
-        raise OrpheusError(f"Extraction failed: {error}")
-
-    return {"extractions": list(getattr(annotated, "extractions", None) or [])}
+    result = normalise_population(raw, spans=spans, text=text,
+                                  source_label=document.get("filename"))
+    result["engine"] = engine_name
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +247,8 @@ def _langextract_populate(*, store: Store, document: dict, bundle: dict,
 # ---------------------------------------------------------------------------
 
 def normalise_population(raw: Any, spans: list[tuple[int, int, int]] | None = None,
-                         source_label: str | None = None) -> dict:
+                         source_label: str | None = None,
+                         text: str | None = None) -> dict:
     """Translate an engine's output into the shape the store expects.
 
     Accepts either LangExtract's `Extraction` objects or the plain dicts a test
@@ -298,7 +265,7 @@ def normalise_population(raw: Any, spans: list[tuple[int, int, int]] | None = No
 
     entities = []
     for item in extractions:
-        entities.append(_normalise_extraction(item, spans, source_label))
+        entities.append(_normalise_extraction(item, spans, source_label, text))
 
     known = {e["instance_id"] for e in entities}
     kept, dropped = [], 0
@@ -317,13 +284,18 @@ def normalise_population(raw: Any, spans: list[tuple[int, int, int]] | None = No
             "amendments": [dict(a) for a in amendments], "dropped_edges": dropped}
 
 
-def _normalise_extraction(item: Any, spans, source_label) -> dict:
+def _normalise_extraction(item: Any, spans, source_label, text=None) -> dict:
     if isinstance(item, dict):
         interval = item.get("char_interval") or {}
         start = interval.get("start_pos") if isinstance(interval, dict) else None
         end = interval.get("end_pos") if isinstance(interval, dict) else None
         alignment = item.get("alignment_status")
-        type_id = item.get("type_id") or item.get("extraction_class") or "Unknown"
+        # Engines name this field differently: LangExtract says
+        # extraction_class, a JSON-returning model says whatever the prompt
+        # asked for. All three spellings are accepted so the seam does not
+        # depend on which engine produced the dict.
+        type_id = (item.get("type_id") or item.get("type")
+                   or item.get("extraction_class") or "Unknown")
         excerpt = item.get("excerpt") or item.get("extraction_text") or ""
         properties = dict(item.get("properties") or item.get("attributes") or {})
         confidence = item.get("confidence")
@@ -338,6 +310,16 @@ def _normalise_extraction(item: Any, spans, source_label) -> dict:
         properties = dict(getattr(item, "attributes", None) or {})
         confidence = None
         instance_id = None
+
+    # Grounding is computed, not trusted. Whatever the engine claimed, the span
+    # is located in the document here: an engine that hallucinated a quotation
+    # lands at `inferred` rather than being stored as something the document
+    # says. An engine that did its own alignment (LangExtract) agrees with this
+    # nearly always, and where it does not, the document wins.
+    if text and excerpt:
+        located_start, located_end, located_alignment = align_span(text, excerpt, start)
+        if located_alignment is not None or start is None:
+            start, end, alignment = located_start, located_end, located_alignment
 
     if confidence is None:
         confidence = confidence_for_alignment(alignment)
