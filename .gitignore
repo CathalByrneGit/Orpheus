@@ -12,3 +12,13 @@ storage/
 # Python bytecode from the Datasette plugin
 __pycache__/
 *.pyc
+
+# Python build and test artefacts
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+
+# ...except the committed test fixtures
+!tests/fixtures/*.sqlite

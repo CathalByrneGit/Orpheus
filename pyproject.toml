@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orpheus"
+version = "0.2.0"
+description = "Document intelligence with provenance, review and measurable extraction quality"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+# Datasette is the surface and the writer, but the core does not import it, so
+# a script or a test can use the store without it.
+server = ["datasette>=1.0a32"]
+pdf = ["pdfminer.six"]
+ocr = ["pytesseract", "pillow"]
+llm = ["llm"]
+dev = ["pytest>=7", "datasette>=1.0a32", "httpx", "pyyaml"]
+
+[project.scripts]
+orpheus = "orpheus.cli:cli"
+
+[tool.setuptools.packages.find]
+include = ["orpheus*"]
+
+[tool.setuptools.package-data]
+orpheus = ["bundles/*.json", "benchmarks/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning"]
