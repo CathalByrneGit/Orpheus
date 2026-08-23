@@ -10,7 +10,8 @@ configuration, not architecture:
 |---|---|---|---|
 | `gliner2` | 205M encoder, local, CPU | Named spans against a flat schema. Cannot invent a span — it labels text, so every extraction is grounded by construction. Fast, free, air-gappable. | Little reasoning. Nested or inferred values, and anything needing judgement, are out of reach. |
 | `langextract` | Library over a generative model | Chunking, parallel passes, multi-pass recall, its own alignment. Handles long documents properly. | Needs a model behind it — Ollama locally, or a cloud provider. |
-| `chat` | Any OpenAI-compatible endpoint | Whatever the model behind it is good at. OpenRouter fronts Anthropic, Google and OpenAI models through one endpoint; Ollama serves the same shape locally. | Will quote text the document does not contain, so its output is worth exactly as much as the grounding check applied to it. |
+| `llm` | Simon Willison's `llm` library | Every provider its plugins cover — Anthropic, Gemini, OpenRouter, Ollama, Mistral — from one dependency, with schema-enforced JSON where the provider supports it and real token counts for the audit log. Shares a model registry with `datasette-llm`. | Same as any general model: it will quote text the document does not contain. |
+| `chat` | Any OpenAI-compatible endpoint, no dependency | The same reach as `llm` for anything speaking that shape, with nothing to install. | No schema enforcement, no plugin ecosystem, no token counts. |
 
 Whatever the engine, the output goes through the same door: every span is
 located in the source document by `orpheus.align`, and the confidence rubric is
@@ -54,6 +55,7 @@ def available_engines() -> dict[str, bool]:
     return {
         "gliner2": _installed("gliner2") and _installed("torch"),
         "langextract": _installed("langextract"),
+        "llm": _installed("llm"),
         # Needs only an endpoint, and one is configured by default for Ollama.
         "chat": True,
     }
@@ -83,7 +85,7 @@ def resolve_engine(store: Store | None, requested: str | None = None) -> str:
         return name
 
     available = available_engines()
-    for candidate in ("langextract", "gliner2", "chat"):
+    for candidate in ("langextract", "llm", "gliner2", "chat"):
         if available.get(candidate):
             return candidate
     return "chat"
@@ -265,7 +267,144 @@ def langextract_extract(*, store: Store, document: dict, bundle: dict, text: str
 
 
 # ---------------------------------------------------------------------------
-# chat — any OpenAI-compatible endpoint
+# llm — Simon Willison's llm library and its plugin ecosystem
+# ---------------------------------------------------------------------------
+
+def extraction_schema(bundle: dict) -> dict:
+    """A JSON Schema for what an extraction pass should return.
+
+    Passed to models that can enforce it, which is the difference between
+    asking for JSON and being given it: no fenced reply to strip, no prose to
+    parse around, no retry because the model explained itself first.
+
+    `properties` is left open rather than typed per object type. A schema
+    strict enough to say which fields belong to which type would have to be a
+    union across every type in the bundle, and the providers that enforce
+    schemas do not all handle unions the same way; an open object is the shape
+    that works everywhere. Validation against the bundle happens on the way
+    into the store regardless, where it has to happen anyway.
+    """
+    type_ids = [type_id for type_id, _ in _extractable_types(bundle)]
+    return {
+        "type": "object",
+        "properties": {
+            "extractions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": type_ids},
+                        "excerpt": {
+                            "type": "string",
+                            "description": ("The text this was read from, copied "
+                                            "character for character from the "
+                                            "document."),
+                        },
+                        "properties": {"type": "object"},
+                    },
+                    "required": ["type", "excerpt", "properties"],
+                },
+            },
+        },
+        "required": ["extractions"],
+    }
+
+
+def llm_extract(*, store: Store, document: dict, bundle: dict, text: str,
+                tier: str, opt_in: bool, actor_id: str | None) -> dict:
+    """Extract through the `llm` library.
+
+    One dependency reaches every provider its plugin ecosystem covers —
+    `llm-anthropic`, `llm-gemini`, `llm-openrouter`, `llm-ollama`, `llm-mistral`
+    and the rest — so adding a provider is `pip install llm-<provider>` and a
+    model id, not an adapter. It is also the library underneath `datasette-llm`,
+    which means the core and the Datasette surface can end up sharing one model
+    registry rather than each having their own.
+
+    Keys: Orpheus passes one explicitly when it has one, and otherwise lets
+    `llm` resolve from its own keystore — which is a real convenience and worth
+    being clear about, because it means a key Orpheus never sees can still serve
+    a call. That does not weaken the gate: the gate decides *whether* a call
+    happens, and it has already decided by the time this runs.
+    """
+    try:
+        import llm as llm_lib
+    except ImportError as exc:
+        raise OrpheusError(
+            "The llm library is not installed. `pip install 'orpheus[chat]'`, "
+            "or choose another extraction_engine."
+        ) from exc
+
+    from .population import prompt_for
+
+    if tier == "cloud":
+        llm.assert_cloud_allowed(store, opt_in=opt_in, actor_id=actor_id)
+    config = llm.model_config(store, tier)
+    model_id = _llm_model_id(store, tier, config)
+
+    try:
+        model = llm_lib.get_model(model_id)
+    except Exception as exc:
+        raise OrpheusError(
+            f"llm does not know a model called {model_id!r}: {exc}. "
+            "Install the provider's plugin (for example `pip install "
+            "llm-anthropic`, `llm-gemini`, `llm-openrouter`, `llm-ollama`) or "
+            "set the {tier}_model setting to one `llm models` lists."
+        ) from exc
+
+    instructions = prompt_for(bundle)
+    kwargs: dict[str, Any] = {"system": instructions, "stream": False}
+    if getattr(model, "supports_schema", False):
+        kwargs["schema"] = extraction_schema(bundle)
+    else:
+        # No enforcement available, so the shape has to be asked for and then
+        # checked. _parse_chat_json tolerates the fenced reply that follows.
+        kwargs["system"] = instructions + "\n\n" + _JSON_INSTRUCTIONS
+    if config.get("api_key") and isinstance(model, llm_lib.KeyModel):
+        kwargs["key"] = config["api_key"]
+
+    error, content, usage = None, "", None
+    try:
+        response = model.prompt(text, **kwargs)
+        content = response.text()
+        usage = response.usage()
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    finally:
+        llm.record_llm_call(
+            store, tier=tier, purpose="populate",
+            # Real token counts when the provider reported them, rather than a
+            # character count standing in for one.
+            prompt_chars=getattr(usage, "input", None) or len(text),
+            provider="llm:" + str(getattr(model, "needs_key", None) or "local"),
+            model=model_id, document_id=document["document_id"],
+            actor_id=actor_id, excerpt_only=False, payload=text, error=error)
+    if error:
+        raise OrpheusError(f"Extraction failed: {error}")
+
+    return {"extractions": _parse_chat_json(content)}
+
+
+def _llm_model_id(store: Store | None, tier: str, config: dict) -> str:
+    if store is not None:
+        configured = store.setting(f"{tier}_llm_model", None)
+        if configured:
+            return configured
+    return os.environ.get(f"ORPHEUS_{tier.upper()}_LLM_MODEL") or config["model_id"]
+
+
+_JSON_INSTRUCTIONS = (
+    "Return JSON only, of the form "
+    '{"extractions": [{"type": "<one of the entity types above>", '
+    '"excerpt": "<verbatim text from the document>", "properties": {...}}]}. '
+    "Every `excerpt` must be copied character for character from the document. "
+    "Omit any property the document does not state. Return no prose, no "
+    "explanation and no code fence."
+)
+
+
+# ---------------------------------------------------------------------------
+# chat — any OpenAI-compatible endpoint, with no dependency at all
 # ---------------------------------------------------------------------------
 
 def chat_extract(*, store: Store, document: dict, bundle: dict, text: str,
@@ -378,5 +517,6 @@ def _parse_chat_json(content: str) -> list[dict]:
 
 
 register_engine("gliner2", gliner2_extract)
+register_engine("llm", llm_extract)
 register_engine("langextract", langextract_extract)
 register_engine("chat", chat_extract)

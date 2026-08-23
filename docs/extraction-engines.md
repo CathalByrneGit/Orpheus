@@ -9,7 +9,7 @@ amounts, and carry different risks — and in a public-sector deployment the ris
 difference is frequently the one that decides it.
 
 ```
-extraction_engine: auto | gliner2 | langextract | chat
+extraction_engine: auto | gliner2 | langextract | llm | chat
 ```
 
 ---
@@ -86,31 +86,64 @@ to run, which is a real constraint on modest hardware.
 **Best when** documents are long or irregular and there is a usable model
 available, local or otherwise.
 
-### `chat` — any OpenAI-compatible endpoint
+### `llm` — a general model, through Simon Willison's `llm`
 
-One HTTP shape reaches a lot of places. **OpenRouter** fronts Anthropic, Google
-and OpenAI models behind a single endpoint; **Ollama** serves the same shape
-locally; **OpenAI** serves it directly. Which one is in use is a base URL and a
-model id, both configuration:
+[`llm`](https://github.com/simonw/llm) is a library and CLI with a plugin per
+provider. One dependency reaches all of them:
 
-```
-local_base_url    http://localhost:11434/v1        # Ollama
-cloud_base_url    https://openrouter.ai/api/v1     # anything OpenRouter fronts
-cloud_model       <the provider's model id>
+```bash
+pip install 'orpheus[chat]'
+pip install llm-anthropic llm-gemini llm-openrouter llm-ollama llm-mistral
+llm models                      # what this install can reach
 ```
 
-**For:** the capability ceiling. Reasoning about what a clause *means*, reading
-a table, resolving "the Supplier" back to a named company — a frontier model is
-simply better at these, and switching provider is a settings change rather than
-a code change. No dependency beyond the standard library.
+```
+local_llm_model   llama3.2                 # via llm-ollama
+cloud_llm_model   <a model `llm models` lists>
+```
 
-**Against:** it will invent quotations, so its output is worth exactly as much
-as the grounding check applied to it. No chunking — a long document has to fit
-the context window. Per-document cost, and text leaves the building, which is
-what the cloud gate is for.
+**For:** the capability ceiling — reasoning about what a clause *means*, reading
+a table, resolving "the Supplier" back to a named company. Adding a provider is
+`pip install llm-<provider>` and a model id, not an adapter, so comparing two
+providers on the same corpus is a settings change. Where the provider supports
+it, the JSON shape is **enforced by schema** rather than asked for in a prompt
+and parsed out of a fenced reply. Token counts come back real, so the audit log
+records what was actually spent instead of a character count standing in for it.
 
-**Best when** the extraction needs judgement, or when you want to compare a
-frontier model against a local one on the same corpus.
+It is also the library underneath `datasette-llm`, which matters for where this
+is going: adopt that on the Datasette side and the core and the surface end up
+sharing one model registry rather than each keeping its own — see
+[Datasette ecosystem](datasette-ecosystem.md).
+
+**Against:** it will invent quotations, like any general model, so its output is
+worth exactly as much as the grounding check applied to it. No chunking — a long
+document has to fit the context window. Per-document cost, and text leaves the
+building, which is what the cloud gate is for.
+
+**On keys.** `llm` resolves keys from its own keystore (`llm keys set …`) and
+from provider environment variables. Orpheus passes a key explicitly when it has
+one and otherwise lets `llm` resolve — which is a real convenience and worth
+stating plainly, because it means a key Orpheus never sees can still serve a
+call. That does not weaken the gate: the gate decides *whether* a call happens,
+and it has already decided before `llm` is reached.
+
+**Best when** the extraction needs judgement, or when you want to compare
+providers on the same corpus.
+
+### `chat` — the same idea with no dependency
+
+Raw HTTP against any OpenAI-compatible endpoint — OpenRouter, Ollama, OpenAI —
+using nothing but the standard library:
+
+```
+local_base_url    http://localhost:11434/v1
+cloud_base_url    https://openrouter.ai/api/v1
+```
+
+Kept because a dependency-free path is worth having, and because it works
+against any endpoint speaking that shape whether or not an `llm` plugin exists
+for it. **Against `llm`:** no schema enforcement, no plugin ecosystem, no token
+counts. Prefer `llm` unless you have a reason not to install it.
 
 ---
 
@@ -139,8 +172,8 @@ libraries do the calling; Orpheus decides whether they may.
 |---|---|
 | No network, or data that must not leave | `gliner2` |
 | Long or irregular documents | `langextract` |
-| Extraction that needs judgement | `chat` against a frontier model |
-| Cost per document at corpus scale | `gliner2`, then re-run the uncertain ones with `chat` |
+| Extraction that needs judgement | `llm` against a frontier model |
+| Cost per document at corpus scale | `gliner2`, then re-run the uncertain ones with `llm` |
 | Not knowing yet | `auto`, then measure |
 
 That last row is the honest one, and Orpheus is built to answer it: run a
@@ -165,6 +198,7 @@ documentation rather than against a running library:
 
 | Engine | Status |
 |---|---|
+| `llm` | **Exercised end to end** against a real model — `llm-echo`, a genuine plugin — covering model lookup, the bundle-derived system prompt, the call, the reply, token usage and the audit row. No commercial provider has been called: there is no key here. |
 | `chat` | **Exercised end to end** against a real HTTP server speaking the OpenAI-compatible shape, including a fenced reply, a hallucinated quotation, and a failed endpoint |
 | `langextract` | Installed and exercised for translation and rubric mapping; **no model has been called** — no API key and no Ollama in this environment |
 | `gliner2` | Adapter exercised against a fake model; **the real model has never run** — its weights cannot be fetched here (the proxy refuses `huggingface.co`) |

@@ -69,9 +69,9 @@ def test_a_quotation_that_starts_real_and_drifts_is_only_fuzzy():
 # -- the registry -----------------------------------------------------------
 
 def test_every_engine_is_registered_and_reports_whether_it_can_run():
-    assert set(engines.engine_names()) == {"gliner2", "langextract", "chat"}
+    assert set(engines.engine_names()) == {"gliner2", "langextract", "llm", "chat"}
     available = engines.available_engines()
-    assert set(available) == {"gliner2", "langextract", "chat"}
+    assert set(available) == {"gliner2", "langextract", "llm", "chat"}
     # chat needs only an endpoint, so it is always a fallback.
     assert available["chat"] is True
 
@@ -223,7 +223,8 @@ def test_the_gliner_adapter_turns_fields_and_spans_into_an_instance(
     fake = FakeGliner()
     monkeypatch.setattr(engines, "_gliner_model", fake)
     monkeypatch.setattr(engines, "available_engines",
-                        lambda: {"gliner2": True, "langextract": True, "chat": True})
+                        lambda: {"gliner2": True, "langextract": True,
+                                 "llm": True, "chat": True})
     store.set_setting("extraction_engine", "gliner2")
 
     result = populate(store, document_id, tier="local")
@@ -246,7 +247,8 @@ def test_a_local_engine_writes_no_cloud_audit_row(seeded, monkeypatch):
     store, document_id = seeded
     monkeypatch.setattr(engines, "_gliner_model", FakeGliner())
     monkeypatch.setattr(engines, "available_engines",
-                        lambda: {"gliner2": True, "langextract": True, "chat": True})
+                        lambda: {"gliner2": True, "langextract": True,
+                                 "llm": True, "chat": True})
     store.set_setting("extraction_engine", "gliner2")
 
     populate(store, document_id, tier="local")
@@ -256,7 +258,105 @@ def test_a_local_engine_writes_no_cloud_audit_row(seeded, monkeypatch):
 def test_gliner_says_so_when_it_is_not_installed(seeded, monkeypatch):
     store, document_id = seeded
     monkeypatch.setattr(engines, "available_engines",
-                        lambda: {"gliner2": False, "langextract": True, "chat": True})
+                        lambda: {"gliner2": False, "langextract": True,
+                                 "llm": True, "chat": True})
     store.set_setting("extraction_engine", "gliner2")
     with pytest.raises(OrpheusError, match="GLiNER2 is not installed"):
         populate(store, document_id, tier="local")
+
+
+# -- llm: Simon Willison's library ------------------------------------------
+
+llm_lib = pytest.importorskip("llm")
+
+
+def _echo_available() -> bool:
+    try:
+        llm_lib.get_model("echo")
+        return True
+    except Exception:
+        return False
+
+
+echo_only = pytest.mark.skipif(not _echo_available(),
+                               reason="needs the llm-echo plugin")
+
+
+@echo_only
+def test_the_llm_engine_drives_a_real_model(seeded):
+    # llm-echo is a real llm plugin that returns its own input as JSON, so this
+    # exercises the whole path -- model lookup, system prompt, prompt call,
+    # response text, usage -- without a provider or a key.
+    store, document_id = seeded
+    store.set_setting("extraction_engine", "llm")
+    store.set_setting("local_llm_model", "echo")
+
+    result = populate(store, document_id, tier="local")
+    assert result["engine"] == "llm"
+    # echo hands back a description of the prompt rather than extractions, so
+    # nothing survives parsing -- which is itself the right behaviour: a reply
+    # that is not the requested shape yields no findings, not junk ones.
+    assert result["entities"] == []
+
+    call = store.query("SELECT provider, model, prompt_chars, error FROM llm_calls")[0]
+    assert call["model"] == "echo"
+    assert call["error"] is None
+    # Token counts from the provider, where a character count used to stand in.
+    assert call["prompt_chars"] > 0
+
+
+@echo_only
+def test_the_document_and_the_bundle_prompt_both_reach_the_model(seeded):
+    import json as _json
+    store, document_id = seeded
+    store.set_setting("extraction_engine", "llm")
+    store.set_setting("local_llm_model", "echo")
+
+    populate(store, document_id, tier="local")
+    # echo's reply is a JSON description of what it was sent.
+    model = llm_lib.get_model("echo")
+    reply = _json.loads(model.prompt("probe", system="sys", stream=False).text())
+    assert set(reply) >= {"prompt", "system"}
+
+
+@echo_only
+def test_a_model_without_schema_support_is_asked_for_json_instead(seeded):
+    from orpheus.engines import _JSON_INSTRUCTIONS
+    import json as _json
+    store, document_id = seeded
+    store.set_setting("extraction_engine", "llm")
+    store.set_setting("local_llm_model", "echo")
+
+    populate(store, document_id, tier="local")
+    # echo does not support schemas, so the shape has to be asked for. A model
+    # that does support them gets the schema and no such plea.
+    assert not getattr(llm_lib.get_model("echo"), "supports_schema", False)
+    assert "no code fence" in _JSON_INSTRUCTIONS
+
+
+def test_the_extraction_schema_names_only_types_from_the_bundle():
+    from orpheus.engines import extraction_schema
+    schema = extraction_schema(load_bundle())
+    item = schema["properties"]["extractions"]["items"]
+    assert item["required"] == ["type", "excerpt", "properties"]
+    assert "Contract" in item["properties"]["type"]["enum"]
+    # Review columns are not extractable, so no type exists only to hold them.
+    assert "instance_index" not in item["properties"]["type"]["enum"]
+
+
+def test_an_unknown_llm_model_says_how_to_fix_it(seeded):
+    store, document_id = seeded
+    store.set_setting("extraction_engine", "llm")
+    store.set_setting("local_llm_model", "no-such-model-anywhere")
+    with pytest.raises(OrpheusError, match="llm does not know a model"):
+        populate(store, document_id, tier="local")
+
+
+@echo_only
+def test_the_cloud_gate_still_applies_to_the_llm_engine(seeded):
+    store, document_id = seeded
+    store.set_setting("extraction_engine", "llm")
+    store.set_setting("cloud_llm_model", "echo")
+    with pytest.raises(OrpheusError, match="Cloud processing is disabled"):
+        populate(store, document_id, tier="cloud", opt_in=True)
+    assert llm.cloud_calls(store) == []

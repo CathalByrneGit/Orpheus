@@ -22,6 +22,10 @@ server = ["datasette>=1.0a32"]
 llm = ["langextract>=1.6"]
 # A local encoder: CPU-only, no API key, no network. Pulls in PyTorch.
 gliner = ["gliner2"]
+# A general model through Simon Willison's llm and its plugin ecosystem. The
+# provider plugins are separate installs by design -- pick the ones you use:
+#   pip install llm-anthropic llm-gemini llm-openrouter llm-ollama llm-mistral
+chat = ["llm>=0.20"]
 # Layout-aware parsing: page structure, reading order, tables, and OCR for
 # scanned pages. Heavy (ML models fetched on first run), so it is opt-in and
 # the pdftotext path stays as the fallback.
@@ -29,7 +33,7 @@ layout = ["docling>=2"]
 pdf = ["pdfminer.six"]
 ocr = ["pytesseract", "pillow"]
 dev = ["pytest>=7", "datasette>=1.0a32", "httpx", "pyyaml", "jsonschema",
-       "langextract>=1.6"]
+       "langextract>=1.6", "llm>=0.20", "llm-echo"]
 
 [project.scripts]
 orpheus = "orpheus.cli:cli"
