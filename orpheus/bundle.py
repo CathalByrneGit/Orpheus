@@ -604,6 +604,11 @@ def ddl(bundle: dict) -> list[str]:
             sql_type = _SQL_TYPES.get(prop.get("type", "string"), "TEXT")
             null = "" if prop.get("nullable", True) else " NOT NULL"
             columns.append(f'  "{prop["id"]}" {sql_type}{null}')
+        # Store bookkeeping, deliberately not a bundle property: declaring it
+        # as one would put it in every object-set projection, where it means
+        # nothing to anyone reading the data.
+        if "created_at" not in property_ids(obj):
+            columns.append('  "created_at" TEXT')
         keys = obj.get("primaryKey", {}).get("properties") or ["instance_id"]
         columns.append("  PRIMARY KEY (" + ", ".join(f'"{k}"' for k in keys) + ")")
         statements.append(
@@ -615,3 +620,75 @@ def ddl(bundle: dict) -> list[str]:
                 f'ON "{table}" ("document_id")'
             )
     return statements
+
+
+# ---------------------------------------------------------------------------
+# Registering a bundle in a store
+# ---------------------------------------------------------------------------
+
+def register(store, bundle: dict, actor_id: str | None = None,
+             activate: bool = True, stage: str = "production") -> dict:
+    """Store a bundle and, by default, make it the active one.
+
+    Activating applies its schema: one table per managed object type, generated
+    from the declaration rather than written by hand, so adding a type to the
+    bundle is the whole of adding a type.
+    """
+    from .utils import now, to_json
+
+    store.assert_writable()
+    if stage not in ("production", "staging"):
+        raise OrpheusError("stage must be 'production' or 'staging'.")
+    if stage == "staging" and activate:
+        raise OrpheusError(
+            "A staging bundle cannot be activated. Promote it to production first.")
+
+    validate(bundle)
+    with store.transaction():
+        store.execute(
+            "INSERT INTO bundles (bundle_id, bundle_version, bundle_json, stage, "
+            "created_at, created_by, is_active) VALUES (?, ?, ?, ?, ?, ?, 0) "
+            "ON CONFLICT(bundle_id, bundle_version) DO UPDATE SET "
+            "bundle_json = excluded.bundle_json, stage = excluded.stage",
+            (bundle["bundleId"], bundle["bundleVersion"], to_json(bundle), stage,
+             now(), actor_id))
+        if activate:
+            store.execute("UPDATE bundles SET is_active = 0")
+            store.execute(
+                "UPDATE bundles SET is_active = 1 WHERE bundle_id = ? AND bundle_version = ?",
+                (bundle["bundleId"], bundle["bundleVersion"]))
+            apply_schema(store, bundle)
+    return bundle
+
+
+def apply_schema(store, bundle: dict) -> list[str]:
+    """Create the instance tables, and add columns the bundle has gained.
+
+    Additive only. A property removed from the bundle leaves its column in
+    place, because dropping it would destroy data a reviewer may have corrected
+    by hand.
+    """
+    statements = ddl(bundle)
+    for statement in statements:
+        store.execute(statement)
+
+    for obj in managed_object_types(bundle):
+        table = table_name(obj)
+        if not table or not store.table_exists(table):
+            continue
+        existing = set(store.columns(table))
+        if "created_at" not in existing:
+            store.execute(f'ALTER TABLE "{table}" ADD COLUMN "created_at" TEXT')
+            existing.add("created_at")
+        for prop in obj.get("properties", []):
+            if prop["id"] in existing:
+                continue
+            sql_type = _SQL_TYPES.get(prop.get("type", "string"), "TEXT")
+            store.execute(f'ALTER TABLE "{table}" ADD COLUMN "{prop["id"]}" {sql_type}')
+            statements.append(f'ALTER TABLE "{table}" ADD COLUMN "{prop["id"]}"')
+    return statements
+
+
+def active(store) -> dict | None:
+    row = store.one("SELECT bundle_json FROM bundles WHERE is_active = 1")
+    return normalise(from_json(row["bundle_json"])) if row else None
