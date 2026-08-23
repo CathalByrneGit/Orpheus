@@ -68,6 +68,14 @@ empty page.
 
 Returns `document_id`, `n_pages`, `needs_ocr`, `text_source`.
 
+**Exercised against a real PDF, not a stand-in.**
+`tests/testthat/fixtures/services-agreement.pdf` is a genuine two-page PDF with
+a text layer, built by `data-raw/make_test_pdf.py`. `test-pdf.R` runs it through
+ingest and the deterministic pass and asserts the page split lands in the right
+place, `text_source` is `native` rather than a silent fall through to OCR, and
+each finding carries the page it was read from. Page attribution is the part of
+provenance a multi-page document can get wrong without anyone noticing.
+
 ## 2 — Schema discovery
 
 Occasional, and not part of a document's journey. An `ontologyDiscoverR`
@@ -112,6 +120,14 @@ is left to do the work only it can do.
   first one in the list. In *"Commencing on 1 January 2024 and shall expire on
   2026-12-31"* both cues are in range of both dates; nearest-cue is what makes
   the second one `end` rather than `start`.
+
+  Cues are matched as literal substrings, so each one is written as a **stem**:
+  `"commenc"`, `"terminat"`, `"expir"`. This is not stylistic. The table once
+  carried `"terminate on"`, which does not match *"terminates on"* — the
+  ordinary way a contract says it — and with no `end` cue matching, the nearest
+  surviving cue was `"commence"` several clauses earlier. A real contract's
+  termination date was therefore stored as its start date: not a missing fact,
+  which review would catch, but a confidently wrong one, which it might not.
 
 **The model pass** calls `orph_populate()`, which hands an `ontologyDiscoverR`
 `populate_session()` the whole schema and asks for instances and relationships.

@@ -164,10 +164,19 @@ orph_find_amounts <- function(text) {
   df[!duplicated(df$raw_text), , drop = FALSE]
 }
 
+#' Cues that say what a date is for
+#'
+#' Matched as literal substrings, so a cue must be written as a **stem** to
+#' survive ordinary inflection: `"commence"` catches commences and commencing,
+#' where `"terminate on"` caught only the bare infinitive and missed
+#' "terminates on" -- the commonest phrasing there is. A date that matches no
+#' cue is left `unknown` rather than guessed at, but one that matches the wrong
+#' cue is worse than either, because it reads as a fact.
+#'
 #' @keywords internal
 DATE_ROLE_CUES <- list(
-  start     = c("commence", "commencing", "start date", "effective from", "effective date", "with effect from"),
-  end       = c("expire", "expiry", "terminate on", "end date", "until", "termination date"),
+  start     = c("commenc", "start date", "effective from", "effective date", "with effect from"),
+  end       = c("expir", "terminat", "end date", "until", "ceases"),
   signature = c("signed", "executed", "dated this", "in witness whereof"),
   milestone = c("milestone", "delivery date", "by no later than", "deadline")
 )
