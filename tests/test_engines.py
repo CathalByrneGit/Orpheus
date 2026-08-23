@@ -389,3 +389,38 @@ def test_the_cloud_gate_still_applies_to_the_llm_engine(seeded):
     with pytest.raises(OrpheusError, match="Cloud processing is disabled"):
         populate(store, document_id, tier="cloud", opt_in=True)
     assert llm.cloud_calls(store) == []
+
+
+def test_the_audit_names_the_provider_the_key_actually_reached(monkeypatch):
+    """`provider` on an llm_calls row has to follow the key, not the default.
+
+    The cloud default is Gemini. A deployment routing through OpenRouter with an
+    OpenRouter key would otherwise write `gemini` on every audit row -- a wrong
+    answer to "where did this document's text go", which is the one question the
+    log exists to answer.
+    """
+    from orpheus import llm
+
+    for variable in ("ORPHEUS_CLOUD_API_KEY", "ORPHEUS_CLOUD_PROVIDER",
+                     "OPENROUTER_API_KEY", "LANGEXTRACT_API_KEY",
+                     "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(variable, raising=False)
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = llm.model_config(None, "cloud")
+    assert config["provider"] == "openrouter"
+    assert config["api_key"] == "sk-or-test"
+
+    monkeypatch.delenv("OPENROUTER_API_KEY")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    assert llm.model_config(None, "cloud")["provider"] == "anthropic"
+
+
+def test_a_stored_provider_setting_wins_over_the_key(store, monkeypatch):
+    # A deployment fronting several models behind one gateway names it once,
+    # rather than having it inferred per call.
+    from orpheus import llm
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    store.set_setting("cloud_provider", "acme-gateway")
+    assert llm.model_config(store, "cloud")["provider"] == "acme-gateway"

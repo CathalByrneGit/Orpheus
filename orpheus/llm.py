@@ -105,11 +105,31 @@ def model_config(store: Store | None, tier: str) -> dict:
         config["api_key"] = None
     else:
         # Read only when the gate has already allowed the call.
-        config["api_key"] = (os.environ.get("LANGEXTRACT_API_KEY")
+        config["api_key"] = (os.environ.get("ORPHEUS_CLOUD_API_KEY")
+                             or os.environ.get("OPENROUTER_API_KEY")
+                             or os.environ.get("LANGEXTRACT_API_KEY")
                              or os.environ.get("GEMINI_API_KEY")
                              or os.environ.get("ANTHROPIC_API_KEY")
                              or os.environ.get("OPENAI_API_KEY"))
+        # Which provider is serving the tier is recorded on every `llm_calls`
+        # row, so it has to follow the key that was actually used rather than
+        # stay at the default. An audit saying `gemini` for a call that went to
+        # OpenRouter is a wrong answer to "where did this document's text go".
+        config["provider"] = setting("cloud_provider", _provider_for(config))
     return config
+
+
+def _provider_for(config: dict) -> str:
+    """Name the provider from the key in hand, defaulting to the tier's."""
+    if os.environ.get("ORPHEUS_CLOUD_PROVIDER"):
+        return os.environ["ORPHEUS_CLOUD_PROVIDER"]
+    for variable, provider in (("OPENROUTER_API_KEY", "openrouter"),
+                               ("ANTHROPIC_API_KEY", "anthropic"),
+                               ("OPENAI_API_KEY", "openai"),
+                               ("GEMINI_API_KEY", "gemini")):
+        if os.environ.get(variable):
+            return provider
+    return config["provider"]
 
 
 def status(store: Store | None = None) -> dict:
