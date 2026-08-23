@@ -19,6 +19,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Iterable, Iterator, Sequence
 
 from .schema import MIGRATIONS
@@ -167,18 +168,28 @@ class Store:
 
     # -- queries -----------------------------------------------------------
 
-    def execute(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Cursor:
-        return self.conn.execute(sql, tuple(params))
+    @staticmethod
+    def _bind(params: Sequence[Any] | Mapping[str, Any]) -> Any:
+        """Positional or named, whichever the caller used.
 
-    def query(self, sql: str, params: Sequence[Any] = ()) -> list[dict]:
-        return [dict(r) for r in self.conn.execute(sql, tuple(params)).fetchall()]
+        The permission rules are written with `:actor_id` appearing several
+        times; binding those positionally means counting the occurrences, and
+        the count changes when the rule does.
+        """
+        return params if isinstance(params, Mapping) else tuple(params)
 
-    def one(self, sql: str, params: Sequence[Any] = ()) -> dict | None:
-        row = self.conn.execute(sql, tuple(params)).fetchone()
+    def execute(self, sql: str, params: Sequence[Any] | Mapping[str, Any] = ()) -> sqlite3.Cursor:
+        return self.conn.execute(sql, self._bind(params))
+
+    def query(self, sql: str, params: Sequence[Any] | Mapping[str, Any] = ()) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(sql, self._bind(params)).fetchall()]
+
+    def one(self, sql: str, params: Sequence[Any] | Mapping[str, Any] = ()) -> dict | None:
+        row = self.conn.execute(sql, self._bind(params)).fetchone()
         return dict(row) if row is not None else None
 
-    def scalar(self, sql: str, params: Sequence[Any] = ()) -> Any:
-        row = self.conn.execute(sql, tuple(params)).fetchone()
+    def scalar(self, sql: str, params: Sequence[Any] | Mapping[str, Any] = ()) -> Any:
+        row = self.conn.execute(sql, self._bind(params)).fetchone()
         return row[0] if row is not None else None
 
     def insert(self, table: str, values: dict) -> None:

@@ -26,7 +26,10 @@ EXCLUDED_STATUSES = ("rejected",)
 
 ACTIONS = ("view", "edit", "share", "delete")
 SHARE_ROLES = ("viewer", "editor")
-VISIBILITY = ("private", "department", "organisation")
+# Matches datasette-paper's three levels, which is not a coincidence: the same
+# shape solves the same problem, and it is the plugin that would enforce these
+# row by row in Datasette.
+VISIBILITY = ("private", "link-view", "link-edit")
 CLOUD_POLICIES = ("disabled", "per_user", "org_allow")
 
 # Every naive-matched corpus result carries this, so nothing downstream can
