@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CathalByrneGit/Orpheus/schemas/orpheus.bundle.schema.json",
+  "title": "Orpheus extensions to an ontologySpecR bundle",
+  "description": "Validates only what ontologySpecR leaves open. A bundle must satisfy both this and ontologySpecR.bundle.schema.json; between them they cover the whole file, because the base schema forbids additional properties everywhere else.",
+  "type": "object",
+  "required": ["extensions"],
+  "properties": {
+    "extensions": {
+      "type": "object",
+      "required": ["orpheus"],
+      "properties": {
+        "orpheus": { "$ref": "#/$defs/domain" }
+      }
+    },
+    "objects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/managedObject" }
+    }
+  },
+  "$defs": {
+    "domain": {
+      "type": "object",
+      "description": "What the engine needs to know about this domain. Without it the pipeline would have to guess which object type a document is fundamentally about, and guessing is how a general engine becomes a contract engine again.",
+      "required": ["primaryObjectType", "documentTypes"],
+      "properties": {
+        "primaryObjectType": {
+          "type": "string",
+          "description": "The object type a document is fundamentally about. Deterministic findings are linked to its instance."
+        },
+        "containerProperty": {
+          "type": "string",
+          "description": "The property on child types that holds the primary instance's id."
+        },
+        "valueProperty": {
+          "type": "string",
+          "description": "Property on the primary type holding a comparable numeric value, for corpus comparison."
+        },
+        "currencyProperty": {
+          "type": "string",
+          "description": "Property naming the unit of valueProperty. Values are only ever compared within one unit."
+        },
+        "documentTypes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "The vocabulary the classifier is given. A closed list, because an open one produces a new doc_type per document."
+        },
+        "scores": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/score" },
+          "description": "Composite scores over concepts. ontologySpecR has no equivalent, so they live here."
+        }
+      }
+    },
+    "score": {
+      "type": "object",
+      "required": ["id", "objectTypeId", "components"],
+      "properties": {
+        "id": { "type": "string" },
+        "objectTypeId": { "type": "string" },
+        "description": { "type": "string" },
+        "aggregation": { "type": "string", "enum": ["weighted_sum"] },
+        "thresholds": { "type": "object" },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["conceptId", "scope"],
+            "properties": {
+              "conceptId": { "type": "string" },
+              "scope": { "type": "string" },
+              "weight": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "managedObject": {
+      "type": "object",
+      "properties": {
+        "extensions": {
+          "type": "object",
+          "properties": {
+            "orpheus": {
+              "type": "object",
+              "properties": {
+                "managed": {
+                  "type": "boolean",
+                  "description": "Orpheus creates and owns this object type's table. An unmanaged type is read from a table someone else maintains."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

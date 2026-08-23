@@ -1,0 +1,225 @@
+{
+  "specVersion": "0.1.0",
+  "bundleId": "aviation-demo",
+  "bundleVersion": "0.1.0",
+  "metadata": {
+    "name": "Aviation Demo Ontology",
+    "description": "A demo ontology modeling airports, airlines, and flight routes.",
+    "authors": ["Cathal Byrne"],
+    "tags": ["aviation", "demo", "transport"]
+  },
+  "objects": [
+    {
+      "id": "Airport",
+      "display": {
+        "name": "Airport",
+        "pluralName": "Airports",
+        "description": "A commercial or private airport.",
+        "icon": "plane"
+      },
+      "properties": [
+        { "id": "airport_id", "type": "string", "nullable": false },
+        { "id": "name", "type": "string", "nullable": false },
+        { "id": "city", "type": "string" },
+        { "id": "country", "type": "string" },
+        { "id": "latitude", "type": "number" },
+        { "id": "longitude", "type": "number" },
+        { "id": "elevation_ft", "type": "integer" }
+      ],
+      "primaryKey": {
+        "properties": ["airport_id"],
+        "strategy": "natural"
+      },
+      "implements": ["GeoLocated"],
+      "source": {
+        "kind": "table",
+        "table": "airports",
+        "schema": "public"
+      }
+    },
+    {
+      "id": "Airline",
+      "display": {
+        "name": "Airline",
+        "pluralName": "Airlines",
+        "description": "A commercial airline company."
+      },
+      "properties": [
+        { "id": "airline_id", "type": "string", "nullable": false },
+        { "id": "name", "type": "string", "nullable": false },
+        { "id": "country", "type": "string" },
+        { "id": "active", "type": "boolean" }
+      ],
+      "primaryKey": {
+        "properties": ["airline_id"],
+        "strategy": "natural"
+      },
+      "source": {
+        "kind": "table",
+        "table": "airlines"
+      }
+    },
+    {
+      "id": "FlightRoute",
+      "display": {
+        "name": "Flight Route",
+        "pluralName": "Flight Routes",
+        "description": "A scheduled flight route between two airports."
+      },
+      "properties": [
+        { "id": "route_id", "type": "string", "nullable": false },
+        { "id": "origin_id", "type": "string", "nullable": false },
+        { "id": "destination_id", "type": "string", "nullable": false },
+        { "id": "airline_id", "type": "string", "nullable": false },
+        { "id": "stops", "type": "integer" },
+        { "id": "equipment", "type": "string" }
+      ],
+      "primaryKey": {
+        "properties": ["route_id"],
+        "strategy": "natural"
+      },
+      "source": {
+        "kind": "table",
+        "table": "routes"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "RouteOrigin",
+      "display": {
+        "name": "Route Origin",
+        "description": "Links a flight route to its origin airport."
+      },
+      "from": "FlightRoute",
+      "to": "Airport",
+      "cardinality": "many-to-one",
+      "directed": true,
+      "join": {
+        "fromKeys": ["origin_id"],
+        "toKeys": ["airport_id"]
+      }
+    },
+    {
+      "id": "RouteDestination",
+      "display": {
+        "name": "Route Destination",
+        "description": "Links a flight route to its destination airport."
+      },
+      "from": "FlightRoute",
+      "to": "Airport",
+      "cardinality": "many-to-one",
+      "directed": true,
+      "join": {
+        "fromKeys": ["destination_id"],
+        "toKeys": ["airport_id"]
+      }
+    },
+    {
+      "id": "RouteOperator",
+      "display": {
+        "name": "Route Operator",
+        "description": "Links a flight route to its operating airline."
+      },
+      "from": "FlightRoute",
+      "to": "Airline",
+      "cardinality": "many-to-one",
+      "directed": true,
+      "join": {
+        "fromKeys": ["airline_id"],
+        "toKeys": ["airline_id"]
+      }
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "GeoLocated",
+      "display": {
+        "name": "Geo-Located",
+        "description": "Any entity with geographic coordinates."
+      },
+      "requiredProperties": [
+        { "id": "latitude", "type": "number", "nullable": true },
+        { "id": "longitude", "type": "number", "nullable": true }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "id": "UpdateAirportStatus",
+      "display": {
+        "name": "Update Airport Status",
+        "description": "Mark an airport as active, closed, or under maintenance."
+      },
+      "targets": ["Airport"],
+      "parameters": [
+        { "id": "new_status", "type": "string", "required": true }
+      ],
+      "effects": [
+        { "kind": "update", "objectTypeId": "Airport", "notes": "Sets operational status." }
+      ],
+      "implementation": {
+        "kind": "r",
+        "entrypoint": "update_airport_status"
+      }
+    }
+  ],
+  "queries": [
+    {
+      "id": "NearbyAirports",
+      "display": {
+        "name": "Nearby Airports",
+        "description": "Find airports within a given radius of a point."
+      },
+      "parameters": [
+        { "id": "lat", "type": "number", "required": true },
+        { "id": "lon", "type": "number", "required": true },
+        { "id": "radius_km", "type": "number", "required": true }
+      ],
+      "returns": {
+        "kind": "objectSet",
+        "objectTypeId": "Airport"
+      },
+      "definition": {
+        "kind": "sql",
+        "body": "SELECT * FROM airports WHERE haversine(latitude, longitude, :lat, :lon) < :radius_km"
+      }
+    }
+  ],
+  "concepts": [
+    {
+      "id": "busy_airport",
+      "objectTypeId": "Airport",
+      "scope": "operations",
+      "version": 1,
+      "sqlExpr": "daily_passengers > 50000",
+      "status": "draft",
+      "display": {
+        "name": "Busy Airport",
+        "description": "An airport handling more than 50,000 passengers per day."
+      }
+    }
+  ],
+  "templates": [
+    {
+      "id": "utilisation_threshold",
+      "objectTypeId": "Airport",
+      "baseSqlExpr": "utilisation_rate > {{threshold}}",
+      "parameters": [
+        {
+          "id": "threshold",
+          "type": "number",
+          "required": false,
+          "display": {
+            "name": "Threshold",
+            "description": "Utilisation rate threshold (default 0.8)"
+          }
+        }
+      ],
+      "display": {
+        "name": "Utilisation Threshold",
+        "description": "Template for concepts that compare an airport's utilisation rate against a configurable threshold."
+      }
+    }
+  ]
+}

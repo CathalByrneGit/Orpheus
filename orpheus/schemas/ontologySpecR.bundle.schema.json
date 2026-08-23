@@ -1,0 +1,456 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CathalByrneGit/ontologySpecR/bundle.schema.json",
+  "title": "ontologySpecR Bundle",
+  "type": "object",
+  "required": ["specVersion", "bundleId", "bundleVersion", "objects", "links", "interfaces", "actions", "queries"],
+  "additionalProperties": false,
+
+  "properties": {
+    "specVersion": {
+      "type": "string",
+      "description": "Version of this contract/schema (not the ontology).",
+      "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$"
+    },
+
+    "bundleId": {
+      "type": "string",
+      "description": "Stable identifier for this ontology bundle.",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{2,128}$"
+    },
+
+    "bundleVersion": {
+      "type": "string",
+      "description": "SemVer for this bundle release.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+    },
+
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "authors": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "objects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/objectType" },
+      "default": []
+    },
+
+    "links": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/linkType" },
+      "default": []
+    },
+
+    "interfaces": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/interfaceType" },
+      "default": []
+    },
+
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/actionType" },
+      "default": []
+    },
+
+    "queries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/queryDef" },
+      "default": []
+    },
+
+    "concepts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/conceptDef" },
+      "default": []
+    },
+
+    "templates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/conceptTemplateDef" },
+      "default": []
+    },
+
+    "extensions": {
+      "type": "object",
+      "description": "Free-form extension point for non-core concepts.",
+      "additionalProperties": true
+    }
+  },
+
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{2,128}$"
+    },
+
+    "refId": {
+      "type": "string",
+      "description": "Reference to another entity by its id.",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{2,128}$"
+    },
+
+    "display": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "pluralName": { "type": "string" },
+        "description": { "type": "string" },
+        "icon": { "type": "string" }
+      }
+    },
+
+    "dataType": {
+      "type": "string",
+      "enum": ["string", "integer", "number", "boolean", "date", "datetime", "json"]
+    },
+
+    "propertyDef": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "$ref": "#/$defs/dataType" },
+        "nullable": { "type": "boolean", "default": true },
+        "display": { "$ref": "#/$defs/display" },
+
+        "source": {
+          "type": "object",
+          "description": "Optional mapping from backend schema to ontology property.",
+          "additionalProperties": false,
+          "properties": {
+            "column": { "type": "string" },
+            "expression": { "type": "string", "description": "Optional transform expression (SQL/dplyr/etc.)" }
+          }
+        },
+
+        "extensions": { "type": "object", "additionalProperties": true }
+      }
+    },
+
+    "primaryKeyDef": {
+      "type": "object",
+      "required": ["properties"],
+      "additionalProperties": false,
+      "properties": {
+        "properties": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/refId" },
+          "description": "Property ids that form the primary key."
+        },
+        "strategy": {
+          "type": "string",
+          "enum": ["natural", "surrogate"],
+          "default": "natural"
+        }
+      }
+    },
+
+    "objectType": {
+      "type": "object",
+      "required": ["id", "properties", "primaryKey"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "display": { "$ref": "#/$defs/display" },
+
+        "properties": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/propertyDef" },
+          "default": []
+        },
+
+        "primaryKey": { "$ref": "#/$defs/primaryKeyDef" },
+
+        "implements": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/refId" },
+          "description": "Interface ids implemented by this object type.",
+          "default": []
+        },
+
+        "source": {
+          "type": "object",
+          "description": "Backend binding for this object type.",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["table", "view", "query", "external"]
+            },
+            "uri": {
+              "type": "string",
+              "description": "Backend pointer. Examples: dbi://..., duckdb://..., s3://..., file://..."
+            },
+            "table": { "type": "string" },
+            "schema": { "type": "string" },
+            "sql": { "type": "string", "description": "Optional defining SQL if kind=view/query." }
+          }
+        },
+
+        "extensions": { "type": "object", "additionalProperties": true }
+      }
+    },
+
+    "linkType": {
+      "type": "object",
+      "required": ["id", "from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "display": { "$ref": "#/$defs/display" },
+
+        "from": { "$ref": "#/$defs/refId", "description": "ObjectType id (source)." },
+        "to": { "$ref": "#/$defs/refId", "description": "ObjectType id (target)." },
+
+        "cardinality": {
+          "type": "string",
+          "enum": ["one-to-one", "one-to-many", "many-to-one", "many-to-many"],
+          "default": "many-to-many"
+        },
+
+        "directed": { "type": "boolean", "default": true },
+
+        "join": {
+          "type": "object",
+          "description": "Minimal join semantics for materializing/traversing links.",
+          "additionalProperties": false,
+          "properties": {
+            "fromKeys": { "type": "array", "items": { "type": "string" } },
+            "toKeys": { "type": "array", "items": { "type": "string" } },
+            "sql": { "type": "string", "description": "Optional explicit SQL for link edges." }
+          }
+        },
+
+        "extensions": { "type": "object", "additionalProperties": true }
+      }
+    },
+
+    "interfaceType": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "display": { "$ref": "#/$defs/display" },
+
+        "requiredProperties": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/propertyRequirement" },
+          "default": []
+        },
+
+        "requiredLinks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/linkRequirement" },
+          "default": []
+        },
+
+        "requiredActions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/refId" },
+          "default": []
+        },
+
+        "extensions": { "type": "object", "additionalProperties": true }
+      }
+    },
+
+    "propertyRequirement": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "$ref": "#/$defs/dataType" },
+        "nullable": { "type": "boolean", "default": true }
+      }
+    },
+
+    "linkRequirement": {
+      "type": "object",
+      "required": ["linkTypeId"],
+      "additionalProperties": false,
+      "properties": {
+        "linkTypeId": { "$ref": "#/$defs/refId" },
+        "minCount": { "type": "integer", "minimum": 0, "default": 0 },
+        "maxCount": { "type": ["integer", "null"], "minimum": 1, "default": null }
+      }
+    },
+
+    "parameterDef": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "$ref": "#/$defs/dataType" },
+        "required": { "type": "boolean", "default": false },
+        "display": { "$ref": "#/$defs/display" }
+      }
+    },
+
+    "actionType": {
+      "type": "object",
+      "required": ["id", "targets", "parameters"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "display": { "$ref": "#/$defs/display" },
+
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/refId" },
+          "description": "ObjectType ids this action can operate on."
+        },
+
+        "parameters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/parameterDef" },
+          "default": []
+        },
+
+        "effects": {
+          "type": "array",
+          "description": "High-level description of what the action changes.",
+          "items": { "$ref": "#/$defs/effectDef" },
+          "default": []
+        },
+
+        "implementation": {
+          "type": "object",
+          "description": "How this action is executed in a runtime.",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "type": "string", "enum": ["r", "sql", "http", "plugin"] },
+            "entrypoint": { "type": "string", "description": "R function name, SQL identifier, URL, or plugin key." }
+          }
+        },
+
+        "policy": {
+          "type": "object",
+          "description": "Optional policy hooks for who can run this and on what.",
+          "additionalProperties": true
+        },
+
+        "extensions": { "type": "object", "additionalProperties": true }
+      }
+    },
+
+    "effectDef": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["create", "update", "delete", "emit"] },
+        "objectTypeId": { "$ref": "#/$defs/refId" },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "queryDef": {
+      "type": "object",
+      "required": ["id", "returns"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "display": { "$ref": "#/$defs/display" },
+
+        "parameters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/parameterDef" },
+          "default": []
+        },
+
+        "returns": {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "type": "string", "enum": ["objectSet", "table", "scalar"] },
+            "objectTypeId": { "$ref": "#/$defs/refId" }
+          }
+        },
+
+        "definition": {
+          "type": "object",
+          "description": "Minimal definition of the query.",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "type": "string", "enum": ["sql", "r", "dsl"] },
+            "body": { "type": "string", "description": "SQL text, R expression, or DSL string." }
+          }
+        },
+
+        "extensions": { "type": "object", "additionalProperties": true }
+      }
+    },
+
+    "conceptDef": {
+      "type": "object",
+      "required": ["id", "objectTypeId", "scope", "version", "sqlExpr"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "objectTypeId": { "$ref": "#/$defs/refId", "description": "Object type this concept applies to." },
+        "scope": { "type": "string", "minLength": 1, "description": "Context bucket, e.g. 'clinical', 'operations'." },
+        "version": { "type": "integer", "minimum": 1, "description": "Monotonically increasing within (id, scope)." },
+        "sqlExpr": { "type": "string", "minLength": 1, "description": "SQL expression returning boolean." },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "active", "deprecated"],
+          "default": "draft"
+        },
+        "rationale": { "type": "string", "description": "Why this definition exists." },
+        "sourceStandard": { "type": "string", "description": "External standard this maps to, e.g. 'ILO', 'WHO'." },
+        "templateId": { "$ref": "#/$defs/refId", "description": "Parent template id if inherited." },
+        "parameterValues": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Parameter overrides applied from the parent template."
+        },
+        "display": { "$ref": "#/$defs/display" },
+        "extensions": { "type": "object", "additionalProperties": true }
+      }
+    },
+
+    "conceptTemplateDef": {
+      "type": "object",
+      "required": ["id", "objectTypeId", "baseSqlExpr"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "objectTypeId": { "$ref": "#/$defs/refId", "description": "Object type this template applies to." },
+        "baseSqlExpr": { "type": "string", "minLength": 1, "description": "SQL template with {{param_name}} placeholders." },
+        "parameters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/parameterDef" },
+          "default": [],
+          "description": "Parameters that correspond to placeholders in baseSqlExpr."
+        },
+        "sourceStandard": { "type": "string" },
+        "display": { "$ref": "#/$defs/display" },
+        "extensions": { "type": "object", "additionalProperties": true }
+      }
+    }
+  }
+}
