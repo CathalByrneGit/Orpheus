@@ -315,6 +315,74 @@ def cmd_review(args) -> int:
     return 0
 
 
+def cmd_search(args) -> int:
+    """Search the corpus, or find where a name appears unextracted."""
+    from . import search as search_mod
+
+    if args.build:
+        store = open_store(args)
+        try:
+            emit(search_mod.enable_search(store, rebuild=args.rebuild), args.json)
+        finally:
+            store.close()
+        return 0
+
+    if not args.query:
+        raise OrpheusError("Give something to search for, or --build the index.")
+
+    store = open_store(args, mode="read")
+    try:
+        if args.unlinked:
+            result = search_mod.unlinked_mentions(store, args.query, limit=args.limit)
+        else:
+            result = {"pages": search_mod.search_pages(store, args.query, args.limit)}
+    finally:
+        store.close()
+
+    if args.json:
+        emit(result, True)
+        return 0
+
+    if args.unlinked:
+        print(f"{args.query!r}  (key: {result['naive_key']})")
+        print(f"\n  extracted in : {', '.join(result['linked_documents']) or 'nowhere'}")
+        print(f"  mentioned in, but not extracted:")
+        for hit in result["unlinked"] or []:
+            print(f"    {hit['document_id']}  p{hit['page_no']}")
+        if not result["unlinked"]:
+            print("    (nothing)")
+        print(f"\n  {result['caveat']}")
+    else:
+        for hit in result["pages"]:
+            snippet = " ".join((hit.get("text") or "").split())[:90]
+            print(f"  {hit['document_id']}  p{hit['page_no']}  {snippet}")
+    return 0
+
+
+def cmd_property(args) -> int:
+    """Rename or drop a property on a type, table and bundle together."""
+    from . import schema_ops
+
+    store = open_store(args)
+    try:
+        if args.action == "rename":
+            if not args.to:
+                raise OrpheusError("Give --to for a rename.")
+            result = schema_ops.rename_property(store, args.type_id, args.property_id,
+                                                args.to, actor_id=args.actor_id)
+        elif args.force:
+            result = schema_ops.force_drop_property(store, args.type_id,
+                                                    args.property_id,
+                                                    actor_id=args.actor_id)
+        else:
+            result = schema_ops.drop_property(store, args.type_id, args.property_id,
+                                              actor_id=args.actor_id)
+    finally:
+        store.close()
+    emit(result, args.json)
+    return 0
+
+
 def cmd_config(args) -> int:
     """Regenerate the Datasette files from the bundle in the store."""
     store = open_store(args, mode="read")
@@ -459,6 +527,25 @@ def build_parser() -> argparse.ArgumentParser:
     config = add("config", cmd_config, "regenerate the Datasette files")
     config.add_argument("--config", default="config/datasette.yml")
     config.add_argument("--storage-root", default="storage")
+
+    searcher = add("search", cmd_search, "search the corpus")
+    searcher.add_argument("query", nargs="?")
+    searcher.add_argument("--build", action="store_true",
+                          help="create the full-text indexes")
+    searcher.add_argument("--rebuild", action="store_true",
+                          help="with --build, rebuild an existing index")
+    searcher.add_argument("--unlinked", action="store_true",
+                          help="documents naming this with nothing extracted")
+    searcher.add_argument("--limit", type=int, default=50)
+
+    prop = add("property", cmd_property, "rename or drop a property")
+    prop.add_argument("action", choices=("rename", "drop"))
+    prop.add_argument("type_id")
+    prop.add_argument("property_id")
+    prop.add_argument("--to", help="new name, for a rename")
+    prop.add_argument("--actor-id")
+    prop.add_argument("--force", action="store_true",
+                      help="for a drop: discard values the column still holds")
 
     bundle = add("bundle", cmd_bundle, "validate a bundle")
     bundle.add_argument("path", nargs="?")

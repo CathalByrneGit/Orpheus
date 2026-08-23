@@ -32,10 +32,18 @@ chat = ["llm>=0.20"]
 # scanned pages. Heavy (ML models fetched on first run), so it is opt-in and
 # the pdftotext path stays as the fallback.
 layout = ["docling>=2"]
+# Full-text search over page text and excerpts. sqlite-utils owns the FTS
+# triggers and the query escaping; writing those by hand is possible and easy to
+# get subtly wrong.
+search = ["sqlite-utils>=3.36"]
+# Renaming, dropping or retyping a property on a table that already holds rows.
+# SQLite cannot do it in place, and the create/copy/drop/rename dance has to
+# preserve indexes and foreign keys. Same package as `search`.
+schema = ["sqlite-utils>=3.36"]
 pdf = ["pdfminer.six"]
 ocr = ["pytesseract", "pillow"]
 dev = ["pytest>=7", "datasette>=1.0a32", "httpx", "pyyaml", "jsonschema",
-       "langextract>=1.6", "llm>=0.20", "llm-echo"]
+       "langextract>=1.6", "llm>=0.20", "llm-echo", "sqlite-utils>=3.36"]
 
 [project.scripts]
 orpheus = "orpheus.cli:cli"

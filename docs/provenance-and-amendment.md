@@ -280,6 +280,38 @@ it does not, the report says so plainly rather than leaving it to be noticed:
 A rubric that does not rank correctly is worse than no rubric, because people
 trust it.
 
+### Did the engine quote things the document actually says?
+
+`confidence` records the *consequence* of grounding — an excerpt that cannot be
+located lands at `inferred`. It does not record the *cause*, and for a while
+that was all there was, which made two opposite findings the same number:
+
+| Both land at `inferred` | But |
+|---|---|
+| The engine reported low confidence in a quotation the document plainly contains | A calibrated model, working correctly |
+| The engine quoted something the document does not contain | A model that cannot be trusted with a citation |
+
+`provenance.alignment` now records which, using `align.py`'s own vocabulary —
+`match_exact`, `match_greater`, `match_lesser`, `match_fuzzy`, or NULL for
+ungrounded. `quality_report()["grounding"]` reports a fabrication rate per
+source:
+
+```
+  ai_cloud: 41/44 quotations located in the document (7% not found)
+  ai_cloud quoted text its document does not contain in 7% of findings
+  (3 of 44). Those are recorded at `inferred` rather than as fact.
+```
+
+The deterministic pass records `match_exact` too, because it finds a value *by*
+matching the text and so cannot assert what the page does not contain. That is
+exactly what separates it from a model, and it is worth being able to show
+rather than assert.
+
+`char_start` and `char_end` are stored beside it: the exact span, not a phrase
+to go looking for. Searching for the excerpt string again finds the wrong
+occurrence whenever a document repeats itself, which is what a reading UI would
+have highlighted.
+
 ### Rule precision
 
 ```python

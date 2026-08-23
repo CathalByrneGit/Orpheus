@@ -19,6 +19,7 @@ not do.
 | `jsonschema` | Validating a bundle against its two schemas | For bundle work |
 | `pdftotext` (poppler) **or** `pdfminer.six` | PDF text | For PDFs |
 | `docling` | Layout-aware parsing: reading order, tables | Optional, heavy |
+| `sqlite-utils` | Full-text search, and renaming/dropping a property | `[search]` / `[schema]` |
 | `tesseract` + `pytesseract` | OCR | For scanned documents |
 | One of `langextract` / `gliner2` / `llm` | The model pass | Unless you register your own populator |
 
@@ -43,7 +44,7 @@ deliberate — the engine choice is a setting, not an architecture. See
 python3 -m pytest
 ```
 
-307 tests, no skips with the `dev` extra installed.
+339 tests, no skips with the `dev` extra installed.
 
 ### How the tests are built
 
@@ -159,6 +160,46 @@ The route is then reachable three ways with no further work: from the plugin's
 pages, over HTTP at `/-/orpheus/api/...`, and from a script calling
 `api.handle()` directly.
 
+### Renaming or dropping a property
+
+`apply_schema()` is additive: it adds columns the bundle has gained, which is
+what makes accepting a `new_property` amendment live rather than a redeployment.
+It cannot remove or rename one, so before `schema_ops.py` a mistake in an
+ontology was permanent in any store that had already run.
+
+```bash
+orpheus --db data/orpheus.sqlite property rename Company registration_number \
+  --to company_number --actor-id act_...
+orpheus --db data/orpheus.sqlite property drop Company address --actor-id act_...
+```
+
+The table and the bundle move **together**, in one transaction, and the bundle's
+patch version bumps. A store whose two disagree is worse than one that cannot
+rename: extraction would write to a column the ontology does not declare, and
+the amendment queue exists precisely to stop that.
+
+Dropping a column that still holds values is refused. Nothing else in this store
+deletes anything — rejected rows are kept because they are evidence — so a
+silent destructive default here would be out of character. `--force` says you
+mean it, and the audit records how much went.
+
+### Searching the corpus
+
+```bash
+orpheus --db data/orpheus.sqlite search --build
+orpheus --db data/orpheus.sqlite search "Halloran Instruments"
+orpheus --db data/orpheus.sqlite search "Halloran Instruments" --unlinked
+```
+
+Two indexes, because they answer different questions: `document_pages.text` is
+what the corpus *says*, `provenance.excerpt` is what the machine *quoted*.
+
+`--unlinked` is the one that matters for building a wiki. Key matching can only
+join instances that were already extracted; this finds documents that name
+something with **nothing** extracted from them, which is where the misses are
+and which key matching cannot see by construction. The results are candidates
+for a person, labelled `naive_unresolved` like everything else built on names.
+
 ### Adding an extraction engine
 
 Write a function with the shared signature and register it in
@@ -235,6 +276,8 @@ orpheus/
 │   └── schemas/             # the two JSON Schemas a bundle is checked against
 ├── plugins/orpheus_datasette.py   # the UI, and the API mounted in-process
 ├── templates/               # the two pages
+│   ├── search.py            # full-text search, and unlinked mentions
+│   ├── schema_ops.py        # rename/drop a property, table and bundle together
 ├── config/                  # generated: metadata.yml + datasette.yml
 ├── tests/
 │   ├── e2e/browser_loop.sh  # the loop, over HTTP, against a real Datasette

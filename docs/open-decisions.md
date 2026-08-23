@@ -453,9 +453,25 @@ and the live reading-pane companion.
 The one deliberate exception is the step 9 corpus escalation, which is
 best-effort naive name matching, labelled `naive_unresolved` on every result. It
 is a stepping stone to Phase 4 resolution, and it should be **replaced** by real
-resolution rather than patched indefinitely. `naive_key()` has a test
-asserting its known failure — `"Ernst & Young"` and `"Ernst and Young"` produce
-different keys — so the limitation cannot quietly disappear.
+resolution rather than patched indefinitely. `naive_key()` has a test asserting
+its known failure — `"Ernst & Young"` and `"Ernst and Young"` produce different
+keys — so the limitation cannot quietly disappear.
+
+It had a second, worse one that was not documented because it was not known:
+`group` and `holdings` were treated as legal-form suffixes and stripped anywhere
+in a name, so `"Kestrel Medical Group"` and `"Kestrel Medical Ltd"` shared a
+key, as did `"Ardmore Holdings plc"` and `"Ardmore Ltd"`. A false *merge* is
+strictly worse than a false split: a split leaves two rows a person can join,
+while a merge combines two organisations and leaves nothing to notice — and a
+holding company is not its subsidiary, which is the distinction that matters
+most in exactly the conflict-of-interest work this is a stepping stone to. Only
+trailing legal forms are stripped now, and migration 5 recomputes stored keys.
+
+**A better tool for the same job now exists.** `search.unlinked_mentions()`
+asks the question key matching cannot: which documents *name* something with
+nothing extracted from them. Key matching can only join instances that were
+already extracted, so the misses are invisible to it by construction. That is
+the screen real resolution should be built on.
 
 ---
 
