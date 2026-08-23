@@ -294,6 +294,64 @@ def codelist_violations(store: Store, bundle: dict | None = None,
     return out
 
 
+def grounding(store: Store, document_id: str | None = None) -> dict:
+    """How often each engine quoted something the document actually contains.
+
+    The question a corpus run exists to answer, and the one `confidence` alone
+    cannot: a row at `inferred` may be there because the model reported low
+    confidence in a real quotation, or because it fabricated one. Those are
+    opposite findings — the first is a calibrated model, the second is a model
+    that cannot be trusted with a citation — and until `alignment` was recorded
+    they were the same number.
+
+    Only rows with an excerpt are counted. A finding with nothing quoted has
+    nothing to locate, so scoring it as ungrounded would blame the engine for
+    the ontology's shape.
+    """
+    clause, params = ("WHERE p.document_id = ?", (document_id,)) if document_id \
+        else ("", ())
+    rows = store.query(
+        "SELECT p.source, p.alignment, COUNT(*) AS n "
+        "FROM provenance p "
+        f"{clause}{' AND' if clause else 'WHERE'} p.excerpt IS NOT NULL "
+        "AND p.excerpt != '' "
+        "GROUP BY p.source, p.alignment", params)
+
+    by_source: dict[str, dict] = {}
+    for row in rows:
+        entry = by_source.setdefault(row["source"], {
+            "source": row["source"], "n_quoted": 0, "n_grounded": 0,
+            "n_fabricated": 0, "by_alignment": {}})
+        entry["n_quoted"] += row["n"]
+        entry["by_alignment"][row["alignment"] or "ungrounded"] = row["n"]
+        if row["alignment"]:
+            entry["n_grounded"] += row["n"]
+        else:
+            entry["n_fabricated"] += row["n"]
+
+    out = []
+    for entry in by_source.values():
+        quoted = entry["n_quoted"]
+        entry["grounded_rate"] = round(entry["n_grounded"] / quoted, 3) if quoted else None
+        entry["fabrication_rate"] = round(entry["n_fabricated"] / quoted, 3) if quoted else None
+        out.append(entry)
+    out.sort(key=lambda e: e["source"])
+
+    worst = max((e for e in out if e["n_quoted"]),
+                key=lambda e: e["fabrication_rate"], default=None)
+    if worst is None:
+        note = "Nothing has been extracted with a quotation yet."
+    elif worst["fabrication_rate"] == 0:
+        note = ("Every quotation was located in its document. No engine has "
+                "invented one.")
+    else:
+        note = (f"{worst['source']} quoted text its document does not contain "
+                f"in {worst['fabrication_rate']:.0%} of findings "
+                f"({worst['n_fabricated']} of {worst['n_quoted']}). Those are "
+                "recorded at `inferred` rather than as fact.")
+    return {"by_source": out, "note": note}
+
+
 def quality_report(store: Store, document_id: str | None = None,
                    min_reviewed: int = 5) -> dict:
     """Everything above, in one call, with the verdict said out loud."""
@@ -314,6 +372,7 @@ def quality_report(store: Store, document_id: str | None = None,
         "headline": headline,
         "extraction": quality,
         "calibration": calibration,
+        "grounding": grounding(store, document_id),
         "concept_precision": concept_precision(store, document_id, min_reviewed),
         "property_corrections": property_corrections(store, document_id),
         "codelist_violations": codelist_violations(store, document_id=document_id),

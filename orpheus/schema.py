@@ -306,4 +306,93 @@ MIGRATIONS: list[dict] = [
     ON concept_versions (concept_id, scope, status)""",
         ],
     },
+    {
+        "version": 4,
+        "name": "provenance_grounding",
+        "statements": [
+            # Where the excerpt was found, and how well it matched.
+            #
+            # The confidence column already carried the *consequence* of
+            # grounding -- a quotation the document does not contain lands at
+            # `inferred`. It did not carry the *cause*, so "0.5 because the
+            # model could not be located" and "0.5 because the model said so"
+            # were indistinguishable afterwards. Separating them is the whole
+            # question a corpus run exists to answer: how often does this model
+            # invent a quotation?
+            #
+            # NULL alignment means ungrounded, which is align.py's own
+            # vocabulary rather than a new one.
+            "ALTER TABLE provenance ADD COLUMN alignment TEXT",
+            # The exact span, not a phrase to go looking for. A reading UI
+            # highlights from these; searching for the excerpt string again
+            # finds the wrong occurrence whenever a document repeats itself.
+            "ALTER TABLE provenance ADD COLUMN char_start INTEGER",
+            "ALTER TABLE provenance ADD COLUMN char_end INTEGER",
+            "CREATE INDEX IF NOT EXISTS idx_provenance_alignment "
+            "ON provenance (alignment)",
+        ],
+    },
+    {
+        "version": 5,
+        "name": "recompute_naive_keys",
+        # `naive_key` stripped "group" and "holdings" anywhere in a name, and
+        # they are not legal forms -- they are name components, and they denote
+        # a *different legal entity* in a corporate structure. "Kestrel Medical
+        # Group" and "Kestrel Medical Ltd" therefore shared a key, as did
+        # "Ardmore Holdings plc" and "Ardmore Ltd".
+        #
+        # A false merge is worse than the false split this function is
+        # documented as having. A split leaves two rows a person can join; a
+        # merge combines two organisations and leaves nothing to notice. Stored
+        # keys are recomputed here so an existing store stops matching on the
+        # old basis rather than carrying it forward invisibly.
+        "run": lambda store: _recompute_naive_keys(store),
+    },
 ]
+
+
+def _recompute_naive_keys(store) -> int:
+    """Rewrite every stored `naive_key` with the current function.
+
+    Which tables carry the column is a bundle question, so it is read from the
+    schema rather than assumed. On a store with no bundle applied yet there are
+    none, and this is correctly a no-op.
+    """
+    from .utils import naive_key, new_id, now, to_json
+
+    tables = [row[0] for row in store.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        "AND name LIKE 'instances_%'")]
+
+    changed = 0
+    for table in tables:
+        columns = {row[1] for row in store.execute(f'PRAGMA table_info("{table}")')}
+        if not {"naive_key", "name"} <= columns:
+            continue
+        for row in store.query(
+                f'SELECT instance_id, name, naive_key FROM "{table}" '
+                "WHERE name IS NOT NULL AND name != ''"):
+            fresh = naive_key(row["name"])
+            if fresh == row["naive_key"]:
+                continue
+            store.execute(f'UPDATE "{table}" SET naive_key = ? WHERE instance_id = ?',
+                          (fresh, row["instance_id"]))
+            changed += 1
+
+    if changed:
+        # Corpus matching ran on the old keys, so any comparison built on it is
+        # now out of date. Silently stale is worse than visibly stale, which is
+        # the whole reason the staleness machinery exists.
+        store.execute(
+            "UPDATE concept_evaluations SET stale = 1, stale_reason = ? "
+            "WHERE kind = 'corpus' AND COALESCE(stale, 0) = 0",
+            ("Name matching keys were recomputed; corpus matches need re-running.",))
+        store.execute(
+            "INSERT INTO edit_history (id, table_name, row_id, document_id, action, "
+            "previous_value, new_value, edited_by, edited_at, note) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (new_id("edit"), "instances_*", "naive_key", None, "migrate", None,
+             to_json({"rows_changed": changed, "migration": 5}), None, now(),
+             "Legal-form suffixes are now stripped only where they trail, so a "
+             "holding company no longer shares a key with its subsidiary."))
+    return changed

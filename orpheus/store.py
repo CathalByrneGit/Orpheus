@@ -303,8 +303,16 @@ class Store:
             if migration["version"] in applied:
                 continue
             with self.transaction():
-                for statement in migration["statements"]:
+                for statement in migration.get("statements", ()):
                     self.conn.execute(statement)
+                # A data migration cannot always be written as SQL: recomputing
+                # a derived column needs the Python that derives it. Running it
+                # here, inside the same transaction and recorded in the same
+                # table, means it happens exactly once like any other migration
+                # rather than becoming a maintenance command someone has to
+                # remember.
+                if migration.get("run"):
+                    migration["run"](self)
                 self.conn.execute(
                     "INSERT INTO schema_migrations (version, name, applied_at) "
                     "VALUES (?, ?, ?)",

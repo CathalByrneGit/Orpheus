@@ -83,23 +83,55 @@ def require_string(value: Any, arg: str) -> str:
 
 
 _PUNCT = re.compile(r"[^\w\s]", re.UNICODE)
-_SUFFIXES = re.compile(
-    r"\b(limited|ltd|plc|llp|llc|inc|incorporated|company|co|group|holdings|the)\b"
+
+# Legal forms only, and only where they trail. These say how a company is
+# incorporated, not who it is, so two renderings of one name differ only by
+# which of them is present: "Halloran Instruments, Inc." and "Halloran
+# Instruments Inc" are the same company written twice.
+#
+# `group` and `holdings` were on this list and are deliberately not any more.
+# They are name components, and worse, they denote a *different legal entity*
+# in a corporate structure -- a holding company is not its subsidiary. Stripping
+# them merged "Kestrel Medical Group" with "Kestrel Medical Ltd", and "Ardmore
+# Holdings plc" with "Ardmore Ltd". That is a false merge, which is strictly
+# worse than the false split this function is documented as having: a split
+# leaves two rows a person can join, while a merge combines two organisations
+# and leaves nothing to notice. Conflating a parent with its subsidiary is also
+# precisely the error that matters most in procurement and conflict-of-interest
+# work, which is where this is heading.
+_LEGAL_FORMS = (
+    "limited", "ltd", "plc", "llp", "llc", "lp", "inc", "incorporated",
+    "corporation", "corp", "company", "co", "sa", "nv", "bv", "ag", "gmbh",
+    "oy", "ab", "as", "aps", "pty", "dac", "cic", "ug", "kg", "srl", "spa",
+    # Irish-registered companies file under the Irish forms too.
+    "teoranta", "teo", "cpt", "ct",
 )
+_TRAILING_FORM = re.compile(
+    r"(?:\s+(?:" + "|".join(_LEGAL_FORMS) + r"))+$"
+)
+_LEADING_THE = re.compile(r"^the\s+")
 _SPACE = re.compile(r"\s+")
 
 
 def naive_key(name: Any) -> str:
     """Normalise a name for naive cross-document matching.
 
-    Deliberately crude: lowercase, strip punctuation, drop common company
-    suffixes, collapse whitespace. This is a stepping stone to entity
-    resolution, not entity resolution, and anything built on it must be
+    Deliberately crude: lowercase, strip punctuation, drop a leading "the" and
+    any trailing legal forms, collapse whitespace. This is a stepping stone to
+    entity resolution, not entity resolution, and anything built on it must be
     labelled unresolved -- see `rubric.NAIVE_RESOLUTION`. Its known failure is
     tested rather than hidden: "Ernst & Young" and "Ernst and Young" produce
     different keys, because the ampersand becomes a space and the word does not.
+
+    Trailing, and repeatedly, because "Foo Co Ltd" is one company under two
+    stacked forms. Anchoring matters: an unanchored match took the "co" out of
+    "Costa Coffee" and the "the" out of "The Boston Consulting Group".
     """
     text = str(name or "").lower()
     text = _PUNCT.sub(" ", text)
-    text = _SUFFIXES.sub(" ", text)
-    return _SPACE.sub(" ", text).strip()
+    text = _SPACE.sub(" ", text).strip()
+    text = _LEADING_THE.sub("", text)
+    stripped = _TRAILING_FORM.sub("", text).strip()
+    # A name that is *only* a legal form keeps it, since an empty key would
+    # match every other empty key.
+    return stripped or text

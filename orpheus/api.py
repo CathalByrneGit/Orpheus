@@ -362,6 +362,20 @@ def get_quality(store, actor, body, **_):
                                   min_reviewed=int(body.get("min_reviewed", 5)))
 
 
+@route("GET", "/grounding")
+def get_grounding(store, actor, body, **_):
+    """How often each engine quoted something its document contains.
+
+    Corpus-wide, so administrator-only for the same reason as `/quality`: it
+    spans documents the caller may not be able to read.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Corpus-wide grounding spans documents you may not be able to "
+            "read, so it is an administrator view.")
+    return quality.grounding(store)
+
+
 @route("GET", r"/documents/(?P<document_id>[^/]+)/quality", permission="view")
 def get_document_quality(store, document_id, body, **_):
     return quality.quality_report(store, document_id,

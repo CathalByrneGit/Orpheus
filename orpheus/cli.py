@@ -271,6 +271,16 @@ def cmd_report(args) -> int:
     for inversion in calibration.get("inversions", []):
         print(f"    ! {inversion}")
 
+    # The finding a corpus run exists for: did the engine quote things the
+    # document actually says?
+    for entry in report["grounding"]["by_source"]:
+        if not entry["n_quoted"]:
+            continue
+        print(f"\n  {entry['source']}: {entry['n_grounded']}/{entry['n_quoted']} "
+              f"quotations located in the document "
+              f"({entry['fabrication_rate']:.0%} not found)")
+    print(f"  {report['grounding']['note']}")
+
     corrections = report["property_corrections"]
     if corrections:
         print("\n  most corrected:")

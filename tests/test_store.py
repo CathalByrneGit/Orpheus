@@ -8,8 +8,14 @@ from orpheus.utils import OrpheusError
 
 
 def test_a_new_store_is_migrated_and_in_wal_mode(store):
+    from orpheus.schema import MIGRATIONS
+
     versions = [r["version"] for r in store.query("SELECT version FROM schema_migrations")]
-    assert versions == [1, 2, 3]
+    # Every declared migration, in order, and no gaps. Pinned to MIGRATIONS
+    # rather than to a literal list, because a literal one fails on every new
+    # migration and says nothing about whether that migration was correct.
+    assert versions == sorted(m["version"] for m in MIGRATIONS)
+    assert versions == list(range(1, len(versions) + 1))
     assert store.scalar("PRAGMA journal_mode") == "wal"
 
 
@@ -123,3 +129,123 @@ def test_settings_round_trip_and_upsert(store):
     store.set_setting("cloud_ai_policy", "opt_in")
     assert store.setting("cloud_ai_policy") == "opt_in"
     assert store.scalar("SELECT COUNT(*) FROM org_settings WHERE key='cloud_ai_policy'") == 1
+
+
+# -- naive_key, and the migration that repairs stored ones -------------------
+
+def test_a_holding_company_no_longer_shares_a_key_with_its_subsidiary():
+    """The suffix list once stripped `group` and `holdings` anywhere in a name.
+
+    Those are not legal forms — they are name components, and they denote a
+    different legal entity in a corporate structure. The result was a false
+    merge, which is strictly worse than the false split this function is
+    documented as having: a split leaves two rows a person can join, while a
+    merge combines two organisations and leaves nothing to notice.
+    """
+    from orpheus.utils import naive_key
+
+    for parent, child in (("Kestrel Medical Group", "Kestrel Medical Ltd"),
+                          ("Ardmore Holdings plc", "Ardmore Ltd"),
+                          ("CRH Group", "CRH plc"),
+                          ("Smith Group", "Smith Holdings")):
+        assert naive_key(parent) != naive_key(child), (parent, child)
+
+
+def test_two_renderings_of_one_company_still_match():
+    from orpheus.utils import naive_key
+
+    for a, b in (("Halloran Instruments, Inc.", "Halloran Instruments Inc"),
+                 ("Ardmore Digital Limited", "ARDMORE DIGITAL LTD"),
+                 ("Foo Co Ltd", "Foo Limited"),          # stacked forms
+                 ("The Kestrel Group", "Kestrel Group")):  # a leading article
+        assert naive_key(a) == naive_key(b), (a, b)
+
+
+def test_a_legal_form_inside_a_name_is_left_alone():
+    # Unanchored matching took the "co" out of "Costa Coffee".
+    from orpheus.utils import naive_key
+
+    assert naive_key("Costa Coffee") == "costa coffee"
+    assert naive_key("The Boston Consulting Group") == "boston consulting group"
+    # A name that is only a legal form keeps it: an empty key would match every
+    # other empty key.
+    assert naive_key("Company") == "company"
+    assert naive_key("") == ""
+
+
+def test_the_known_false_split_is_still_there():
+    # Documented rather than hidden, so the limitation cannot quietly vanish.
+    from orpheus.utils import naive_key
+
+    assert naive_key("Ernst & Young") != naive_key("Ernst and Young")
+
+
+def test_stored_keys_are_recomputed_when_an_old_store_is_opened(tmp_path):
+    import orpheus.bundle as bundle_mod
+
+    path = tmp_path / "old.sqlite"
+    store = Store(str(path), mode="write")
+    bundle_mod.register(store, bundle_mod.load())
+    bundle_mod.apply_schema(store, bundle_mod.load())
+    store.execute("INSERT INTO documents (document_id, filename, file_hash, byte_size,"
+                  " n_pages, date_added, visibility, review_status)"
+                  " VALUES ('doc_1','a.txt','h',10,1,datetime('now'),'private','unreviewed')")
+    for instance_id, name in (("i1", "Kestrel Medical Group"),
+                              ("i2", "Kestrel Medical Ltd")):
+        store.execute(
+            "INSERT INTO instances_Company (instance_id, document_id, name, naive_key,"
+            " source, confidence, status, created_at)"
+            " VALUES (?,?,?,?,'ai_local',1.0,'unconfirmed',datetime('now'))",
+            (instance_id, "doc_1", name, "kestrel medical"))   # the old key, shared
+    store.execute("DELETE FROM schema_migrations WHERE version = 5")
+    store.conn.commit()
+    store.close()
+
+    reopened = Store(str(path), mode="write", force_lock=True)
+    try:
+        keys = [r["naive_key"] for r in reopened.query(
+            "SELECT naive_key FROM instances_Company ORDER BY instance_id")]
+        assert len(set(keys)) == 2, keys
+        # The recompute is recorded, like any other change to the store.
+        assert reopened.one("SELECT note FROM edit_history WHERE action = 'migrate'")
+    finally:
+        reopened.close()
+
+
+def test_recomputing_marks_corpus_comparisons_stale(tmp_path):
+    # They were computed on the old keys. Silently stale is worse than visibly
+    # stale, which is the whole reason the staleness machinery exists.
+    import orpheus.bundle as bundle_mod
+
+    path = tmp_path / "stale.sqlite"
+    store = Store(str(path), mode="write")
+    bundle_mod.register(store, bundle_mod.load())
+    bundle_mod.apply_schema(store, bundle_mod.load())
+    store.execute("INSERT INTO documents (document_id, filename, file_hash, byte_size,"
+                  " n_pages, date_added, visibility, review_status)"
+                  " VALUES ('doc_1','a.txt','h',10,1,datetime('now'),'private','unreviewed')")
+    store.execute("INSERT INTO instances_Company (instance_id, document_id, name, naive_key,"
+                  " source, confidence, status, created_at)"
+                  " VALUES ('i1','doc_1','Kestrel Medical Group','kestrel medical',"
+                  " 'ai_local',1.0,'unconfirmed',datetime('now'))")
+    store.execute(
+        "INSERT INTO concept_evaluations (evaluation_id, concept_id, concept_version,"
+        " concept_scope, kind, scope, target_document_id, result, source, confidence,"
+        " status, generated_at, stale) VALUES ('ev1','m',1,'corpus','corpus',"
+        " 'document','doc_1','{}','ai_local',1.0,'unconfirmed',datetime('now'),0)")
+    store.execute("DELETE FROM schema_migrations WHERE version = 5")
+    store.conn.commit()
+    store.close()
+
+    reopened = Store(str(path), mode="write", force_lock=True)
+    try:
+        row = reopened.one("SELECT stale, stale_reason FROM concept_evaluations")
+        assert row["stale"] == 1
+        assert "recomputed" in row["stale_reason"]
+    finally:
+        reopened.close()
+
+
+def test_a_fresh_store_needs_no_recompute(store):
+    # Nothing to repair, and no spurious audit row claiming otherwise.
+    assert store.one("SELECT 1 FROM edit_history WHERE action = 'migrate'") is None

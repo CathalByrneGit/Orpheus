@@ -28,7 +28,8 @@ from .audit import record_edit
 from .deterministic import (AMOUNT_ROLE_CUES, DATE_ROLE_CUES, find_amounts,
                             find_dates, infer_role)
 from .ingest import document_pages, get_document, has_text
-from .population import populate
+from .align import MATCH_EXACT
+from .population import page_offsets, populate
 from .rubric import EXCLUDED_STATUSES, RESERVED_PROPS, snap_confidence
 from .store import Store
 from .utils import OrpheusError, from_json, naive_key, new_id, now, to_json
@@ -117,13 +118,22 @@ def insert_instance(store: Store, bundle: dict, type_id: str, instance_id: str,
 
 def write_provenance(store: Store, instance_id: str, document_id: str,
                      source_label: str, source: str, page_no: int | None,
-                     excerpt: str, confidence: float) -> None:
-    """The immutable record of what the machine said.
+                     excerpt: str, confidence: float,
+                     alignment: str | None = None,
+                     char_start: int | None = None,
+                     char_end: int | None = None) -> None:
+    """The immutable record of what the machine said, and where it found it.
 
     Separate from the instance row on purpose. Amending an instance overwrites
     its values and sets `source = 'human'`, correctly — it is ground truth now.
     Without this row there would then be nothing left saying what the machine
     had claimed, and no way to ask afterwards whether it was any good.
+
+    `alignment` is why the confidence is what it is. The two are related but not
+    interchangeable: an engine may report low confidence in a quotation the
+    document plainly contains, and may report high confidence in one it does
+    not. Only the second is a fabrication, and only this column can tell them
+    apart afterwards.
     """
     store.insert("provenance", {
         "provenance_id": new_id("prov"),
@@ -134,6 +144,9 @@ def write_provenance(store: Store, instance_id: str, document_id: str,
         "excerpt": excerpt,
         "confidence": snap_confidence(confidence),
         "source": source,
+        "alignment": alignment,
+        "char_start": char_start,
+        "char_end": char_end,
         "created_at": now(),
     })
 
@@ -163,7 +176,10 @@ def persist_population(store: Store, document_id: str, bundle: dict,
             write_provenance(store, new, document_id,
                              entity.get("source_label") or "",
                              source, entity.get("page_no"),
-                             entity.get("excerpt") or "", entity.get("confidence"))
+                             entity.get("excerpt") or "", entity.get("confidence"),
+                             alignment=entity.get("alignment"),
+                             char_start=entity.get("char_start"),
+                             char_end=entity.get("char_end"))
 
             obj = bundle_mod.object_type(bundle, entity["type_id"])
             record_edit(store, bundle_mod.table_name(obj), new, document_id, "extract",
@@ -310,12 +326,23 @@ def run_deterministic_pass(store: Store, document_id: str, bundle: dict,
     failed model call.
     """
     written = 0
+    # Where each page's text begins in the whole-document string. The
+    # deterministic pass reads a page at a time, so its offsets are page-local;
+    # the model pass works on the joined document. Both write to the same
+    # char_start/char_end columns, so both have to mean the same thing —
+    # otherwise a reading UI highlights the right span on the wrong page.
+    text_starts = {
+        page_no: start + len(f"--- Page {page_no} ---\n")
+        for page_no, start, _ in page_offsets(store, document_id)
+    }
+
     with store.transaction():
         for page in document_pages(store, document_id):
             text = page["text"] or ""
             page_no = page["page_no"]
             if not text.strip():
                 continue
+            offset = text_starts.get(page_no, 0)
 
             for found in find_dates(text):
                 if deterministic_finding_exists(store, "instances_KeyDate",
@@ -331,7 +358,16 @@ def run_deterministic_pass(store: Store, document_id: str, bundle: dict,
                 write_provenance(store, instance_id, document_id, "deterministic:date",
                                  "ai_local", page_no,
                                  excerpt_around(text, found["position"], found["raw_text"]),
-                                 found["confidence"])
+                                 found["confidence"],
+                                 # Found *by* matching the text, so it is
+                                 # grounded by construction: the pattern pass
+                                 # cannot assert something the page does not
+                                 # contain, which is exactly what separates it
+                                 # from a model.
+                                 alignment=MATCH_EXACT,
+                                 char_start=offset + found["position"],
+                                 char_end=offset + found["position"]
+                                 + len(found["raw_text"]))
                 record_edit(store, "instances_KeyDate", instance_id, document_id, "extract",
                             new={"value": found["value"], "date_role": role,
                                  "source": "ai_local"},
@@ -355,7 +391,16 @@ def run_deterministic_pass(store: Store, document_id: str, bundle: dict,
                 write_provenance(store, instance_id, document_id, "deterministic:amount",
                                  "ai_local", page_no,
                                  excerpt_around(text, found["position"], found["raw_text"]),
-                                 found["confidence"])
+                                 found["confidence"],
+                                 # Found *by* matching the text, so it is
+                                 # grounded by construction: the pattern pass
+                                 # cannot assert something the page does not
+                                 # contain, which is exactly what separates it
+                                 # from a model.
+                                 alignment=MATCH_EXACT,
+                                 char_start=offset + found["position"],
+                                 char_end=offset + found["position"]
+                                 + len(found["raw_text"]))
                 record_edit(store, "instances_MonetaryAmount", instance_id, document_id,
                             "extract",
                             new={"amount": found["amount"], "currency": found["currency"],

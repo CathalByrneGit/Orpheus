@@ -13,10 +13,11 @@ import pytest
 
 import orpheus.bundle as bundle_mod
 from orpheus.concepts import evaluate_concepts, setup_concepts
-from orpheus.extract import extract
+from orpheus.extract import extract, run_deterministic_pass
 from orpheus.ingest import ingest
 from orpheus.population import set_populator
 from orpheus.quality import (codelist_violations, concept_precision,
+                             grounding,
                              confidence_calibration, extraction_quality,
                              property_corrections, quality_report)
 from orpheus.review import amend_instance, confirm_instance, reject_instance
@@ -257,7 +258,7 @@ def test_the_report_says_the_verdict_out_loud(corpus):
     report = quality_report(store, min_reviewed=5)
     assert "confirmed as extracted" in report["headline"]
     assert report["calibration"]["verdict"] == "monotonic"
-    assert set(report) == {"headline", "extraction", "calibration",
+    assert set(report) == {"headline", "extraction", "calibration", "grounding",
                            "concept_precision", "property_corrections",
                            "codelist_violations"}
 
@@ -265,3 +266,87 @@ def test_the_report_says_the_verdict_out_loud(corpus):
 def test_the_report_refuses_to_pronounce_on_too_little_evidence(store):
     report = quality_report(store)
     assert "Not enough to say anything" in report["headline"]
+
+
+# -- grounding ---------------------------------------------------------------
+
+def test_grounding_separates_a_fabrication_from_an_unsure_model(store, tmp_path):
+    """`confidence` alone cannot tell the two apart, and they are opposites.
+
+    A row at `inferred` may be there because the engine reported low confidence
+    in a quotation the document plainly contains, or because it invented one.
+    The first is a calibrated model; the second cannot be trusted with a
+    citation.
+    """
+    store.insert("actors", {"actor_id": "act_test", "display_name": "T",
+                            "is_admin": 1, "created_at": "2026-01-01T00:00:00Z"})
+    bundle_mod.register(store, bundle_mod.load(), actor_id="act_test")
+    document_id = ingest(store, PDF, actor_id="act_test",
+                         storage_root=tmp_path / "storage")["document_id"]
+
+    set_populator(lambda **kw: {"extractions": [
+        # Verbatim -- the fixture really says this.
+        {"type": "Company", "excerpt": "Ardmore Digital Limited",
+         "properties": {"name": "Ardmore Digital Limited"}},
+        # Nothing like this is anywhere in the document.
+        {"type": "Company", "excerpt": "Invented Holdings Incorporated of Atlantis",
+         "properties": {"name": "Invented Holdings Incorporated"}},
+    ]})
+    extract(store, document_id, tier="local", actor_id="act_test")
+
+    report = grounding(store)
+    ai = next(e for e in report["by_source"] if e["source"] == "ai_local")
+    assert ai["n_grounded"] >= 1
+    assert ai["n_fabricated"] == 1
+    assert 0 < ai["fabrication_rate"] < 1
+    assert "does not contain" in report["note"]
+
+    # And the two are distinguishable in the store, not merely in the summary.
+    rows = {r["alignment"]: r["excerpt"] for r in
+            store.query("SELECT alignment, excerpt FROM provenance "
+                        "WHERE excerpt LIKE '%Ardmore Digital Limited%' "
+                        "   OR excerpt LIKE 'Invented%'")}
+    assert rows[None].startswith("Invented")
+    assert "match_exact" in rows
+
+
+def test_the_deterministic_pass_is_grounded_by_construction(store, tmp_path):
+    # It finds a value *by* matching the text, so it cannot assert something
+    # the page does not contain. That is exactly what separates it from a model.
+    store.insert("actors", {"actor_id": "act_test", "display_name": "T",
+                            "is_admin": 1, "created_at": "2026-01-01T00:00:00Z"})
+    bundle_mod.register(store, bundle_mod.load(), actor_id="act_test")
+    document_id = ingest(store, PDF, actor_id="act_test",
+                         storage_root=tmp_path / "storage")["document_id"]
+    run_deterministic_pass(store, document_id, bundle_mod.load(), "act_test")
+
+    rows = store.query("SELECT alignment, char_start, char_end, excerpt "
+                       "FROM provenance WHERE source_label LIKE 'deterministic:%'")
+    assert rows
+    assert all(r["alignment"] == "match_exact" for r in rows)
+    assert all(r["char_start"] is not None and r["char_end"] > r["char_start"]
+               for r in rows)
+    assert grounding(store)["by_source"][0]["fabrication_rate"] == 0
+
+
+def test_the_span_points_at_the_document_not_the_page(store, tmp_path):
+    """Both passes write to one pair of columns, so both must mean the same.
+
+    The deterministic pass reads a page at a time and the model pass reads the
+    joined document. Page-local offsets in the same column would highlight the
+    right span on the wrong page.
+    """
+    from orpheus.population import document_text
+
+    store.insert("actors", {"actor_id": "act_test", "display_name": "T",
+                            "is_admin": 1, "created_at": "2026-01-01T00:00:00Z"})
+    bundle_mod.register(store, bundle_mod.load(), actor_id="act_test")
+    document_id = ingest(store, PDF, actor_id="act_test",
+                         storage_root=tmp_path / "storage")["document_id"]
+    run_deterministic_pass(store, document_id, bundle_mod.load(), "act_test")
+
+    text = document_text(store, document_id)
+    for row in store.query("SELECT p.char_start, p.char_end, k.raw_text "
+                           "FROM provenance p JOIN instances_KeyDate k "
+                           "  ON k.instance_id = p.instance_id"):
+        assert text[row["char_start"]:row["char_end"]] == row["raw_text"]
