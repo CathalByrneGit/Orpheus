@@ -100,7 +100,7 @@ and no language choice touches it: see *Extraction quality is unmeasured* below.
 **Settled: the engine is domain-neutral and the bundle carries the domain.**
 
 Phase 1 was specified around contracts and the code drifted into assuming them —
-`compare_contract_values()` selected from `instances_Contract` by name,
+`compare_primary_values()` once selected from `instances_Contract` by name,
 deterministic findings were linked by a hardcoded `contract_instance_id`, the
 classifier's vocabulary was a constant, and a Datasette canned query listed the
 instance tables of one domain.
@@ -263,8 +263,8 @@ information-governance people, not a technical one.
 
 **Deliberately not settled. A provider registry was built instead.**
 
-`set_ocr_backend()` takes any `f(image_path) -> text`. Built-in fallbacks are
-`pytesseract` then a `tesseract` binary. With no backend, pages are marked
+`textract.set_ocr_provider()` takes any `f(image_path) -> text`. Built-in
+fallbacks are `pytesseract` then a `tesseract` binary. With no backend, pages are marked
 `needs_ocr` rather than passed off as empty.
 
 A third candidate arrived with the port: **Docling** does layout-aware parsing
@@ -366,6 +366,36 @@ configured, have someone who knows the domain review a sample, and read
 Nothing else on this list is worth deciding before that number exists. A
 language, a storage engine and an identity provider are all answerable later; an
 extraction pipeline nobody has measured is answerable only by measuring it.
+
+---
+
+## What leaves the building on a cloud call
+
+**Status: open, and it was quietly answered wrongly until this cleanup.**
+
+The cloud gate decides *whether* a call happens. It says nothing about *how
+much* goes with it, and the two are separate questions a deployment handling
+sensitive contracts needs both answers to.
+
+The R implementation scored pages against clause-related terms and sent the best
+few. That was not ported. `populate()` sends `document_text()` — the whole
+document — to whichever engine, and all three engines record `excerpt_only=False`
+on the `llm_calls` row.
+
+**The audit was telling the truth and `/capabilities` was not.** It read a
+`cloud_send_mode` setting that defaulted to `"excerpt"` and that nothing
+implemented, so a deployment checking what it sends would have been told its
+contracts left in fragments when they left whole. That claim is now removed:
+`send_mode` reports `full_document`, with a note saying classification is the
+only pass that truncates.
+
+**What would settle it:** whether excerpt selection is wanted at all. It is not
+obviously right — sending a model four pages of a forty-page agreement is how
+you miss the clause on page thirty-one, and the extraction quality cost is
+unmeasured. The honest options are to implement it and measure both, or to
+decide that the cloud tier is for documents a deployment is willing to send
+whole and let the gate carry the whole decision. Either is defensible; claiming
+one and doing the other is not.
 
 ---
 
@@ -494,11 +524,13 @@ holding company is not its subsidiary, which is the distinction that matters
 most in exactly the conflict-of-interest work this is a stepping stone to. Only
 trailing legal forms are stripped now, and migration 5 recomputes stored keys.
 
-**A better tool for the same job now exists.** `search.unlinked_mentions()`
-asks the question key matching cannot: which documents *name* something with
-nothing extracted from them. Key matching can only join instances that were
-already extracted, so the misses are invisible to it by construction. That is
-the screen real resolution should be built on.
+**Two better tools for the same job now exist.** `entities.candidates_for_mention()`
+offers pages an extracted mention might belong to, ranked by the kind of
+evidence rather than by how close the spelling looks. And
+`search.unextracted_mentions()` asks what neither can: which documents *name*
+something the extractor never picked up at all. Key matching can only join
+instances that were already extracted, so those misses are invisible to it by
+construction.
 
 ---
 

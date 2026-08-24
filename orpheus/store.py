@@ -20,7 +20,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Mapping
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Iterator, Sequence
 
 from .schema import MIGRATIONS
 from .utils import OrpheusError, from_json, now, to_json

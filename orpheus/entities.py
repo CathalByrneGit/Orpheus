@@ -30,7 +30,7 @@ it trustworthy rather than merely convenient:
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
 
 from . import bundle as bundle_mod
 from .audit import record_edit

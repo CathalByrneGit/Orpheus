@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-from typing import Any
 
 from .rubric import CLOUD_POLICIES
 from .store import Store
@@ -25,11 +24,29 @@ from .utils import OrpheusError, new_id, now
 
 
 def cloud_policy(store: Store) -> dict:
+    """What a deployment is allowed to send, and what it actually sends.
+
+    `send_mode` used to be read from a `cloud_send_mode` setting defaulting to
+    `"excerpt"`, and nothing implemented it: `populate()` sends
+    `document_text()` -- the whole document -- to whichever engine, and all
+    three engines record `excerpt_only=False` on the audit row. So the audit was
+    telling the truth while this was not, and a deployment reading
+    `/capabilities` would have been told its contracts left in fragments when
+    they left whole.
+
+    A false claim about what leaves the building is worse than no claim, so this
+    reports the code's behaviour. Excerpt selection existed in the R
+    implementation and was not ported; until it is, `full_document` is the
+    honest answer. See open-decisions.
+    """
     policy = store.setting("cloud_ai_policy", "disabled")
     return {
         "policy": policy,
         "available": policy != "disabled",
-        "send_mode": store.setting("cloud_send_mode", "excerpt"),
+        "send_mode": "full_document",
+        "send_mode_note": ("The whole document text is sent. Excerpt selection "
+                           "is not implemented; classification is the only pass "
+                           "that truncates, and it says so per call."),
         "requires_explicit_opt_in": True,
     }
 

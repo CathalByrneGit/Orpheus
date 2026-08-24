@@ -16,7 +16,7 @@ its start date.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from typing import Iterable
 
 from .rubric import CONFIDENCE
 

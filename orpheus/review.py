@@ -21,7 +21,7 @@ from . import bundle as bundle_mod
 from .audit import record_edit
 from .rubric import CONFIDENCE, RESERVED_PROPS, STATUSES
 from .store import Store
-from .utils import (NotFound, OrpheusError, naive_key, new_id, now,
+from .utils import (NotFound, OrpheusError, naive_key, now, 
                     require_choice, require_string)
 
 

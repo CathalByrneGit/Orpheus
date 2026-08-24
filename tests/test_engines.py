@@ -424,3 +424,34 @@ def test_a_stored_provider_setting_wins_over_the_key(store, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     store.set_setting("cloud_provider", "acme-gateway")
     assert llm.model_config(store, "cloud")["provider"] == "acme-gateway"
+
+
+def test_the_reported_send_mode_matches_what_is_actually_sent(seeded):
+    """A false claim about what leaves the building is worse than no claim.
+
+    `send_mode` was read from a setting defaulting to `"excerpt"` that nothing
+    implemented: `populate()` sends the whole document, and every engine records
+    `excerpt_only=False`. The audit was honest while `/capabilities` was not.
+    """
+    from orpheus import llm
+
+    store, document_id = seeded
+    store.set_setting("cloud_ai_policy", "org_allow")
+    assert llm.cloud_policy(store)["send_mode"] == "full_document"
+
+    # And a setting that nothing reads cannot quietly change the answer back.
+    store.set_setting("cloud_send_mode", "excerpt")
+    assert llm.cloud_policy(store)["send_mode"] == "full_document"
+
+
+def test_extraction_records_that_it_sent_the_whole_document(seeded, chat_server):
+    store, document_id = seeded
+    store.set_setting("extraction_engine", "chat")
+    store.set_setting("local_base_url", chat_server)
+    populate(store, document_id, tier="local")
+
+    row = store.one("SELECT excerpt_only, prompt_chars FROM llm_calls")
+    assert row["excerpt_only"] == 0
+    # The whole page text, not a selection from it.
+    from orpheus.population import document_text
+    assert row["prompt_chars"] == len(document_text(store, document_id))

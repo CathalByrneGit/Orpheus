@@ -11,9 +11,8 @@ decision rather than an ordinary review.
 
 from __future__ import annotations
 
-from .audit import record_edit
 from .store import Store
-from .utils import new_id, now, to_json
+from .utils import new_id, now
 
 AMENDMENT_TYPES = ("new_property", "new_type", "new_link_type")
 

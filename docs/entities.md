@@ -220,9 +220,10 @@ carries the caveat, until a person has confirmed the page and every link on it.
 
 What it *does* provide is the shape real resolution would populate, and the
 review surface that makes a person's decisions cheap to record. See
-[`search.unlinked_mentions()`](developer-guide.md#searching-the-corpus) for the
-complementary half: documents that name something with nothing extracted from
-them, which key matching cannot see by construction.
+[`search.unextracted_mentions()`](developer-guide.md#searching-the-corpus) for
+the neighbouring question: documents that name something with nothing extracted
+from them at all, which no amount of linking can recover because there is no
+mention there to link.
 
 ---
 

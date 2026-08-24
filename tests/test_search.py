@@ -12,7 +12,7 @@ import pytest
 
 import orpheus.bundle as bundle_mod
 from orpheus.search import (available, enable_search, search_excerpts,
-                            search_pages, unlinked_mentions)
+                            search_pages, unextracted_mentions)
 from orpheus.utils import OrpheusError, naive_key
 
 pytest.importorskip("sqlite_utils")
@@ -101,20 +101,20 @@ def test_excerpts_are_searchable_separately_from_source_text(corpus):
     assert len(search_pages(corpus, "Halloran")) == 2
 
 
-def test_unlinked_mentions_finds_the_document_nothing_was_extracted_from(corpus):
-    result = unlinked_mentions(corpus, "Halloran Instruments")
+def test_unextracted_mentions_finds_the_document_nothing_was_extracted_from(corpus):
+    result = unextracted_mentions(corpus, "Halloran Instruments")
     assert result["linked_documents"] == ["doc_1"]
     assert [h["document_id"] for h in result["unlinked"]] == ["doc_2"]
 
 
-def test_unlinked_mentions_stays_labelled_unresolved(corpus):
+def test_unextracted_mentions_stays_labelled_unresolved(corpus):
     # It is a list of candidates for a person, never a merge the machine did.
-    result = unlinked_mentions(corpus, "Halloran Instruments")
+    result = unextracted_mentions(corpus, "Halloran Instruments")
     assert result["resolution_quality"] == "naive_unresolved"
     assert "not matches" in result["caveat"]
 
 
 def test_a_name_with_nothing_to_find_returns_nothing_rather_than_failing(corpus):
-    result = unlinked_mentions(corpus, "Nonexistent Holdings")
+    result = unextracted_mentions(corpus, "Nonexistent Holdings")
     assert result["unlinked"] == []
     assert result["linked_documents"] == []

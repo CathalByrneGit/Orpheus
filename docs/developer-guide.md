@@ -45,7 +45,7 @@ deliberate — the engine choice is a setting, not an architecture. See
 python3 -m pytest
 ```
 
-389 tests, no skips with the `dev` extra installed.
+396 tests, no skips with the `dev` extra installed.
 
 ### How the tests are built
 
@@ -195,11 +195,13 @@ orpheus --db data/orpheus.sqlite search "Halloran Instruments" --unlinked
 Two indexes, because they answer different questions: `document_pages.text` is
 what the corpus *says*, `provenance.excerpt` is what the machine *quoted*.
 
-`--unlinked` is the one that matters for building a wiki. Key matching can only
-join instances that were already extracted; this finds documents that name
-something with **nothing** extracted from them, which is where the misses are
-and which key matching cannot see by construction. The results are candidates
-for a person, labelled `naive_unresolved` like everything else built on names.
+`--unlinked` finds documents that name something with **nothing** extracted from
+them — an *extraction* gap rather than a linking one. `entities.unlinked_mentions()`
+answers the neighbouring question, which extracted mentions have no page yet;
+this one finds names the extractor never picked up at all, which no amount of
+linking can recover because there is no mention there to link. The results are
+candidates for a person, labelled `naive_unresolved` like everything else built
+on names.
 
 ### Adding an extraction engine
 

@@ -19,7 +19,7 @@ import secrets
 from .audit import record_edit
 from .rubric import ACTIONS, SHARE_ROLES, VISIBILITY
 from .store import Store
-from .utils import (NotFound, OrpheusError, PermissionDenied, new_id, now,
+from .utils import (NotFound, PermissionDenied, new_id, now, 
                     require_choice, require_string, to_json)
 
 

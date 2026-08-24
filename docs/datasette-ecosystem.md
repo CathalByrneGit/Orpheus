@@ -7,9 +7,16 @@ first set, a search for anything that already built the wiki UI, and then the
 directory itself. Every verdict below came from installing the thing and making
 a request; two of them contradicted what the metadata implied.
 
-The headline question was whether **`datasette-agent` removes the need for R and
-the Plumber API**. The answer was no to the first half and yes to the second, but
-neither for the reason it looked like.
+## First pass: four plugins, when the direction was set
+
+Researched because the direction is Datasette-first and the Datasette team keeps
+building things Orpheus would otherwise build badly.
+
+### The headline question
+
+Whether **`datasette-agent` removes the need for R and the Plumber API**. The
+answer was no to the first half and yes to the second, but neither for the
+reason it looked like.
 
 The Plumber API is gone — not because a chat plugin replaced it, but because the
 port made Datasette the writer, so the API became a dispatch table imported
@@ -27,9 +34,9 @@ allowed to do, and that conclusion outlived both changes.
 
 ---
 
-## `datasette-agent`
+### `datasette-agent`
 
-### What it actually is
+#### What it actually is
 
 A chat interface at `/-/agent`, a background-task runner, and a tool-calling
 loop built on the Claude Agent SDK and `datasette-llm`. Its built-in tools are
@@ -40,7 +47,7 @@ agents. 116 commits, actively developed, beta.
 It is an **orchestration and conversation layer**. That is worth being precise
 about, because it is the whole of the answer to the R question.
 
-### Why it cannot replace the core
+#### Why it cannot replace the core
 
 The core is about 6,000 lines. The bulk of it, by what it does:
 
@@ -71,7 +78,7 @@ each tool is one `api.handle()` call with the actor already resolved. The
 obstacles that used to stand in the way (a second process, a token, a base URL)
 are gone.
 
-### The part it would genuinely replace
+#### The part it would genuinely replace
 
 `orpheus/llm.py` — the provider layer. `datasette-llm` does the same job with a real
 plugin ecosystem behind it: keys via `datasette-secrets` or `llm`'s keystore,
@@ -80,7 +87,7 @@ per-model configuration, one interface for every provider `llm` supports.
 This is a real saving, and it is also the one place adoption is dangerous, for
 reasons below.
 
-### Why `execute_write_sql` must never touch the store
+#### Why `execute_write_sql` must never touch the store
 
 The agent can write. It analyses each statement, shows the user the SQL, and
 asks for approval in chat. For a general Datasette that is a good design. For
@@ -108,7 +115,7 @@ approving a hundred `INSERT`s is not review — review is what
 [provenance and amendment](provenance-and-amendment.md) describes, one fact at a
 time, with the machine's original kept beside the correction.
 
-### The shape that does work
+#### The shape that does work
 
 `register_agent_tools` — the hook that lets a plugin add typed tools:
 
@@ -136,7 +143,7 @@ over the API, verified not to open a SQLite connection. The agent becomes a
 *second* client with a conversational interface, which is a strictly better
 version of the reading companion than a bespoke pane.
 
-### What must be settled before adopting it
+#### What must be settled before adopting it
 
 **The cloud gate is the blocker, and it is specific.** `datasette-llm` resolves
 API keys from `datasette-secrets`, `llm`'s `keys.json`, or the environment, and
@@ -161,7 +168,7 @@ the plugin is usable here at all.
 
 ---
 
-## `datasette-accounts`
+### `datasette-accounts`
 
 Username/password accounts stored in Datasette's internal database, with a web
 admin UI, a CLI, and a JSON API. PBKDF2 hashing off the event loop, timing-safe
@@ -193,7 +200,7 @@ which is one more thing the port simplified.
 
 ---
 
-## `datasette-paper`
+### `datasette-paper`
 
 A collaborative document editor: ProseMirror front end, SQLite storage, SSE for
 real-time collaboration, wiki-links, inline tags, task assignment. 218 commits,
@@ -224,7 +231,7 @@ typed amendments to typed properties. Read it for the hook and move on.
 
 ---
 
-## `datasette-apps`
+### `datasette-apps`
 
 Stored HTML/JavaScript apps hosted inside Datasette, sandboxed in iframes, with
 data access through injected `datasette.query()` and `datasette.storedQuery()`
@@ -248,28 +255,6 @@ and says nothing about writes; treat write support as unconfirmed rather than
 absent. Either way the sandbox is the wrong place for a write path that must
 carry provenance — that belongs to the API, and the existing plugin already
 reaches it.
-
----
-
-## Suggested order
-
-1. **Test whether `datasette-llm` can drive a local model.** Everything else
-   about `datasette-agent` depends on it, and it is an afternoon.
-2. **`datasette-accounts`**, if the local-model answer is yes and Datasette is
-   going to be the front door. It deletes real code and closes a named open
-   decision.
-3. **The `permission_resources_sql` plugin**, using `datasette-paper` as the
-   reference. Orpheus already generates the SQL; this is the smallest step from
-   "documented rule" to "enforced rule".
-4. **`datasette-apps` for the quality report** — independent of all of the above,
-   and the fastest way to make the Phase 1 question visible to someone who does
-   not run R.
-5. **`datasette-agent` as a tool client**, last, and only through
-   `register_agent_tools`. Never with `execute_write_sql` pointed at the store.
-
----
-
-[← Back to index](index.md) | [Prior art →](prior-art.md)
 
 ---
 
@@ -447,3 +432,32 @@ but a config block. So the wiki **index** does not need to be built.
 What Datasette cannot give is the page itself, because it is a projection
 computed in Python, and the review actions, because they must go through core
 functions rather than raw SQL. Those are the parts worth writing.
+
+---
+
+## What to do about it
+
+Rewritten after the third pass, since the first version argued from a codebase
+that no longer exists — it recommended making the quality report visible "to
+someone who does not run R".
+
+1. **Implement the reconciliation protocol.** The clearest answer to how this
+   gets reused elsewhere, and `datasette-reconcile` will not provide it. Blocked
+   on calibrating the similarity threshold, which is blocked on the corpus run.
+   See [open decisions](open-decisions.md#reconciliation-how-this-gets-reused-elsewhere).
+2. **`datasette-accounts`**, when Datasette is the front door for real users. It
+   deletes real code and closes a named open decision. Check it at `main` first:
+   the released versions across this ecosystem lag badly.
+3. **The `permission_resources_sql` plugin**, using `datasette-paper` as the
+   reference. Orpheus already generates the SQL; this is the smallest step from
+   "documented rule" to "enforced rule".
+4. **Watch `datasette-comments` for a release.** It is the debate gap, it is
+   1.0-ready in git, and it needs a frontend build that a release would carry.
+
+Deliberately not on this list: anything that writes to the store. The rule from
+the first pass survived all three — the agent, the write UI, the enrichment
+runner are all clients, and every write goes through core functions.
+
+---
+
+[← Back to index](index.md)

@@ -20,7 +20,7 @@ from .audit import record_edit
 from .ingest import document_text, get_document, has_text
 from .rubric import snap_confidence
 from .store import Store
-from .utils import OrpheusError, from_json, now
+from .utils import OrpheusError, from_json
 
 MAX_CHARS = 12000
 

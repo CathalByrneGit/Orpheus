@@ -20,7 +20,6 @@ from pathlib import Path
 
 from . import bundle as bundle_mod
 from .auth import permission_sql
-from .store import Store
 
 
 def _yaml(value, indent: int = 0) -> str:

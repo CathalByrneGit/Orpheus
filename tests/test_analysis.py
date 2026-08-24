@@ -14,6 +14,7 @@ import pytest
 
 import orpheus.bundle as bundle_mod
 from orpheus.analysis import (compare_primary_values, corpus_analysis,
+                              match_counterparties,
                               identifier_matches, object_set_by_interface)
 from orpheus.extract import extract
 from orpheus.ingest import ingest
@@ -259,3 +260,102 @@ def test_a_rejected_company_does_not_match(store, tmp_path):
     reject_instance(store, other, "act_admin", note="Misread")
     assert corpus_analysis(store, docs[0],
                            actor_id="act_admin")["matched_companies"] == 0
+
+
+# -- entity links beat re-derived name matches --------------------------------
+
+TWO_DOCS = [[company("Ardmore Digital Limited", "612884")],
+            [company("Ardmore Digital Limited", "612884")]]
+
+
+def link_all(store, type_id="Company"):
+    """Put every mention sharing a name on one entity, as a reviewer would."""
+    import orpheus.entities as entities_mod
+
+    table = bundle_mod.table_name(
+        bundle_mod.object_type(bundle_mod.active(store), type_id))
+    groups: dict = {}
+    for row in store.query(f'SELECT instance_id, name FROM "{table}"'):
+        groups.setdefault(row["name"], []).append(row["instance_id"])
+    for name, instance_ids in groups.items():
+        entity_id = entities_mod.create_entity(store, type_id, name,
+                                               actor_id="act_admin")
+        for instance_id in instance_ids:
+            entities_mod.link_mention(store, entity_id, instance_id,
+                                      actor_id="act_admin")
+
+
+def test_corpus_matching_follows_an_entity_link_when_there_is_one(store, tmp_path):
+    """A person decided these mentions are the same thing.
+
+    Re-deriving that from a normalised name would ignore the answer and
+    recompute a worse one -- the key was only ever a stand-in for the decision.
+    """
+    first, second = seed(store, tmp_path, TWO_DOCS)
+    link_all(store)
+
+    found = match_counterparties(store, bundle_mod.active(store), first,
+                                 "Company")
+    assert found and found[0]["matched_via"] == "entity"
+    assert found[0]["appears_in_documents"] == 1
+    assert second in found[0]["other_document_ids"]
+
+
+def test_an_unlinked_mention_still_falls_back_to_name_matching(store, tmp_path):
+    first, _ = seed(store, tmp_path, TWO_DOCS)
+    found = match_counterparties(store, bundle_mod.active(store), first,
+                                 "Company")
+    assert found and found[0]["matched_via"] == "naive_key"
+
+
+def test_a_mention_on_its_own_entity_finds_no_siblings(store, tmp_path):
+    """An entity with one mention is a decision that it stands alone.
+
+    The fallback is for mentions nobody has looked at, not a second chance to
+    ignore one who has.
+    """
+    import orpheus.entities as entities_mod
+
+    first, _ = seed(store, tmp_path, TWO_DOCS)
+    mine = store.one("SELECT instance_id, name FROM instances_Company "
+                     "WHERE document_id = ?", (first,))
+    entity_id = entities_mod.create_entity(store, "Company", mine["name"],
+                                           actor_id="act_admin")
+    entities_mod.link_mention(store, entity_id, mine["instance_id"],
+                              actor_id="act_admin")
+
+    found = match_counterparties(store, bundle_mod.active(store), first,
+                                 "Company")
+    # No entity siblings, so the identifier match is what remains -- and it is
+    # reported as such rather than as a reviewed link.
+    assert found[0]["matched_via"] == "naive_key"
+
+
+def test_a_fully_linked_result_stops_calling_itself_unresolved(store, tmp_path):
+    """`naive_unresolved` is a claim about how the answer was reached.
+
+    Once every match came through a reviewed link it is no longer true, and
+    leaving it in place would make the label meaningless.
+    """
+    first, _ = seed(store, tmp_path, TWO_DOCS)
+    link_all(store)
+
+    result = corpus_analysis(store, first, actor_id="act_admin")
+    assert result["resolution_quality"] == "resolved"
+    assert result["caveat"] is None
+
+
+def test_one_name_derived_match_is_enough_to_stay_unresolved(store, tmp_path):
+    # A caller must not be able to trust the weakest row in the set.
+    first, _ = seed(store, tmp_path,
+                    [[company("Ardmore Digital Limited", "612884"),
+                      {"type": "Person", "excerpt": "Nuala Ryan",
+                       "properties": {"name": "Nuala Ryan"}}],
+                     [company("Ardmore Digital Limited", "612884"),
+                      {"type": "Person", "excerpt": "Nuala Ryan",
+                       "properties": {"name": "Nuala Ryan"}}]])
+    link_all(store, "Company")          # companies linked, people not
+
+    result = corpus_analysis(store, first, actor_id="act_admin")
+    assert result["resolution_quality"] == NAIVE_RESOLUTION
+    assert result["caveat"]

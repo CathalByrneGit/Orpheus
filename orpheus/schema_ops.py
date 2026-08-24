@@ -25,7 +25,7 @@ from .audit import record_edit
 from .review import bump_patch
 from .rubric import RESERVED_PROPS
 from .store import Store
-from .utils import OrpheusError, now, require_string
+from .utils import OrpheusError, require_string
 
 
 def _database(store: Store):

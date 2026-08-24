@@ -25,7 +25,7 @@ flowchart TD
   pop -.-> S5 -.-> S6
 
   S6["<b>6 Review of extraction</b><br/>confirm / amend / reject"]
-  S6 --> S7["<b>7 Analysis</b><br/>evaluate_concepts()<br/>analyse_document()"]
+  S6 --> S7["<b>7 Analysis</b><br/>evaluate_concepts()<br/>evaluate_score()"]
   S7 --> S8["<b>8 Review of analysis</b><br/>review_evaluation()"]
   S8 -.-> S9["<b>9 Corpus escalation</b><br/>corpus_analysis()<br/><i>naive matching</i>"]
 
@@ -66,8 +66,8 @@ existing `document_id` with `duplicate = True` rather than creating a second row
 
 **OCR is a provider, not a hardcoded tool** — which tool to use is still an open
 decision. Any page yielding fewer than 40 characters is treated as image-only,
-rendered to PNG, and passed to whatever `ocr_backend()` returns: `pytesseract`, a
-`tesseract` binary, or a function registered with `set_ocr_backend()`. With no provider available the page is recorded as
+rendered to PNG, and passed to whatever `textract.ocr_provider()` returns: `pytesseract`, a
+`tesseract` binary, or a function registered with `textract.set_ocr_provider()`. With no provider available the page is recorded as
 `text_source = 'needs_ocr'` — visible as a gap, rather than passed off as an
 empty page.
 
@@ -164,10 +164,15 @@ worked when the online one did.
 Same persistence path, `source = 'ai_cloud'`. Two independent conditions must
 both hold — see [Provenance and amendment](provenance-and-amendment.md#the-cloud-gate).
 
-By default only excerpts are sent: `select_excerpts()` scores pages against
-clause-related terms and sends the best few with their page markers intact, so
-the model can still cite a page. `cloud_send_mode = 'full_document'` overrides
-this deployment-wide.
+**The whole document is sent.** The R implementation scored pages against
+clause-related terms and sent the best few; that was not ported, and until it is
+`/capabilities` reports `send_mode: full_document` rather than claiming
+otherwise. Classification is the one pass that truncates, and it records
+`excerpt_only` per call so the audit says which calls were partial.
+
+That is a real gap for a deployment handling sensitive documents — it is
+recorded in [open decisions](open-decisions.md#what-leaves-the-building-on-a-cloud-call)
+rather than papered over.
 
 ## 6 — Review of extraction
 
@@ -199,10 +204,8 @@ diffable between versions. Every result carries its `contributions`: which
 concepts fired and by how much. A score nobody can decompose is no better than
 the model's opinion.
 
-`risk_comparison()` puts it beside the narrative risk level. Agreement is
-mild evidence both are working; **disagreement is the useful signal**, and says
-nothing about which one is wrong — the score sees only concepts that were
-evaluated, the model sees only facts that were extracted.
+Every result carries its `contributions`: which concepts fired and by how much.
+A score nobody can decompose is no better than the model's opinion.
 
 **Templated thresholds** — `high_value` does not carry a number. It renders from
 a `value_threshold` template whose parameter defaults in the bundle and is
@@ -218,11 +221,16 @@ and still explains itself. A threshold is local policy, not a fact about
 contracts, and treating it as configuration rather than code is what stops a
 placeholder quietly becoming the rule.
 
-**Narrative analysis** — `analyse_document()` gives a model the extracted
-instances, with their confidence and status, and asks for a summary, risk level,
-key issues and recommendations. It reads *structured facts, not document text*,
-which keeps what goes to a cloud model to the facts a person has already seen.
-Re-analysing supersedes the previous narrative rather than sitting beside it.
+**Narrative analysis** — `corpus_analysis(narrate=True)` gives a model the
+findings, with their confidence and status, and asks for a summary in prose. It
+reads *structured facts, not document text*, which keeps what goes to a cloud
+model to the facts a person has already seen, and it is the one place in the
+pipeline that sends excerpts rather than a whole document.
+
+The R implementation also ran a per-document narrative and compared its risk
+level against the composite score, on the argument that disagreement between a
+rule and a reading is the useful signal. Neither was ported. The composite score
+is here and decomposable; the narrative half of that comparison is not.
 
 ## 8 — Review of analysis
 

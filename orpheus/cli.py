@@ -427,7 +427,8 @@ def cmd_search(args) -> int:
     store = open_store(args, mode="read")
     try:
         if args.unlinked:
-            result = search_mod.unlinked_mentions(store, args.query, limit=args.limit)
+            result = search_mod.unextracted_mentions(store, args.query,
+                                                    limit=args.limit)
         else:
             result = {"pages": search_mod.search_pages(store, args.query, args.limit)}
     finally:

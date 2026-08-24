@@ -21,8 +21,6 @@ rather than assumed — it takes no transaction of its own and commits nothing.
 
 from __future__ import annotations
 
-from typing import Any
-
 from .store import Store
 from .utils import OrpheusError
 
@@ -94,14 +92,17 @@ def search_excerpts(store: Store, query: str, limit: int = 50) -> list[dict]:
                     "confidence", "alignment"], limit)
 
 
-def unlinked_mentions(store: Store, name: str, limit: int = 50) -> dict:
+def unextracted_mentions(store: Store, name: str, limit: int = 50) -> dict:
     """Documents that say this name but have no instance carrying it.
 
-    The screen entity resolution actually needs. An exact-key match can only
-    join instances that were *already extracted*; this finds the ones that were
-    not, which is where the misses are. Presented as candidates for a person to
-    accept, never as a merge the machine performed — the caveat that everything
-    here is `naive_unresolved` still holds.
+    An **extraction** gap, not a linking one, and the distinction is why this is
+    not called `unlinked_mentions` -- `entities.unlinked_mentions()` answers the
+    neighbouring question of which extracted mentions have no entity yet. This
+    one finds names the extractor never picked up at all, which no amount of
+    linking can recover because there is nothing to link.
+
+    Presented as candidates for a person, never as a merge the machine
+    performed.
     """
     from .utils import naive_key
 

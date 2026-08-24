@@ -21,7 +21,6 @@ from __future__ import annotations
 import statistics
 
 from . import bundle as bundle_mod
-from . import llm
 from .concepts import write_evaluation
 from .ingest import get_document
 from .rubric import CONFIDENCE, NAIVE_RESOLUTION
@@ -149,9 +148,15 @@ def match_counterparties(store: Store, bundle: dict, document_id: str,
 
     out = []
     for row in mine:
-        others = [n for n in named
-                  if n["naive_key"] == row["naive_key"]
-                  and n["document_id"] != document_id]
+        # An entity link, where one exists, is what this question is *for*: a
+        # person decided these mentions are the same thing, which is strictly
+        # better evidence than the normalised name that was only ever a
+        # stand-in for the decision. Re-deriving it from `naive_key` here would
+        # ignore the answer and recompute a worse one.
+        linked = entity_siblings(store, row["instance_id"], document_id)
+        others = linked or [n for n in named
+                            if n["naive_key"] == row["naive_key"]
+                            and n["document_id"] != document_id]
         by_identifier = registered.get(row["instance_id"], [])
         # Either kind of match is worth reporting. Requiring a name match first
         # would make the identifier useless — it exists precisely to catch the
@@ -176,6 +181,10 @@ def match_counterparties(store: Store, bundle: dict, document_id: str,
             # the clearest signal that this needs real resolution.
             "spelling_varies": bool(set(variants) - {row["name"]}),
             "identifier_matches": by_identifier,
+            # Which path produced this match. A reviewed entity link and a
+            # normalised name are not the same claim, and a caller that treats
+            # them alike loses the only distinction that matters here.
+            "matched_via": "entity" if linked else "naive_key",
             # A name that is a company here and a person elsewhere is exactly
             # what a reviewer wants to look at — reported, and reported
             # separately, because it is weaker than a same-type match.
@@ -184,6 +193,39 @@ def match_counterparties(store: Store, bundle: dict, document_id: str,
                  "instance_id": o["instance_id"], "document_id": o["document_id"]}
                 for o in other_type],
         })
+    return out
+
+
+def entity_siblings(store: Store, instance_id: str, document_id: str) -> list[dict]:
+    """Other mentions of the same entity, if this mention has been linked.
+
+    Returns nothing when it has not, so the caller falls back to name matching.
+    Only links a person has not rejected count: an unlinked or rejected one is
+    a decision that these are *not* the same thing, and honouring it is the
+    point of having asked.
+    """
+    if not store.table_exists("entity_mentions"):
+        return []
+    home = store.one(
+        "SELECT entity_id FROM entity_mentions WHERE instance_id = ? "
+        "AND unlinked_at IS NULL", (instance_id,))
+    if home is None:
+        return []
+
+    out = []
+    for row in store.query(
+            "SELECT m.instance_id, m.document_id, i.type_id, i.table_name "
+            "FROM entity_mentions m JOIN instance_index i USING (instance_id) "
+            "WHERE m.entity_id = ? AND m.unlinked_at IS NULL "
+            "AND m.document_id != ?", (home["entity_id"], document_id)):
+        detail = store.one(
+            f'SELECT name, naive_key FROM "{row["table_name"]}" '
+            "WHERE instance_id = ?", (row["instance_id"],))
+        out.append({"instance_id": row["instance_id"],
+                    "document_id": row["document_id"],
+                    "type_id": row["type_id"],
+                    "name": detail["name"] if detail else None,
+                    "naive_key": detail["naive_key"] if detail else None})
     return out
 
 
@@ -287,6 +329,12 @@ CAVEAT = (
 )
 
 
+def _resolution_quality(findings: list[dict]) -> str:
+    if findings and all(f["matched_via"] == "entity" for f in findings):
+        return "resolved"
+    return NAIVE_RESOLUTION
+
+
 def corpus_analysis(store: Store, document_id: str, actor_id: str | None = None,
                     narrate: bool = False, tier: str = "cloud",
                     opt_in: bool = False) -> dict:
@@ -315,8 +363,13 @@ def corpus_analysis(store: Store, document_id: str, actor_id: str | None = None,
         "people": people,
         "value_comparison": value_comparison,
         "identifier_matched": sum(1 for f in counterparties if f["identifier_matches"]),
-        "resolution_quality": NAIVE_RESOLUTION,
-        "caveat": CAVEAT,
+        # `naive_unresolved` unless *every* match came through a reviewed entity
+        # link. One name-derived match is enough to make the whole result a
+        # stepping stone again, and saying otherwise would let a caller trust
+        # the weakest row in the set.
+        "resolution_quality": _resolution_quality(counterparties + people),
+        "caveat": CAVEAT if any(f["matched_via"] == "naive_key"
+                                for f in counterparties + people) else None,
     }
 
     if narrate:
@@ -338,7 +391,7 @@ def corpus_analysis(store: Store, document_id: str, actor_id: str | None = None,
                             "document_ids": list(dict.fromkeys(
                                 d for f in counterparties + people
                                 for d in f["other_document_ids"]))},
-            resolution_quality=NAIVE_RESOLUTION)
+            resolution_quality=result["resolution_quality"])
 
     result["evaluation_id"] = evaluation_id
     return result
