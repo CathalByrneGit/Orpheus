@@ -76,6 +76,7 @@ Start at **[docs/index.md](docs/index.md)**.
 |---|---|
 | [Data model](docs/data-model.md) | Tables, the ontology bundle, the confidence rubric |
 | [Pipeline walkthrough](docs/pipeline-walkthrough.md) | The nine steps, with the function that runs each |
+| [Entities: the wiki](docs/entities.md) | Mentions vs entities, and why a page is a projection |
 | [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
 | [Extraction engines](docs/extraction-engines.md) | Four ways to run the model pass, and when each is right |
 | [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
@@ -108,7 +109,7 @@ both the audit story and the only way to measure whether extraction is improving
 
 ## Status
 
-339 tests:
+380 tests:
 
 ```bash
 pip install -e '.[dev]'

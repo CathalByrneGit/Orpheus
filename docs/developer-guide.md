@@ -44,7 +44,7 @@ deliberate — the engine choice is a setting, not an architecture. See
 python3 -m pytest
 ```
 
-339 tests, no skips with the `dev` extra installed.
+380 tests, no skips with the `dev` extra installed.
 
 ### How the tests are built
 
@@ -276,6 +276,7 @@ orpheus/
 │   └── schemas/             # the two JSON Schemas a bundle is checked against
 ├── plugins/orpheus_datasette.py   # the UI, and the API mounted in-process
 ├── templates/               # the two pages
+│   ├── entities.py          # mentions -> entities; the wiki page projection
 │   ├── search.py            # full-text search, and unlinked mentions
 │   ├── schema_ops.py        # rename/drop a property, table and bundle together
 ├── config/                  # generated: metadata.yml + datasette.yml

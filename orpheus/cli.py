@@ -315,6 +315,100 @@ def cmd_review(args) -> int:
     return 0
 
 
+def cmd_wiki(args) -> int:
+    """The entity wiki: propose, list, read and review pages."""
+    from . import entities as entities_mod
+
+    if args.action == "propose":
+        store = open_store(args)
+        try:
+            result = entities_mod.propose_entities(store, type_id=args.type_id,
+                                                   actor_id=args.actor_id)
+        finally:
+            store.close()
+        if args.json:
+            emit(result, True)
+            return 0
+        print(f"{result['proposed']} page(s) proposed from {result['linked']} "
+              f"mention(s).")
+        for entity in result["entities"]:
+            print(f"  {entity['entity_id']}  {entity['canonical_name'][:44]:46} "
+                  f"{entity['n_mentions']:>3} mention(s)  via {entity['basis']}")
+        if result["entities"]:
+            print(f"\n  {result['caveat']}")
+        return 0
+
+    if args.action == "list":
+        store = open_store(args, mode="read")
+        try:
+            rows = entities_mod.list_entities(store, type_id=args.type_id,
+                                              status=args.status, query=args.query,
+                                              limit=args.limit)
+        finally:
+            store.close()
+        if args.json:
+            emit({"entities": rows}, True)
+            return 0
+        for row in rows:
+            print(f"  {row['entity_id']}  {row['status']:<12} "
+                  f"{row['canonical_name'][:40]:42} "
+                  f"{row['n_documents']:>3} doc(s)  "
+                  f"{row['n_confirmed'] or 0}/{row['n_mentions']} confirmed")
+        return 0
+
+    if args.action == "show":
+        if not args.query:
+            raise OrpheusError("Give an entity id to show.")
+        store = open_store(args, mode="read")
+        try:
+            page = entities_mod.entity_page(store, args.query,
+                                            include_unconfirmed=not args.confirmed_only)
+        finally:
+            store.close()
+        if args.json:
+            emit(page, True)
+            return 0
+        _print_page(page)
+        return 0
+
+    raise OrpheusError(f"Unknown action {args.action!r}.")
+
+
+def _print_page(page: dict) -> None:
+    entity = page["entity"]
+    print(f"{entity['canonical_name']}  [{entity['type_id']}] "
+          f"({entity['status']})")
+    if page["description"]:
+        print(f"\n  {page['description']}")
+    if page["aliases"]:
+        print(f"\n  also written: {', '.join(page['aliases'])}")
+
+    counts = page["counts"]
+    print(f"\n  {counts['mentions']} mention(s) across {counts['documents']} "
+          f"document(s); {counts['confirmed_links']} confirmed, "
+          f"{counts['unconfirmed_links']} awaiting review")
+
+    if page["properties"]:
+        print("\n  what the documents say:")
+        for prop, values in page["properties"].items():
+            for value in values:
+                mark = "*" if value["n_confirmed"] else " "
+                print(f"   {mark} {prop:<22} {str(value['value'])[:30]:32} "
+                      f"{len(value['mentions'])} mention(s)")
+
+    print("\n  sources:")
+    for record in page["mentions"]:
+        evidence = record["evidence"] or {}
+        document = record["document"] or {}
+        excerpt = " ".join((evidence.get("excerpt") or "").split())[:44]
+        print(f"    {document.get('filename', '?')[:22]:24} "
+              f"p{evidence.get('page_no') or '?':<3} "
+              f"{record['link']['status']:<12} {excerpt!r}")
+
+    if page["caveat"]:
+        print(f"\n  {page['caveat']}")
+
+
 def cmd_search(args) -> int:
     """Search the corpus, or find where a name appears unextracted."""
     from . import search as search_mod
@@ -527,6 +621,16 @@ def build_parser() -> argparse.ArgumentParser:
     config = add("config", cmd_config, "regenerate the Datasette files")
     config.add_argument("--config", default="config/datasette.yml")
     config.add_argument("--storage-root", default="storage")
+
+    wiki = add("wiki", cmd_wiki, "the entity wiki")
+    wiki.add_argument("action", choices=("propose", "list", "show"))
+    wiki.add_argument("query", nargs="?", help="entity id for `show`, filter for `list`")
+    wiki.add_argument("--type-id")
+    wiki.add_argument("--status")
+    wiki.add_argument("--actor-id")
+    wiki.add_argument("--confirmed-only", action="store_true",
+                      help="show only what a person has confirmed")
+    wiki.add_argument("--limit", type=int, default=100)
 
     searcher = add("search", cmd_search, "search the corpus")
     searcher.add_argument("query", nargs="?")

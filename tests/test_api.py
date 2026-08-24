@@ -244,3 +244,108 @@ def test_the_corpus_quality_report_is_administrator_only(api):
     _, call, document_id, _ = api
     assert call("GET", "/quality", who="owner")[0] == 403
     assert call("GET", f"/documents/{document_id}/quality", who="owner")[0] == 200
+
+
+# -- entities ----------------------------------------------------------------
+
+@pytest.fixture
+def with_entities(api):
+    store, call, document_id, _ = api
+    from orpheus.utils import naive_key
+    for instance_id, name, registration in (
+            ("i1", "Halloran Instruments, Inc.", "482991"),
+            ("i2", "Halloran Instruments Inc", "482991")):
+        store.execute(
+            "INSERT INTO instances_Company (instance_id, document_id, name,"
+            " naive_key, registration_number, source, confidence, status,"
+            " created_at) VALUES (?,?,?,?,?,'ai_cloud',0.9,'unconfirmed',"
+            " datetime('now'))",
+            (instance_id, document_id, name, naive_key(name), registration))
+        store.execute(
+            "INSERT INTO instance_index (instance_id, type_id, table_name,"
+            " document_id, created_at) VALUES (?,'Company','instances_Company',"
+            " ?,datetime('now'))", (instance_id, document_id))
+    store.conn.commit()
+    return store, call, document_id
+
+
+def test_proposing_and_reading_a_page_over_the_api(with_entities):
+    _, call, _ = with_entities
+    status, proposed = call("POST", "/entities/propose", {})
+    assert status == 200 and proposed["proposed"] == 1
+
+    entity_id = proposed["entities"][0]["entity_id"]
+    status, page = call("GET", f"/entities/{entity_id}")
+    assert status == 200
+    assert page["counts"]["mentions"] == 2
+    assert page["aliases"] == ["Halloran Instruments Inc"]
+
+
+def test_the_propose_route_is_not_shadowed_by_the_entity_id_route(with_entities):
+    # `/entities/propose` and `/entities/<id>` share a prefix; dispatch is
+    # ordered, so this is worth pinning rather than assuming.
+    _, call, _ = with_entities
+    assert call("POST", "/entities/propose", {})[0] == 200
+
+
+def test_confirming_a_link_and_hiding_proposals(with_entities):
+    _, call, _ = with_entities
+    entity_id = call("POST", "/entities/propose", {})[1]["entities"][0]["entity_id"]
+    assert call("POST", f"/entities/{entity_id}/mentions/i1/confirm", {})[0] == 200
+
+    _, everything = call("GET", f"/entities/{entity_id}")
+    _, asserted = call("GET", f"/entities/{entity_id}",
+                       {"include_unconfirmed": "0"})
+    assert everything["counts"]["mentions"] == 2
+    assert asserted["counts"]["mentions"] == 1
+
+
+def test_unlinking_over_the_api_returns_the_mention_to_the_queue(with_entities):
+    _, call, _ = with_entities
+    entity_id = call("POST", "/entities/propose", {})[1]["entities"][0]["entity_id"]
+    assert call("POST", f"/entities/{entity_id}/mentions/i2/unlink",
+                {"note": "different company"})[0] == 200
+    _, queue = call("GET", "/mentions/unlinked")
+    assert "i2" in {m["instance_id"] for m in queue["mentions"]}
+
+
+def test_candidates_are_offered_for_an_unlinked_mention(with_entities):
+    _, call, _ = with_entities
+    status, created = call("POST", "/entities",
+                           {"type_id": "Company",
+                            "canonical_name": "Halloran Instruments, Inc."})
+    assert status == 200
+    call("POST", f"/entities/{created['entity_id']}/mentions",
+         {"instance_id": "i1"})
+
+    _, result = call("GET", "/mentions/i2/candidates")
+    assert result["candidates"][0]["entity_id"] == created["entity_id"]
+    assert result["candidates"][0]["basis"] == "identifier"
+
+
+def test_a_document_lists_the_entities_it_is_evidence_about(with_entities):
+    _, call, document_id = with_entities
+    call("POST", "/entities/propose", {})
+    status, result = call("GET", f"/documents/{document_id}/entities")
+    assert status == 200
+    assert result["entities"]
+
+
+def test_merging_over_the_api(with_entities):
+    _, call, _ = with_entities
+    keep = call("POST", "/entities", {"type_id": "Company",
+                                      "canonical_name": "Halloran"})[1]["entity_id"]
+    gone = call("POST", "/entities", {"type_id": "Company",
+                                      "canonical_name": "Halloran Inc"})[1]["entity_id"]
+    call("POST", f"/entities/{gone}/mentions", {"instance_id": "i1"})
+
+    status, result = call("POST", f"/entities/{keep}/merge", {"merge_id": gone})
+    assert status == 200 and result["mentions_moved"] == 1
+    # The merged id still resolves, which is why its row is kept.
+    assert call("GET", f"/entities/{gone}")[1]["entity"]["entity_id"] == keep
+
+
+def test_a_bad_entity_request_is_a_message_not_a_traceback(with_entities):
+    _, call, _ = with_entities
+    assert call("POST", "/entities", {"type_id": "Company"})[0] == 400
+    assert call("GET", "/entities/ent_nope")[0] == 404

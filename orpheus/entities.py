@@ -1,0 +1,676 @@
+"""Entities: the thing itself, as against a mention of it in one document.
+
+Everything before this was mentions. `instances_Company` rows are document-
+scoped by construction — two documents naming one company are two rows, and the
+only thing joining them was a key computed from the spelling. That is fine for
+"does this name appear elsewhere" and useless for "what do we know about this
+company", which is the question a reusable body of knowledge has to answer.
+
+The split is small and it changes what the store is. An entity page is a
+**projection**: the entity row, plus every mention, each carrying its document,
+page, excerpt, confidence, grounding and review status. So every line on that
+page points at a source, and a claim with no mention behind it cannot be
+written. A knowledge base of uncited assertions is worth nothing to the next
+project that wants to use it; this one is cited by construction.
+
+Three rules carried over from the rest of the store, because they are what make
+it trustworthy rather than merely convenient:
+
+- **Nothing is destructive.** Unlinking a mention records the unlink; it does
+  not delete the row. A merged entity keeps its row and points at its
+  successor. Both are evidence about how well matching works.
+- **The machine proposes, a person decides.** Linking on a normalised name is
+  `unconfirmed` and says so. Only an exact stated identifier, or a person, is
+  worth more, and `basis` records which — those are different kinds of evidence
+  and collapsing them would lose the distinction permanently.
+- **One mention has one home.** Enforced by a partial unique index, not by
+  convention: the same excerpt cited on two entity pages is two pages claiming
+  the same evidence, and nothing would notice.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Iterable
+
+from . import bundle as bundle_mod
+from .audit import record_edit
+from .rubric import CONFIDENCE, EXCLUDED_STATUSES, STATUSES
+from .store import Store
+from .utils import (NotFound, OrpheusError, naive_key, new_id, now,
+                    require_choice, require_string)
+
+# What a link rests on. Not a confidence score — a kind of evidence. An exact
+# registration number and a normalised name are not the same claim, and the
+# difference has to survive into anything built on top.
+BASES = ("human", "identifier", "naive_key", "search")
+
+BASIS_CONFIDENCE = {
+    "human": CONFIDENCE["explicit"],
+    # A stated company number matching exactly is about as good as machine
+    # evidence gets, but the number itself was extracted and may be wrong.
+    "identifier": CONFIDENCE["named"],
+    # A normalised name. The caveat that follows this everywhere is the point.
+    "naive_key": CONFIDENCE["implied"],
+    "search": CONFIDENCE["inferred"],
+}
+
+NAIVE_CAVEAT = (
+    "Links made on a normalised name are candidates, not resolution. Two "
+    "organisations sharing a name are merged by it and one organisation "
+    "written two ways is not."
+)
+
+
+# ---------------------------------------------------------------------------
+# Reading mentions
+# ---------------------------------------------------------------------------
+
+def _named_tables(store: Store, bundle: dict | None = None) -> list[tuple[str, str]]:
+    """`(type_id, table)` for every type that carries a name.
+
+    Read from the bundle's `Named` interface where there is one, so a bundle
+    describing planning applications resolves applicants rather than companies.
+    """
+    bundle = bundle or bundle_mod.active(store)
+    if bundle is None:
+        return []
+    type_ids = bundle_mod.implementing_types(bundle, "Named")
+    out = []
+    for type_id in type_ids:
+        obj = bundle_mod.object_type(bundle, type_id)
+        table = bundle_mod.table_name(obj) if obj else None
+        if table and store.table_exists(table):
+            out.append((type_id, table))
+    return out
+
+
+def mention(store: Store, instance_id: str) -> dict:
+    """One mention, with the document it was read from."""
+    row = store.one(
+        "SELECT instance_id, type_id, table_name, document_id FROM instance_index "
+        "WHERE instance_id = ?", (instance_id,))
+    if row is None:
+        raise NotFound(f"No instance {instance_id!r}.")
+    detail = store.one(f'SELECT * FROM "{row["table_name"]}" WHERE instance_id = ?',
+                       (instance_id,))
+    return {**row, "properties": dict(detail) if detail else {}}
+
+
+def _home(store: Store, instance_id: str) -> dict | None:
+    return store.one(
+        "SELECT entity_id, basis, status FROM entity_mentions "
+        "WHERE instance_id = ? AND unlinked_at IS NULL", (instance_id,))
+
+
+# ---------------------------------------------------------------------------
+# Creating and reviewing an entity
+# ---------------------------------------------------------------------------
+
+def create_entity(store: Store, type_id: str, canonical_name: str,
+                  actor_id: str | None = None, description: str | None = None,
+                  source: str = "human", status: str | None = None) -> str:
+    """Register an entity. Says nothing yet about which mentions are it."""
+    store.assert_writable()
+    require_string(type_id, "type_id")
+    require_string(canonical_name, "canonical_name")
+    bundle = bundle_mod.active(store)
+    if bundle is not None and bundle_mod.object_type(bundle, type_id) is None:
+        raise OrpheusError(f"The active bundle has no object type {type_id!r}.")
+
+    entity_id = new_id("ent")
+    # A person naming an entity is asserting it exists; a machine proposing one
+    # is not, and the status has to say which.
+    status = status or ("confirmed" if source == "human" else "unconfirmed")
+    require_choice(status, STATUSES, "status")
+    store.insert("entities", {
+        "entity_id": entity_id,
+        "type_id": type_id,
+        "canonical_name": canonical_name,
+        "naive_key": naive_key(canonical_name),
+        "description": description,
+        "source": source,
+        "confidence": CONFIDENCE["explicit"] if source == "human"
+                      else CONFIDENCE["implied"],
+        "status": status,
+        "created_at": now(),
+        "created_by": actor_id,
+    })
+    record_edit(store, "entities", entity_id, None, "create",
+                new={"type_id": type_id, "canonical_name": canonical_name,
+                     "source": source},
+                actor_id=actor_id)
+    return entity_id
+
+
+def get_entity(store: Store, entity_id: str, follow_merge: bool = True) -> dict:
+    row = store.one("SELECT * FROM entities WHERE entity_id = ?", (entity_id,))
+    if row is None:
+        raise NotFound(f"No entity {entity_id!r}.")
+    if follow_merge and row["merged_into"]:
+        # A link made before a merge still resolves, which is the reason the
+        # merged row is kept rather than deleted.
+        return get_entity(store, row["merged_into"], follow_merge=True)
+    return dict(row)
+
+
+def confirm_entity(store: Store, entity_id: str, actor_id: str,
+                   note: str | None = None) -> str:
+    """A person agrees this entity is a real, distinct thing."""
+    return _set_entity_status(store, entity_id, "confirmed", actor_id, note)
+
+
+def reject_entity(store: Store, entity_id: str, actor_id: str,
+                  note: str | None = None) -> str:
+    """Not a real entity — a parsing artefact, or two things confused.
+
+    Excluded rather than deleted, and its mentions are released so they can be
+    linked somewhere correct.
+    """
+    entity_id = _set_entity_status(store, entity_id, "rejected", actor_id, note)
+    with store.transaction():
+        for row in store.query(
+                "SELECT instance_id FROM entity_mentions "
+                "WHERE entity_id = ? AND unlinked_at IS NULL", (entity_id,)):
+            unlink_mention(store, entity_id, row["instance_id"], actor_id,
+                           note="Entity rejected.")
+    return entity_id
+
+
+def rename_entity(store: Store, entity_id: str, canonical_name: str,
+                  actor_id: str, note: str | None = None) -> str:
+    """Correct the name the page is filed under, keeping the old one in history."""
+    store.assert_writable()
+    require_string(canonical_name, "canonical_name")
+    before = get_entity(store, entity_id, follow_merge=False)
+    if before["canonical_name"] == canonical_name:
+        raise OrpheusError(
+            "That is already the name. Nothing was changed.")
+    with store.transaction():
+        store.execute(
+            "UPDATE entities SET canonical_name = ?, naive_key = ?, "
+            "status = 'amended', source = 'human', confidence = ?, "
+            "amended_by = ?, amended_at = ? WHERE entity_id = ?",
+            (canonical_name, naive_key(canonical_name), CONFIDENCE["explicit"],
+             actor_id, now(), entity_id))
+        record_edit(store, "entities", entity_id, None, "amend",
+                    previous={"canonical_name": before["canonical_name"]},
+                    new={"canonical_name": canonical_name},
+                    actor_id=actor_id, note=note)
+    return entity_id
+
+
+def describe_entity(store: Store, entity_id: str, description: str,
+                    actor_id: str, note: str | None = None) -> str:
+    """The page's own prose — the one thing on it that is not from a document.
+
+    Kept apart from everything else for that reason: a reader can see at a
+    glance which part of a page is sourced and which part is a person writing.
+    """
+    store.assert_writable()
+    before = get_entity(store, entity_id, follow_merge=False)
+    with store.transaction():
+        store.execute(
+            "UPDATE entities SET description = ?, amended_by = ?, amended_at = ? "
+            "WHERE entity_id = ?", (description, actor_id, now(), entity_id))
+        record_edit(store, "entities", entity_id, None, "amend",
+                    previous={"description": before["description"]},
+                    new={"description": description}, actor_id=actor_id, note=note)
+    return entity_id
+
+
+def _set_entity_status(store: Store, entity_id: str, status: str,
+                       actor_id: str, note: str | None) -> str:
+    store.assert_writable()
+    require_string(actor_id, "actor_id")
+    require_choice(status, STATUSES, "status")
+    before = get_entity(store, entity_id, follow_merge=False)
+    with store.transaction():
+        store.execute(
+            "UPDATE entities SET status = ?, amended_by = ?, amended_at = ? "
+            "WHERE entity_id = ?", (status, actor_id, now(), entity_id))
+        # Named explicitly rather than derived from the status: rstrip() strips
+        # characters, not a suffix, and happens to work for these three only.
+        action = {"confirmed": "confirm", "rejected": "reject",
+                  "amended": "amend"}.get(status, status)
+        record_edit(store, "entities", entity_id, None, action,
+                    previous={"status": before["status"]}, new={"status": status},
+                    actor_id=actor_id, note=note)
+    return entity_id
+
+
+# ---------------------------------------------------------------------------
+# Linking mentions
+# ---------------------------------------------------------------------------
+
+def link_mention(store: Store, entity_id: str, instance_id: str,
+                 actor_id: str | None = None, basis: str = "human",
+                 note: str | None = None, status: str | None = None) -> dict:
+    """Attach one mention to one entity.
+
+    Refuses if the mention already has a home. Moving it is `unlink` then
+    `link`, deliberately two steps: a silent re-home would rewrite which page
+    cites a piece of evidence with nothing recording that it moved.
+    """
+    store.assert_writable()
+    require_choice(basis, BASES, "basis")
+    entity = get_entity(store, entity_id)
+    found = mention(store, instance_id)
+
+    if entity["type_id"] != found["type_id"]:
+        raise OrpheusError(
+            f"{instance_id} is a {found['type_id']} and {entity_id} is a "
+            f"{entity['type_id']}. A name that is a company in one document and "
+            "a person in another is a finding to look at, not a link to make."
+        )
+
+    existing = _home(store, instance_id)
+    if existing and existing["entity_id"] == entity["entity_id"]:
+        return {"entity_id": entity["entity_id"], "instance_id": instance_id,
+                "already_linked": True}
+    if existing:
+        raise OrpheusError(
+            f"{instance_id} is already linked to {existing['entity_id']}. "
+            "Unlink it first — moving evidence between pages silently would "
+            "leave nothing recording that it moved."
+        )
+
+    status = status or ("confirmed" if basis == "human" else "unconfirmed")
+    require_choice(status, STATUSES, "status")
+    with store.transaction():
+        # A previous, unlinked row for this pair may exist; the primary key is
+        # (entity_id, instance_id), so relinking updates it rather than
+        # inserting a duplicate.
+        store.execute(
+            "INSERT INTO entity_mentions (entity_id, instance_id, document_id, "
+            "basis, confidence, status, linked_by, linked_at, note) "
+            "VALUES (?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(entity_id, instance_id) DO UPDATE SET "
+            "basis = excluded.basis, confidence = excluded.confidence, "
+            "status = excluded.status, linked_by = excluded.linked_by, "
+            "linked_at = excluded.linked_at, note = excluded.note, "
+            "unlinked_at = NULL, unlinked_by = NULL",
+            (entity["entity_id"], instance_id, found["document_id"], basis,
+             BASIS_CONFIDENCE[basis], status, actor_id, now(), note))
+        record_edit(store, "entity_mentions", instance_id, found["document_id"],
+                    "link", new={"entity_id": entity["entity_id"], "basis": basis},
+                    actor_id=actor_id, note=note)
+    return {"entity_id": entity["entity_id"], "instance_id": instance_id,
+            "basis": basis, "status": status}
+
+
+def unlink_mention(store: Store, entity_id: str, instance_id: str,
+                   actor_id: str | None = None, note: str | None = None) -> dict:
+    """Detach a mention. The row stays, marked unlinked.
+
+    A link a person removed is evidence about how well matching works — the
+    same reason a rejected instance is kept rather than deleted.
+    """
+    store.assert_writable()
+    row = store.one(
+        "SELECT * FROM entity_mentions WHERE entity_id = ? AND instance_id = ? "
+        "AND unlinked_at IS NULL", (entity_id, instance_id))
+    if row is None:
+        raise NotFound(
+            f"{instance_id} is not currently linked to {entity_id}.")
+    with store.transaction():
+        store.execute(
+            "UPDATE entity_mentions SET unlinked_at = ?, unlinked_by = ?, "
+            "note = COALESCE(?, note) WHERE entity_id = ? AND instance_id = ?",
+            (now(), actor_id, note, entity_id, instance_id))
+        record_edit(store, "entity_mentions", instance_id, row["document_id"],
+                    "unlink", previous={"entity_id": entity_id, "basis": row["basis"]},
+                    new={"entity_id": None}, actor_id=actor_id, note=note)
+    return {"entity_id": entity_id, "instance_id": instance_id, "unlinked": True}
+
+
+def confirm_link(store: Store, entity_id: str, instance_id: str, actor_id: str,
+                 note: str | None = None) -> dict:
+    """A person agrees a proposed link is right."""
+    store.assert_writable()
+    row = store.one(
+        "SELECT status FROM entity_mentions WHERE entity_id = ? "
+        "AND instance_id = ? AND unlinked_at IS NULL", (entity_id, instance_id))
+    if row is None:
+        raise NotFound(f"{instance_id} is not currently linked to {entity_id}.")
+    with store.transaction():
+        store.execute(
+            "UPDATE entity_mentions SET status = 'confirmed', confidence = ? "
+            "WHERE entity_id = ? AND instance_id = ?",
+            (CONFIDENCE["explicit"], entity_id, instance_id))
+        record_edit(store, "entity_mentions", instance_id, None, "confirm",
+                    previous={"status": row["status"]}, new={"status": "confirmed"},
+                    actor_id=actor_id, note=note)
+    return {"entity_id": entity_id, "instance_id": instance_id,
+            "status": "confirmed"}
+
+
+# ---------------------------------------------------------------------------
+# Merging
+# ---------------------------------------------------------------------------
+
+def merge_entities(store: Store, keep_id: str, merge_id: str, actor_id: str,
+                   note: str | None = None) -> dict:
+    """Two pages turn out to be one thing.
+
+    The merged entity keeps its row and points at the survivor, so a link made
+    before the merge still resolves and the merge itself is readable afterwards.
+    Splitting is the inverse and is deliberately not one operation: unlink the
+    mentions that belong elsewhere and create the entity they belong to, so each
+    half is a decision with its own record.
+    """
+    store.assert_writable()
+    require_string(actor_id, "actor_id")
+    if keep_id == merge_id:
+        raise OrpheusError("An entity cannot be merged into itself.")
+    keep = get_entity(store, keep_id)
+    merge = get_entity(store, merge_id, follow_merge=False)
+    if merge["merged_into"]:
+        raise OrpheusError(
+            f"{merge_id} was already merged into {merge['merged_into']}.")
+    if keep["type_id"] != merge["type_id"]:
+        raise OrpheusError(
+            f"{keep_id} is a {keep['type_id']} and {merge_id} is a "
+            f"{merge['type_id']}. Merging across types would make the type "
+            "meaningless on the surviving page.")
+
+    moved = 0
+    with store.transaction():
+        for row in store.query(
+                "SELECT instance_id, basis, status, note FROM entity_mentions "
+                "WHERE entity_id = ? AND unlinked_at IS NULL", (merge_id,)):
+            unlink_mention(store, merge_id, row["instance_id"], actor_id,
+                           note=f"Merged into {keep['entity_id']}.")
+            link_mention(store, keep["entity_id"], row["instance_id"], actor_id,
+                         basis=row["basis"], status=row["status"],
+                         note=row["note"])
+            moved += 1
+        store.execute(
+            "UPDATE entities SET merged_into = ?, status = 'amended', "
+            "amended_by = ?, amended_at = ? WHERE entity_id = ?",
+            (keep["entity_id"], actor_id, now(), merge_id))
+        record_edit(store, "entities", merge_id, None, "merge",
+                    previous={"entity_id": merge_id,
+                              "canonical_name": merge["canonical_name"]},
+                    new={"merged_into": keep["entity_id"], "mentions_moved": moved},
+                    actor_id=actor_id, note=note)
+    return {"kept": keep["entity_id"], "merged": merge_id,
+            "mentions_moved": moved}
+
+
+# ---------------------------------------------------------------------------
+# Proposing
+# ---------------------------------------------------------------------------
+
+def candidates_for_mention(store: Store, instance_id: str,
+                           limit: int = 10) -> list[dict]:
+    """Which existing entities could this mention be?
+
+    Ordered by the strength of the evidence, not by similarity: an exact stated
+    identifier beats a normalised name however close the spelling.
+    """
+    found = mention(store, instance_id)
+    properties = found["properties"]
+    name = properties.get("name") or ""
+    key = properties.get("naive_key") or naive_key(name)
+
+    out: dict[str, dict] = {}
+
+    identifier = properties.get("registration_number")
+    if identifier:
+        for row in store.query(
+                "SELECT DISTINCT e.entity_id, e.canonical_name, e.status "
+                "FROM entities e JOIN entity_mentions m USING (entity_id) "
+                f'JOIN "{found["table_name"]}" i ON i.instance_id = m.instance_id '
+                "WHERE m.unlinked_at IS NULL AND e.merged_into IS NULL "
+                "AND i.registration_number = ? AND e.type_id = ?",
+                (identifier, found["type_id"])):
+            out[row["entity_id"]] = {**dict(row), "basis": "identifier",
+                                     "evidence": f"registration number {identifier}"}
+
+    if key:
+        for row in store.query(
+                "SELECT entity_id, canonical_name, status FROM entities "
+                "WHERE naive_key = ? AND type_id = ? AND merged_into IS NULL "
+                "AND status != 'rejected' LIMIT ?",
+                (key, found["type_id"], limit)):
+            out.setdefault(row["entity_id"], {**dict(row), "basis": "naive_key",
+                                              "evidence": f"name key {key!r}"})
+
+    ranked = sorted(out.values(), key=lambda c: BASES.index(c["basis"]))
+    return ranked[:limit]
+
+
+def unlinked_mentions(store: Store, type_id: str | None = None,
+                      document_id: str | None = None,
+                      limit: int = 200) -> list[dict]:
+    """Mentions with no entity yet — the work queue for building the wiki."""
+    rows = []
+    for found_type, table in _named_tables(store):
+        if type_id and found_type != type_id:
+            continue
+        clause = "AND i.document_id = ?" if document_id else ""
+        # A one-element tuple's repr carries a trailing comma, which is not SQL.
+        excluded = ", ".join("?" for _ in EXCLUDED_STATUSES)
+        params: tuple = tuple(EXCLUDED_STATUSES) + (
+            (document_id,) if document_id else ())
+        rows += [dict(r) for r in store.query(
+            f'SELECT i.instance_id, i.document_id, i.name, i.naive_key, '
+            f"       '{found_type}' AS type_id "
+            f'FROM "{table}" i '
+            "LEFT JOIN entity_mentions m ON m.instance_id = i.instance_id "
+            "  AND m.unlinked_at IS NULL "
+            f"WHERE m.entity_id IS NULL AND i.status NOT IN ({excluded}) "
+            f"AND i.name IS NOT NULL AND i.name != '' {clause} "
+            f"LIMIT {int(limit)}", params)]
+    return rows
+
+
+def propose_entities(store: Store, type_id: str | None = None,
+                     actor_id: str | None = None,
+                     min_mentions: int = 1) -> dict:
+    """Bootstrap the wiki: group unlinked mentions and propose an entity each.
+
+    Everything proposed here is `unconfirmed` and linked on `naive_key`, which
+    is the weakest basis there is. That is deliberate — this exists to turn a
+    pile of mentions into a reviewable queue, not to decide anything. A person
+    confirming a page is what makes it real.
+
+    Mentions carrying the same stated identifier are grouped together even when
+    their names differ, because an exact registration number is better evidence
+    than a spelling.
+    """
+    store.assert_writable()
+    pending = unlinked_mentions(store, type_id=type_id)
+    if not pending:
+        return {"proposed": 0, "linked": 0, "entities": [], "caveat": NAIVE_CAVEAT}
+
+    # Group by identifier where there is one, else by name key.
+    groups: dict[tuple, list[dict]] = {}
+    for found in pending:
+        detail = mention(store, found["instance_id"])["properties"]
+        identifier = detail.get("registration_number")
+        key = (found["type_id"], f"id:{identifier}") if identifier \
+            else (found["type_id"], f"key:{found['naive_key']}")
+        groups.setdefault(key, []).append({**found, "identifier": identifier})
+
+    proposed, linked, entities = 0, 0, []
+    with store.transaction():
+        for (found_type, key), members in sorted(groups.items()):
+            if len(members) < min_mentions:
+                continue
+            basis = "identifier" if key.startswith("id:") else "naive_key"
+            # The longest spelling is the least abbreviated, which is the better
+            # page title: "Halloran Instruments, Inc." over "Halloran".
+            canonical = max((m["name"] for m in members), key=len)
+            entity_id = create_entity(store, found_type, canonical,
+                                      actor_id=actor_id, source="ai_local",
+                                      status="unconfirmed")
+            proposed += 1
+            for member in members:
+                link_mention(store, entity_id, member["instance_id"],
+                             actor_id=actor_id, basis=basis,
+                             status="unconfirmed")
+                linked += 1
+            entities.append({"entity_id": entity_id, "type_id": found_type,
+                             "canonical_name": canonical,
+                             "n_mentions": len(members), "basis": basis})
+    return {"proposed": proposed, "linked": linked, "entities": entities,
+            "caveat": NAIVE_CAVEAT}
+
+
+# ---------------------------------------------------------------------------
+# The projection: an entity as a page
+# ---------------------------------------------------------------------------
+
+def entity_page(store: Store, entity_id: str,
+                include_unconfirmed: bool = True) -> dict:
+    """Everything known about an entity, with a source on every line.
+
+    This is the shape the wiki renders. Note what it does *not* do: it never
+    picks a winner when two documents disagree. A property comes back as the
+    set of values seen, each with the mentions asserting it and how many of
+    those a person has confirmed. Choosing between them is a judgement, and
+    making it here would bury it — the disagreement is usually the interesting
+    part, and often both are true of the moment each document was written.
+
+    `include_unconfirmed` is the collapsible half of the page: confirmed facts
+    are what the wiki asserts, proposals sit behind a disclosure.
+    """
+    entity = get_entity(store, entity_id)
+    links = store.query(
+        "SELECT instance_id, document_id, basis, confidence, status, "
+        "       linked_by, linked_at, note "
+        "FROM entity_mentions WHERE entity_id = ? AND unlinked_at IS NULL "
+        "ORDER BY linked_at", (entity["entity_id"],))
+
+    mentions, properties = [], {}
+    documents: dict[str, dict] = {}
+    reserved = {"instance_id", "document_id", "source", "confidence", "status",
+                "amended_by", "amended_at", "created_at", "naive_key"}
+
+    for link in links:
+        if not include_unconfirmed and link["status"] not in ("confirmed", "amended"):
+            continue
+        found = mention(store, link["instance_id"])
+        provenance = store.one(
+            "SELECT excerpt, page_no, confidence, alignment, char_start, char_end, "
+            "       source FROM provenance WHERE instance_id = ?",
+            (link["instance_id"],))
+        document = store.one(
+            "SELECT document_id, filename, doc_type, date_added FROM documents "
+            "WHERE document_id = ?", (link["document_id"],))
+
+        record = {
+            "instance_id": link["instance_id"],
+            "document_id": link["document_id"],
+            "document": dict(document) if document else None,
+            "link": {"basis": link["basis"], "status": link["status"],
+                     "confidence": link["confidence"], "linked_by": link["linked_by"]},
+            "instance_status": found["properties"].get("status"),
+            "instance_source": found["properties"].get("source"),
+            "properties": {k: v for k, v in found["properties"].items()
+                           if k not in reserved and v is not None},
+            # The citation. A page line without this cannot be written.
+            "evidence": dict(provenance) if provenance else None,
+        }
+        mentions.append(record)
+        if document:
+            documents[document["document_id"]] = dict(document)
+
+        for key, value in record["properties"].items():
+            if key == "name":
+                continue
+            bucket = properties.setdefault(key, {})
+            seen = bucket.setdefault(str(value), {
+                "value": value, "mentions": [], "n_confirmed": 0})
+            seen["mentions"].append(link["instance_id"])
+            if link["status"] in ("confirmed", "amended"):
+                seen["n_confirmed"] += 1
+
+    # Names seen for this entity, which is how a page shows its own aliases.
+    aliases = sorted({m["properties"].get("name") for m in mentions
+                      if m["properties"].get("name")}
+                     - {entity["canonical_name"]})
+
+    return {
+        "entity": entity,
+        # The one part of the page that is not from a document, kept separate
+        # so a reader can see at a glance which is which.
+        "description": entity["description"],
+        "aliases": aliases,
+        "properties": {
+            key: sorted(values.values(),
+                        key=lambda v: (-v["n_confirmed"], -len(v["mentions"])))
+            for key, values in sorted(properties.items())
+        },
+        "mentions": mentions,
+        "documents": sorted(documents.values(), key=lambda d: d["date_added"] or ""),
+        "counts": {
+            "mentions": len(mentions),
+            "documents": len(documents),
+            "confirmed_links": sum(1 for m in mentions
+                                   if m["link"]["status"] in ("confirmed", "amended")),
+            "unconfirmed_links": sum(1 for m in mentions
+                                     if m["link"]["status"] == "unconfirmed"),
+        },
+        # A link is settled when a person made it or a person checked it.
+        # Basing this on `basis` alone would mean confirming a proposal changed
+        # nothing, which makes confirmation meaningless here -- and the page
+        # would carry a caveat about naive matching after every link on it had
+        # been verified by hand.
+        "resolution_quality": ("resolved" if _settled(entity, mentions)
+                               else "naive_unresolved"),
+        "caveat": None if _settled(entity, mentions) else NAIVE_CAVEAT,
+    }
+
+
+def _settled(entity: dict, mentions: list[dict]) -> bool:
+    """Has a person actually vouched for this page, link by link?"""
+    if entity["status"] not in ("confirmed", "amended"):
+        return False
+    if not mentions:
+        return False
+    return all(m["link"]["basis"] == "human"
+               or m["link"]["status"] in ("confirmed", "amended")
+               for m in mentions)
+
+
+def list_entities(store: Store, type_id: str | None = None,
+                  status: str | None = None, query: str | None = None,
+                  limit: int = 100) -> list[dict]:
+    """The wiki's index, with how much sits behind each page."""
+    clauses = ["e.merged_into IS NULL"]
+    params: list[Any] = []
+    if type_id:
+        clauses.append("e.type_id = ?")
+        params.append(type_id)
+    if status:
+        clauses.append("e.status = ?")
+        params.append(status)
+    if query:
+        clauses.append("(e.canonical_name LIKE ? OR e.naive_key LIKE ?)")
+        params += [f"%{query}%", f"%{naive_key(query)}%"]
+
+    return [dict(r) for r in store.query(
+        "SELECT e.entity_id, e.type_id, e.canonical_name, e.status, e.description, "
+        "       COUNT(m.instance_id) AS n_mentions, "
+        "       COUNT(DISTINCT m.document_id) AS n_documents, "
+        "       SUM(CASE WHEN m.status IN ('confirmed','amended') THEN 1 ELSE 0 END) "
+        "         AS n_confirmed "
+        "FROM entities e "
+        "LEFT JOIN entity_mentions m ON m.entity_id = e.entity_id "
+        "  AND m.unlinked_at IS NULL "
+        f"WHERE {' AND '.join(clauses)} "
+        "GROUP BY e.entity_id ORDER BY n_documents DESC, e.canonical_name "
+        f"LIMIT {int(limit)}", tuple(params))]
+
+
+def entities_in_document(store: Store, document_id: str) -> list[dict]:
+    """Which entities this document is evidence about — the reverse view."""
+    return [dict(r) for r in store.query(
+        "SELECT DISTINCT e.entity_id, e.type_id, e.canonical_name, e.status, "
+        "       m.basis, m.status AS link_status, m.instance_id "
+        "FROM entity_mentions m JOIN entities e USING (entity_id) "
+        "WHERE m.document_id = ? AND m.unlinked_at IS NULL "
+        "  AND e.merged_into IS NULL "
+        "ORDER BY e.canonical_name", (document_id,))]

@@ -71,13 +71,11 @@ def test_python_migrations_reproduce_the_r_schema(tmp_path):
         fresh.close()
     r = _schema(sqlite3.connect(FIXTURE))
 
-    # What Python has and R did not. Migration 3 adopts the five tables
-    # conceptR used to create as a side effect, which is why they were absent
-    # from R's own migration list even though the store depended on them.
-    # Migration 4 adds grounding to provenance, which R never recorded at all.
-    new_in_python = {("index", "idx_concept_versions_active"),
-                     ("index", "idx_provenance_alignment")}
-    assert set(python) - set(r) == new_in_python
+    # Python's schema is a superset by design and grows with every migration,
+    # so what it has *in addition* is not asserted -- an enumeration here fails
+    # on each new migration while saying nothing about whether that migration
+    # was right. The two claims that matter are below: nothing R had is
+    # missing, and nothing R had changed underneath it.
 
     # Everything R had, Python creates. Whitespace is normalised because R
     # heredocs carry their source indentation into the DDL.

@@ -23,6 +23,7 @@ import re
 from typing import Any, Callable
 
 from . import analysis, auth, bundle as bundle_mod, classify, concepts
+from . import entities as entities_mod
 from . import engines, extract as extract_mod, ingest as ingest_mod
 from . import llm, quality, review, rubric, textract
 from .store import Store
@@ -338,6 +339,125 @@ def post_corpus_analysis(store, document_id, actor, body, **_):
                                     narrate=bool(body.get("narrate")),
                                     tier=body.get("tier", "cloud"),
                                     opt_in=bool(body.get("cloud_opt_in")))
+
+
+# ---------------------------------------------------------------------------
+# Entities: the wiki
+# ---------------------------------------------------------------------------
+
+@route("GET", "/entities")
+def get_entities(store, body, **_):
+    return {"entities": entities_mod.list_entities(
+        store, type_id=body.get("type_id"), status=body.get("status"),
+        query=body.get("q"), limit=int(body.get("limit", 100)))}
+
+
+@route("POST", "/entities")
+def post_entity(store, actor, body, **_):
+    if not body.get("type_id") or not body.get("canonical_name"):
+        raise ApiError(400, "Give `type_id` and `canonical_name`.")
+    entity_id = entities_mod.create_entity(
+        store, body["type_id"], body["canonical_name"],
+        actor_id=_actor_id(actor), description=body.get("description"))
+    return {"entity_id": entity_id}
+
+
+@route("GET", r"/entities/(?P<entity_id>[^/]+)")
+def get_entity_page(store, entity_id, body, **_):
+    """The page. A projection of mentions, so every line carries a source."""
+    return entities_mod.entity_page(
+        store, entity_id,
+        include_unconfirmed=body.get("include_unconfirmed", "1") not in
+        ("0", "false", "False", False))
+
+
+@route("POST", r"/entities/(?P<entity_id>[^/]+)/rename")
+def post_entity_rename(store, entity_id, actor, body, **_):
+    if not body.get("canonical_name"):
+        raise ApiError(400, "Give `canonical_name`.")
+    entities_mod.rename_entity(store, entity_id, body["canonical_name"],
+                               _actor_id(actor), note=body.get("note"))
+    return {"entity_id": entity_id}
+
+
+@route("POST", r"/entities/(?P<entity_id>[^/]+)/describe")
+def post_entity_describe(store, entity_id, actor, body, **_):
+    entities_mod.describe_entity(store, entity_id, body.get("description") or "",
+                                 _actor_id(actor), note=body.get("note"))
+    return {"entity_id": entity_id}
+
+
+@route("POST", r"/entities/(?P<entity_id>[^/]+)/confirm")
+def post_entity_confirm(store, entity_id, actor, body, **_):
+    entities_mod.confirm_entity(store, entity_id, _actor_id(actor),
+                                note=body.get("note"))
+    return {"entity_id": entity_id, "status": "confirmed"}
+
+
+@route("POST", r"/entities/(?P<entity_id>[^/]+)/reject")
+def post_entity_reject(store, entity_id, actor, body, **_):
+    entities_mod.reject_entity(store, entity_id, _actor_id(actor),
+                               note=body.get("note"))
+    return {"entity_id": entity_id, "status": "rejected"}
+
+
+@route("POST", r"/entities/(?P<entity_id>[^/]+)/merge")
+def post_entity_merge(store, entity_id, actor, body, **_):
+    if not body.get("merge_id"):
+        raise ApiError(400, "Give `merge_id`: the entity being merged away.")
+    return entities_mod.merge_entities(store, entity_id, body["merge_id"],
+                                       _actor_id(actor), note=body.get("note"))
+
+
+@route("POST", r"/entities/(?P<entity_id>[^/]+)/mentions")
+def post_entity_link(store, entity_id, actor, body, **_):
+    if not body.get("instance_id"):
+        raise ApiError(400, "Give `instance_id`.")
+    return entities_mod.link_mention(
+        store, entity_id, body["instance_id"], actor_id=_actor_id(actor),
+        basis=body.get("basis", "human"), note=body.get("note"))
+
+
+@route("POST", r"/entities/(?P<entity_id>[^/]+)/mentions/(?P<instance_id>[^/]+)/confirm")
+def post_link_confirm(store, entity_id, instance_id, actor, body, **_):
+    return entities_mod.confirm_link(store, entity_id, instance_id,
+                                     _actor_id(actor), note=body.get("note"))
+
+
+@route("POST", r"/entities/(?P<entity_id>[^/]+)/mentions/(?P<instance_id>[^/]+)/unlink")
+def post_link_unlink(store, entity_id, instance_id, actor, body, **_):
+    return entities_mod.unlink_mention(store, entity_id, instance_id,
+                                       _actor_id(actor), note=body.get("note"))
+
+
+@route("POST", "/entities/propose")
+def post_entities_propose(store, actor, body, **_):
+    """Turn a pile of mentions into a reviewable queue.
+
+    Everything it makes is unconfirmed and linked on the weakest basis there
+    is. It decides nothing; a person confirming a page is what makes it real.
+    """
+    return entities_mod.propose_entities(store, type_id=body.get("type_id"),
+                                         actor_id=_actor_id(actor))
+
+
+@route("GET", "/mentions/unlinked")
+def get_unlinked_mentions(store, body, **_):
+    return {"mentions": entities_mod.unlinked_mentions(
+        store, type_id=body.get("type_id"), document_id=body.get("document_id"),
+        limit=int(body.get("limit", 200)))}
+
+
+@route("GET", r"/mentions/(?P<instance_id>[^/]+)/candidates")
+def get_mention_candidates(store, instance_id, body, **_):
+    return {"instance_id": instance_id,
+            "candidates": entities_mod.candidates_for_mention(
+                store, instance_id, limit=int(body.get("limit", 10)))}
+
+
+@route("GET", r"/documents/(?P<document_id>[^/]+)/entities", permission="view")
+def get_document_entities(store, document_id, **_):
+    return {"entities": entities_mod.entities_in_document(store, document_id)}
 
 
 # ---------------------------------------------------------------------------

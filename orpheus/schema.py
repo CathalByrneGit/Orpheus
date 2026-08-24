@@ -348,6 +348,81 @@ MIGRATIONS: list[dict] = [
         # old basis rather than carrying it forward invisibly.
         "run": lambda store: _recompute_naive_keys(store),
     },
+    {
+        "version": 6,
+        "name": "entities",
+        "statements": [
+            # An entity is the thing itself; an instance row is one *mention* of
+            # it in one document. Everything before this was mentions only, and
+            # two documents naming one company were two rows joined by a key
+            # computed from the spelling.
+            #
+            # The split is what turns the store into something reusable. A wiki
+            # page for a company is a projection of this table plus its
+            # mentions, so every line on it points at a document, a page and an
+            # excerpt, and says whether a person has checked it. A page of
+            # uncited assertions is worth nothing downstream; this one cannot
+            # be written.
+            """
+            CREATE TABLE IF NOT EXISTS entities (
+                entity_id      TEXT PRIMARY KEY,
+                type_id        TEXT NOT NULL,
+                canonical_name TEXT NOT NULL,
+                naive_key      TEXT,
+                description    TEXT,
+                source         TEXT NOT NULL,
+                confidence     REAL NOT NULL,
+                status         TEXT NOT NULL DEFAULT 'unconfirmed',
+                -- Set when this entity was merged into another. The row stays,
+                -- so a link made before the merge still resolves and the merge
+                -- itself can be read back.
+                merged_into    TEXT REFERENCES entities(entity_id),
+                created_at     TEXT NOT NULL,
+                created_by     TEXT REFERENCES actors(actor_id),
+                amended_by     TEXT REFERENCES actors(actor_id),
+                amended_at     TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_entities_key ON entities (naive_key)",
+            "CREATE INDEX IF NOT EXISTS idx_entities_type ON entities (type_id)",
+            "CREATE INDEX IF NOT EXISTS idx_entities_merged ON entities (merged_into)",
+
+            # Which mentions belong to which entity, and on what grounds.
+            # `basis` is the evidence for the link, not a confidence score:
+            # `identifier` is a stated registration number matching exactly,
+            # `naive_key` is a normalised name, `human` is a person saying so.
+            # They are not interchangeable and the difference has to survive.
+            """
+            CREATE TABLE IF NOT EXISTS entity_mentions (
+                entity_id   TEXT NOT NULL REFERENCES entities(entity_id),
+                instance_id TEXT NOT NULL,
+                document_id TEXT REFERENCES documents(document_id),
+                basis       TEXT NOT NULL,
+                confidence  REAL NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'unconfirmed',
+                linked_by   TEXT REFERENCES actors(actor_id),
+                linked_at   TEXT NOT NULL,
+                -- Unlinking is not deletion. A link a person removed is
+                -- evidence about how well matching works, which is the same
+                -- reason a rejected instance is kept.
+                unlinked_at TEXT,
+                unlinked_by TEXT REFERENCES actors(actor_id),
+                note        TEXT,
+                PRIMARY KEY (entity_id, instance_id)
+            )
+            """,
+            # One mention belongs to at most one entity at a time. Enforced by
+            # the database rather than by convention, because a mention on two
+            # wiki pages is two pages claiming the same evidence and nothing
+            # would notice. Partial, so an unlinked row does not block a relink.
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_mentions_one_home "
+            "ON entity_mentions (instance_id) WHERE unlinked_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity "
+            "ON entity_mentions (entity_id)",
+            "CREATE INDEX IF NOT EXISTS idx_entity_mentions_doc "
+            "ON entity_mentions (document_id)",
+        ],
+    },
 ]
 
 
