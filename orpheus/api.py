@@ -609,6 +609,35 @@ def get_neighbourhood(store, entity_id, body, **_):
                                    depth=int(body.get("depth", 1)))
 
 
+@route("GET", "/graph/paths")
+def get_paths(store, body, **_):
+    """How two pages are connected, with the evidence for every hop.
+
+    Each chain names its weakest link: one running through an unconfirmed
+    machine guess is not the same finding as one a person has checked end to
+    end, and reporting them alike invites the conclusion the store exists to
+    prevent.
+    """
+    if not body.get("from") or not body.get("to"):
+        raise ApiError(400, "Give `from` and `to` entity ids.")
+    return graph_mod.paths_between(
+        store, body["from"], body["to"],
+        max_paths=int(body.get("max_paths", 5)),
+        max_length=int(body.get("max_length", 6)))
+
+
+@route("GET", "/graph/centrality")
+def get_centrality(store, actor, body, **_):
+    """Degree, and betweenness where networkx is installed."""
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Centrality is computed over the whole corpus, including documents "
+            "you may not be able to read, so it is an administrator view.")
+    sample = body.get("sample")
+    return graph_mod.centrality(
+        graph_mod.build(store), k=int(sample) if sample else None)
+
+
 @route("GET", "/corroboration")
 def get_corroboration(store, actor, body, **_):
     """Where the corpus agrees with itself, and where it is quoting itself."""

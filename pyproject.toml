@@ -37,6 +37,12 @@ layout = ["docling>=2"]
 # everything else is built on. `datasette-rapidfuzz` exposes the same functions
 # as SQL for ad-hoc exploration, and is not needed by the core.
 match = ["rapidfuzz>=3"]
+# Graph analysis beyond the deterministic core. Louvain in place of label
+# propagation (much more stable, and it reports modularity so a reader can see
+# whether the partition means anything), and betweenness centrality. Without it
+# components, articulation points, paths, isolates and degree all still work --
+# a store has to be readable structurally by a script with nothing installed.
+graph = ["networkx>=3"]
 # Full-text search over page text and excerpts. sqlite-utils owns the FTS
 # triggers and the query escaping; writing those by hand is possible and easy to
 # get subtly wrong.
@@ -48,7 +54,8 @@ schema = ["sqlite-utils>=3.36"]
 pdf = ["pdfminer.six"]
 ocr = ["pytesseract", "pillow"]
 dev = ["pytest>=7", "datasette>=1.0a32", "httpx", "pyyaml", "jsonschema",
-       "langextract>=1.6", "llm>=0.20", "llm-echo", "sqlite-utils>=3.36", "rapidfuzz>=3"]
+       "langextract>=1.6", "llm>=0.20", "llm-echo", "sqlite-utils>=3.36",
+       "rapidfuzz>=3", "networkx>=3"]
 
 [project.scripts]
 orpheus = "orpheus.cli:cli"

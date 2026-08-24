@@ -21,15 +21,20 @@ Two kinds of structure, kept apart because they are not equally trustworthy:
 - **Deterministic.** Components, articulation points, degree, isolates. No
   randomness, no threshold, no parameter. Run twice, get the same answer; these
   are facts about the graph.
-- **Heuristic.** Communities, by label propagation, and the bridges defined in
-  terms of them. Seeded so a run is reproducible, but the partition is one of
-  many defensible ones and a different seed gives a different map. Labelled
-  `heuristic` everywhere it is returned, because a cluster boundary presented
-  as a fact is a claim the data does not support.
+- **Heuristic.** Communities — Louvain, or label propagation without networkx —
+  and the bridges defined in terms of them. Seeded so a run is reproducible, but
+  the partition is one of many defensible ones and a different seed gives a
+  different map. Labelled `heuristic` everywhere it is returned, and carrying
+  the `method` that produced it, because a cluster boundary presented as a fact
+  is a claim the data does not support, and two reports run under different
+  methods are not comparable.
 
-No third-party dependency, which rules out networkx and Louvain. That is a
-constraint rather than a preference, but label propagation and Tarjan are a few
-dozen lines each and the graphs here are corpus-sized, not web-sized.
+The deterministic half needs no third-party package and never will: a store must
+be readable, structurally, by a script with nothing installed. `networkx` is an
+optional extra (`pip install 'orpheus[graph]'`) and buys two things worth the
+import — Louvain in place of label propagation, and betweenness centrality.
+Everything degrades with a message saying which ran, so a report never quietly
+means something different from the last one.
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ from collections import defaultdict, deque
 from typing import Any
 
 from .store import Store
+from .utils import OrpheusError
 
 # Statuses that put a row out of the graph. A rejected relation is a known
 # error; drawing it would let a mistake the review already caught shape the
@@ -317,9 +323,144 @@ def isolates(graph: dict) -> list[dict]:
 # Heuristic structure
 # ---------------------------------------------------------------------------
 
+def _networkx():
+    """networkx if it is installed, else None.
+
+    Checked at the call rather than at import, so a store opened by a script
+    with nothing installed still reads structurally -- which is the guarantee
+    the whole deterministic half exists to keep.
+    """
+    try:
+        import networkx  # noqa: PLC0415
+    except ImportError:
+        return None
+    return networkx
+
+
+def to_networkx(graph: dict):
+    """The graph as an `nx.Graph`, for anything this module does not do.
+
+    An escape hatch on purpose. Wrapping networkx function by function would be
+    a worse library than networkx, so the useful few are wrapped below and
+    everything else is one call away.
+    """
+    nx = _networkx()
+    if nx is None:
+        raise OrpheusError(
+            "networkx is not installed. `pip install 'orpheus[graph]'`.")
+    built = nx.Graph()
+    for entity_id, node in graph["nodes"].items():
+        built.add_node(entity_id, **{k: v for k, v in node.items()
+                                     if k != "entity_id"})
+    for edge in graph["edges"]:
+        built.add_edge(edge["from_entity_id"], edge["to_entity_id"],
+                       link_type_id=edge["link_type_id"],
+                       n_documents=edge["n_documents"],
+                       n_confirmed=edge["n_confirmed"])
+    return built
+
+
+def centrality(graph: dict, k: int | None = None) -> dict:
+    """Which pages carry the traffic between others.
+
+    Degree answers "who appears in the most relations"; betweenness answers
+    "who sits on the most paths between other pages", and for a contracts
+    corpus the second is much closer to structurally important. An intermediary
+    with three links can matter far more than a buyer with twenty.
+
+    Needs networkx. Without it the degree ranking comes back on its own and says
+    so, rather than some other number standing in for one that would not mean
+    the same thing.
+    """
+    nodes = graph["nodes"]
+    ranked = sorted(
+        ({"entity_id": e, "name": n["canonical_name"], "type_id": n["type_id"],
+          "degree": n["degree"]} for e, n in nodes.items() if n["degree"]),
+        key=lambda n: (-n["degree"], n["name"]))
+
+    nx = _networkx()
+    if nx is None:
+        return {"method": "degree_only", "by_degree": ranked,
+                "by_betweenness": None,
+                "note": ("Betweenness needs networkx: `pip install "
+                         "'orpheus[graph]'`. Degree is shown on its own, and "
+                         "answers a different question -- how many relations a "
+                         "page is in, not how much sits on paths through it.")}
+
+    built = to_networkx(graph)
+    # Brandes' algorithm is O(nm); `k` samples that many sources instead, which
+    # is what keeps this usable on a corpus-sized graph. A sampled result is
+    # approximate and the method name says so.
+    scores = nx.betweenness_centrality(built, k=k, seed=DEFAULT_SEED,
+                                       normalized=True)
+    by_betweenness = sorted(
+        ({"entity_id": e, "name": nodes[e]["canonical_name"],
+          "type_id": nodes[e]["type_id"], "degree": nodes[e]["degree"],
+          "betweenness": round(score, 4)}
+         for e, score in scores.items() if nodes.get(e)),
+        key=lambda n: (-n["betweenness"], n["name"]))
+    return {
+        "method": "betweenness_sampled" if k else "betweenness_exact",
+        "by_degree": ranked,
+        "by_betweenness": [n for n in by_betweenness if n["betweenness"] > 0],
+        "note": ("Betweenness is the share of shortest paths between other "
+                 "pages that run through this one."
+                 + (f" Approximate: sampled from {k} sources." if k else "")),
+    }
+
+
 def communities(graph: dict, seed: int = DEFAULT_SEED,
-                max_rounds: int = 100) -> list[dict]:
-    """Clusters, by label propagation.
+                max_rounds: int = 100, method: str = "auto") -> list[dict]:
+    """Clusters: Louvain where networkx is installed, label propagation otherwise.
+
+    Both are heuristics and both say so. The difference is how much. Louvain
+    optimises modularity and lands in much the same place run to run; label
+    propagation breaks ties at random and can collapse a dense graph into one
+    cluster. `method` is recorded on every row, so two reports are never
+    silently comparing different things.
+
+    Louvain also reports `modularity`, which is the number that says whether the
+    partition means anything at all: near zero, the clusters are no better than
+    chance and should not be read as structure.
+    """
+    if method not in ("auto", "louvain", "label_propagation"):
+        raise OrpheusError(f"Unknown community method {method!r}.")
+    nx = _networkx() if method in ("auto", "louvain") else None
+    if method == "louvain" and nx is None:
+        raise OrpheusError(
+            "Louvain needs networkx. `pip install 'orpheus[graph]'`, or pass "
+            "method='label_propagation'.")
+    if nx is not None:
+        return _louvain(graph, nx, seed)
+    return _label_propagation(graph, seed, max_rounds)
+
+
+def _louvain(graph: dict, nx, seed: int) -> list[dict]:
+    built = to_networkx(graph)
+    built.remove_nodes_from([n for n in list(built) if built.degree(n) == 0])
+    if not built:
+        return []
+    partition = nx.community.louvain_communities(built, seed=seed)
+    score = round(nx.community.modularity(built, partition), 4)
+
+    found = [_describe(graph, set(members)) for members in partition if members]
+    found.sort(key=lambda c: -c["n_entities"])
+    for index, community in enumerate(found, 1):
+        community["community"] = index
+        community["basis"] = "heuristic"
+        community["method"] = "louvain"
+        community["modularity"] = score
+        # Below about 0.3 a partition is not saying much, and a reader who has
+        # not met modularity before should not have to know that.
+        community["modularity_note"] = (
+            "Strong structure." if score >= 0.3 else
+            "Weak: the clusters are barely better than chance, so read them as "
+            "a suggestion rather than as structure.")
+    return found
+
+
+def _label_propagation(graph: dict, seed: int, max_rounds: int) -> list[dict]:
+    """The fallback, so the core still clusters with nothing installed.
 
     Every node takes the label most common among its neighbours until nothing
     changes. Cheap, needs no parameter, and finds the obvious groupings well.
@@ -327,8 +468,8 @@ def communities(graph: dict, seed: int = DEFAULT_SEED,
     It is also **unstable**: ties are broken at random, so the partition depends
     on the seed, and on a dense graph it can collapse everything into one
     cluster. Seeded here so two readers of the same store see the same map, and
-    returned marked `heuristic` so nobody mistakes a cluster boundary for a fact
-    about the corpus. Where a claim needs to be defensible, use `components()`
+    marked `heuristic` so nobody mistakes a cluster boundary for a fact about
+    the corpus. Where a claim needs to be defensible, use `components()`
     instead — an island is a fact; a community is a reading.
     """
     adjacency, nodes = graph["adjacency"], graph["nodes"]
@@ -365,6 +506,7 @@ def communities(graph: dict, seed: int = DEFAULT_SEED,
     for index, community in enumerate(found, 1):
         community["community"] = index
         community["basis"] = "heuristic"
+        community["method"] = "label_propagation"
     return found
 
 
@@ -465,6 +607,109 @@ def _describe(graph: dict, members: set) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# How two pages are connected
+# ---------------------------------------------------------------------------
+
+def paths_between(store: Store, from_entity_id: str, to_entity_id: str,
+                  max_paths: int = 5, max_length: int = 6,
+                  graph: dict | None = None) -> dict:
+    """Every short chain joining two pages, with the evidence for each hop.
+
+    The question a corpus is actually asked — *how is this supplier connected to
+    that one?* — and the one a list of entities cannot answer.
+
+    A path is a chain of claims, so it is only as good as its weakest hop. One
+    running through an unconfirmed machine guess is not the same finding as one
+    where a person has checked every link, and a chain reported without that
+    distinction invites exactly the conclusion the store exists to prevent. So
+    every path carries `weakest`: the least-reviewed hop on it, and whether the
+    whole chain has been vouched for.
+    """
+    graph = graph or build(store)
+    nodes, adjacency = graph["nodes"], graph["adjacency"]
+    for entity_id in (from_entity_id, to_entity_id):
+        if entity_id not in nodes:
+            from .utils import NotFound
+            raise NotFound(f"No entity {entity_id!r} in the graph.")
+    if from_entity_id == to_entity_id:
+        from .utils import OrpheusError
+        raise OrpheusError("A page is not connected to itself.")
+
+    # Edges both ways round, so a chain can traverse a relation against its
+    # direction: "A subcontracts to B" connects the two whichever end you start.
+    between: dict[tuple, list[dict]] = defaultdict(list)
+    for edge in graph["edges"]:
+        pair = (edge["from_entity_id"], edge["to_entity_id"])
+        between[pair].append(edge)
+        between[(pair[1], pair[0])].append(edge)
+
+    found: list[list[str]] = []
+    # Breadth-first, so the shortest chains come out first: a four-hop
+    # connection is a much weaker claim than a one-hop one and should not be
+    # the first thing a reader sees.
+    queue = deque([[from_entity_id]])
+    while queue and len(found) < max_paths:
+        path = queue.popleft()
+        if len(path) > max_length:
+            continue
+        for neighbour in sorted(adjacency.get(path[-1], ())):
+            if neighbour in path:
+                continue
+            extended = path + [neighbour]
+            if neighbour == to_entity_id:
+                found.append(extended)
+                if len(found) >= max_paths:
+                    break
+            else:
+                queue.append(extended)
+
+    described = [_describe_path(path, nodes, between) for path in found]
+    if not described:
+        note = (f"No chain of {max_length} steps or fewer joins these two. They "
+                f"may be in different islands, or the relation that joins them "
+                f"may not have been extracted.")
+    else:
+        vouched = [p for p in described if p["confirmed_throughout"]]
+        note = (f"{len(described)} chain(s), shortest {described[0]['n_hops']} "
+                f"hop(s). {len(vouched)} vouched for at every hop; the rest "
+                f"pass through at least one link nobody has checked.")
+    return {"from": nodes[from_entity_id], "to": nodes[to_entity_id],
+            "paths": described, "n_paths": len(described), "note": note}
+
+
+def _describe_path(path: list[str], nodes: dict,
+                   between: dict[tuple, list[dict]]) -> dict:
+    """One chain, hop by hop, each hop carrying what it rests on."""
+    hops = []
+    for left, right in zip(path, path[1:]):
+        candidates = between.get((left, right), [])
+        # The best-supported relation joining this pair, when several do.
+        edge = max(candidates,
+                   key=lambda e: (e["n_confirmed"], e["n_documents"]),
+                   default=None)
+        hops.append({
+            "from_entity_id": left, "from_name": nodes[left]["canonical_name"],
+            "to_entity_id": right, "to_name": nodes[right]["canonical_name"],
+            "link_type_id": edge["link_type_id"] if edge else None,
+            "n_documents": edge["n_documents"] if edge else 0,
+            "n_confirmed": edge["n_confirmed"] if edge else 0,
+            "documents": edge["documents"] if edge else [],
+        })
+    confirmed = all(h["n_confirmed"] for h in hops) if hops else False
+    weakest = min(hops, key=lambda h: (h["n_confirmed"], h["n_documents"]),
+                  default=None)
+    return {
+        "entities": [{"entity_id": e, "name": nodes[e]["canonical_name"],
+                      "type_id": nodes[e]["type_id"]} for e in path],
+        "hops": hops, "n_hops": len(hops),
+        "confirmed_throughout": confirmed,
+        # Named rather than left to be worked out: a chain is as good as its
+        # worst link and a reader should not have to scan for it.
+        "weakest": weakest,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Reading one neighbourhood
 # ---------------------------------------------------------------------------
 
@@ -520,6 +765,7 @@ def topology(store: Store, seed: int = DEFAULT_SEED,
     """
     graph = build(store, reviewed_only=reviewed_only)
     found = communities(graph, seed=seed)
+    important = centrality(graph)
     islands = components(graph)
     stranded = isolates(graph)
     connections = community_connections(graph, found)
@@ -542,11 +788,13 @@ def topology(store: Store, seed: int = DEFAULT_SEED,
         "community_connections": connections,
         "disconnected_pairs": [c for c in connections if c["disconnected"]],
         "isolates": stranded,
-        "most_connected": sorted(
-            ({"entity_id": e, "name": n["canonical_name"],
-              "type_id": n["type_id"], "degree": n["degree"]}
-             for e, n in graph["nodes"].items() if n["degree"]),
-            key=lambda n: (-n["degree"], n["name"]))[:20],
+        "most_connected": important["by_degree"][:20],
+        # A different question from degree: who sits on the paths between other
+        # pages. An intermediary with three links can matter more than a buyer
+        # with twenty, and only this ranking shows it.
+        "most_between": (important["by_betweenness"] or [])[:20],
+        "centrality_method": important["method"],
+        "centrality_note": important["note"],
         "note": ("Components, articulation points, degree and isolates are "
                  "deterministic. Communities and the bridges defined from them "
                  "are a seeded heuristic: reproducible, but one defensible "

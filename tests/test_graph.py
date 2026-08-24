@@ -259,3 +259,187 @@ def test_the_topology_leads_with_how_much_it_describes(corpus):
     assert report["counts"]["canonical_edges"] == 4
     assert "island is a fact" in report["note"]
     assert report["most_connected"][0]["degree"] == 2
+
+
+# -- how two pages are connected ---------------------------------------------
+#
+# The question a corpus is actually asked, and the one a list of entities
+# cannot answer. Stdlib only: it is a breadth-first walk over the adjacency
+# that is already built, so it works in a bare install like the rest of the
+# deterministic half.
+
+def test_a_chain_is_found_and_the_shortest_comes_first(corpus):
+    from orpheus.graph import paths_between
+    result = paths_between(corpus, "ent_A", "ent_D")
+    assert result["n_paths"] == 1
+    path = result["paths"][0]
+    assert [e["entity_id"] for e in path["entities"]] == \
+        ["ent_A", "ent_B", "ent_C", "ent_D"]
+    assert path["n_hops"] == 3
+
+
+def test_every_hop_carries_what_it_rests_on(corpus):
+    # A chain reported without its evidence invites exactly the conclusion the
+    # store exists to prevent.
+    from orpheus.graph import paths_between
+    path = paths_between(corpus, "ent_A", "ent_D")["paths"][0]
+    assert all(hop["link_type_id"] and hop["documents"] for hop in path["hops"])
+    assert path["hops"][0]["n_documents"] == 3
+
+
+def test_a_chain_names_its_weakest_hop(corpus):
+    # A chain is as good as its worst link, and a reader should not have to
+    # scan for it.
+    from orpheus.graph import paths_between
+    path = paths_between(corpus, "ent_A", "ent_D")["paths"][0]
+    assert path["confirmed_throughout"] is False
+    assert path["weakest"]["n_confirmed"] == 0
+
+    corpus.execute("UPDATE edges SET status = 'confirmed'")
+    corpus.conn.commit()
+    vouched = paths_between(corpus, "ent_A", "ent_D")["paths"][0]
+    assert vouched["confirmed_throughout"] is True
+
+
+def test_two_islands_have_no_chain_between_them_and_it_says_why(corpus):
+    from orpheus.graph import paths_between
+    result = paths_between(corpus, "ent_A", "ent_E")
+    assert result["paths"] == []
+    assert "different islands" in result["note"]
+
+
+def test_a_chain_longer_than_the_limit_is_not_reported(corpus):
+    from orpheus.graph import paths_between
+    assert paths_between(corpus, "ent_A", "ent_D", max_length=2)["paths"] == []
+
+
+def test_a_page_is_not_connected_to_itself(corpus):
+    from orpheus.graph import paths_between
+    from orpheus.utils import OrpheusError
+    with pytest.raises(OrpheusError):
+        paths_between(corpus, "ent_A", "ent_A")
+
+
+# -- the optional networkx layer ---------------------------------------------
+
+def test_the_hand_rolled_cut_vertices_agree_with_networkx(corpus):
+    # The deterministic half is stdlib so a bare install still reads
+    # structurally, which means this Tarjan implementation is load-bearing and
+    # unvalidated by anything but itself. networkx settles it.
+    nx = pytest.importorskip("networkx")
+    from orpheus.graph import articulation_points, to_networkx
+    graph = build(corpus)
+    mine = {b["entity_id"] for b in articulation_points(graph)}
+    theirs = set(nx.articulation_points(to_networkx(graph)))
+    assert mine == theirs
+
+
+def test_the_hand_rolled_components_agree_with_networkx(corpus):
+    nx = pytest.importorskip("networkx")
+    from orpheus.graph import to_networkx
+    graph = build(corpus)
+    built = to_networkx(graph)
+    built.remove_nodes_from([n for n in list(built) if built.degree(n) == 0])
+    mine = {frozenset(c["members"]) for c in components(graph)}
+    theirs = {frozenset(c) for c in nx.connected_components(built)}
+    assert mine == theirs
+
+
+def test_louvain_runs_where_networkx_is_installed_and_says_so(corpus):
+    pytest.importorskip("networkx")
+    found = communities(build(corpus))
+    assert found and all(c["method"] == "louvain" for c in found)
+    # Still a heuristic. What changes is how much of one, not whether.
+    assert all(c["basis"] == "heuristic" for c in found)
+
+
+def test_louvain_reports_whether_its_partition_means_anything(corpus):
+    # Modularity near zero means the clusters are no better than chance, and a
+    # reader who has not met the measure should not have to know that.
+    pytest.importorskip("networkx")
+    found = communities(build(corpus))
+    assert "modularity" in found[0]
+    assert found[0]["modularity_note"]
+
+
+def test_the_fallback_can_still_be_asked_for_by_name(corpus):
+    # The core must cluster with nothing installed, so the path has to stay
+    # exercised even in an environment that has networkx.
+    found = communities(build(corpus), method="label_propagation")
+    assert found and all(c["method"] == "label_propagation" for c in found)
+
+
+def test_an_unknown_method_is_refused_rather_than_guessed(corpus):
+    from orpheus.utils import OrpheusError
+    with pytest.raises(OrpheusError):
+        communities(build(corpus), method="spectral")
+
+
+def test_betweenness_finds_what_degree_cannot(corpus):
+    # A -- B -- C -- D: B and C carry every path across, and each has the same
+    # degree as A and D have between them. Degree alone does not distinguish.
+    pytest.importorskip("networkx")
+    from orpheus.graph import centrality
+    result = centrality(build(corpus))
+    assert result["method"] == "betweenness_exact"
+    top = {n["entity_id"] for n in result["by_betweenness"][:2]}
+    assert top == {"ent_B", "ent_C"}
+
+
+def test_the_topology_carries_both_rankings_and_names_the_method(corpus):
+    report = topology(corpus)
+    assert report["centrality_method"] in (
+        "betweenness_exact", "betweenness_sampled", "degree_only")
+    assert report["most_connected"]
+
+
+# -- and without it ----------------------------------------------------------
+#
+# The bare install is the guarantee, so it has to be exercised in an
+# environment that happens to have networkx. Otherwise the fallback is only
+# ever tested by not being reached.
+
+@pytest.fixture
+def without_networkx(monkeypatch):
+    import orpheus.graph as graph_mod
+    monkeypatch.setattr(graph_mod, "_networkx", lambda: None)
+    return graph_mod
+
+
+def test_clustering_falls_back_rather_than_failing(corpus, without_networkx):
+    found = without_networkx.communities(build(corpus))
+    assert found and all(c["method"] == "label_propagation" for c in found)
+
+
+def test_asking_for_louvain_without_it_says_what_to_install(corpus, without_networkx):
+    from orpheus.utils import OrpheusError
+    with pytest.raises(OrpheusError) as caught:
+        without_networkx.communities(build(corpus), method="louvain")
+    assert "orpheus[graph]" in str(caught.value)
+
+
+def test_degree_is_returned_alone_rather_than_a_stand_in_for_betweenness(
+        corpus, without_networkx):
+    # Some other number computed some other way would not mean the same thing,
+    # and a report that quietly changed meaning is worse than one that is short.
+    result = without_networkx.centrality(build(corpus))
+    assert result["method"] == "degree_only"
+    assert result["by_betweenness"] is None
+    assert result["by_degree"]
+    assert "orpheus[graph]" in result["note"]
+
+
+def test_the_deterministic_half_is_untouched_by_its_absence(corpus, without_networkx):
+    graph = build(corpus)
+    assert len(components(graph)) == 2
+    assert {b["entity_id"] for b in
+            without_networkx.articulation_points(graph)} == {"ent_B", "ent_C"}
+    assert [i["entity_id"] for i in isolates(graph)] == ["ent_G"]
+    assert without_networkx.paths_between(corpus, "ent_A", "ent_D")["n_paths"] == 1
+
+
+def test_the_whole_topology_still_runs(corpus, without_networkx):
+    report = without_networkx.topology(corpus)
+    assert report["counts"]["components"] == 2
+    assert report["centrality_method"] == "degree_only"
+    assert report["most_between"] == []

@@ -109,6 +109,8 @@ this arithmetic; do not do it in prose on its behalf.
 ```bash
 orpheus --db store.sqlite graph topology --json
 orpheus --db store.sqlite graph near ent_... --depth 2 --json
+orpheus --db store.sqlite graph path ent_A --to ent_B --json   # how connected
+orpheus --db store.sqlite graph central --json                 # who sits between
 ```
 
 - **Components (islands)** — deterministic. Two islands mean the corpus knows
@@ -119,6 +121,12 @@ orpheus --db store.sqlite graph near ent_... --depth 2 --json
   among several. When a claim has to hold up, use a component instead: an island
   is a fact, a community is a reading. Say "clusters roughly around" rather than
   asserting a boundary.
+
+When you report a **path**, report its weakest hop in the same breath. A chain
+that runs through a relation nobody has checked is a lead, not a finding, and
+`confirmed_throughout` is the field that says which. Never describe two pages as
+connected without saying how many hops apart and how much of the chain has been
+reviewed.
 
 **Disconnected cluster pairs** are the highest-value finding. Two clusters with
 no relation between them are two things nobody has connected. Name the specific

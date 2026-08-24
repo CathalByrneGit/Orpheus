@@ -7,6 +7,8 @@
 
 <h1>The corpus as a network</h1>
 
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+
 {# Coverage first and unmissable. Every number below it is conditional on how
    much of the corpus reached the graph, and a reader who skips this will draw
    confident conclusions from whatever happens to have been linked. #}
@@ -26,6 +28,20 @@
         <td><span style="color:#888">groups reachable from each other and nothing else</span></td></tr>
   </tbody>
 </table>
+
+{% if report.communities %}
+{% set clustering = report.communities[0] %}
+<p style="color:#666">
+  {{ report.counts.communities }} cluster(s), by
+  <strong>{{ clustering.method|replace('_', ' ') }}</strong>
+  {%- if clustering.modularity is not none %} &mdash; modularity
+  {{ '%.2f'|format(clustering.modularity) }}. {{ clustering.modularity_note }}
+  {%- else %}. Ties are broken at random, so a different seed gives a different
+  map; install <code>orpheus[graph]</code> for Louvain, which is much steadier
+  and reports whether its partition means anything
+  {%- endif %}
+</p>
+{% endif %}
 
 <h2>Islands</h2>
 <p style="color:#666">Deterministic &mdash; no seed, no threshold. Two islands
@@ -64,12 +80,72 @@ single unconfirmed link.</p>
 <p style="color:#666">Two clusters with no relation between them &mdash; things
 the corpus knows about separately and has never connected. A question to ask,
 not a gap to fill in silently. <em>Heuristic:</em> the clustering is seeded and
-reproducible, but it is one defensible partition among several.</p>
+reproducible, but it is one defensible partition among several
+.</p>
 <ul>
   {% for pair in report.disconnected_pairs %}
   <li>{{ pair.labels[0] }} &nbsp;&harr;&nbsp; {{ pair.labels[1] }}</li>
   {% endfor %}
 </ul>
+{% endif %}
+
+<h2>How two pages are connected</h2>
+<p style="color:#666">A chain is only as good as its weakest link. One running
+through a relation nobody has checked is not the same finding as one vouched for
+end to end, and this says which.</p>
+<form method="get" style="margin-bottom:1em">
+  <label>from <input type="text" name="from" value="{{ path_from or '' }}"
+         placeholder="ent_…" style="width:16em"></label>
+  <label>to <input type="text" name="to" value="{{ path_to or '' }}"
+         placeholder="ent_…" style="width:16em"></label>
+  <button type="submit">Trace</button>
+</form>
+
+{% if paths %}
+<p style="color:#666">{{ paths.note }}</p>
+{% for path in paths.paths %}
+<div style="border-left:3px solid {% if path.confirmed_throughout %}#166534{% else %}#b45309{% endif %};padding:.6em 1em;margin-bottom:.6em;background:#fafafa">
+  <p style="margin:0">
+    {% for node in path.entities %}
+    <a href="{{ urls.path('/-/orpheus/wiki/' + node.entity_id) }}">{{ node.name }}</a>{% if not loop.last %} &rarr; {% endif %}
+    {% endfor %}
+  </p>
+  <p style="margin:.3em 0 0;color:#666">
+    {% if path.confirmed_throughout %}every hop confirmed
+    {% else %}<span style="color:#b45309">passes through a link nobody has
+    checked</span>{% endif %}
+  </p>
+  <ul style="margin:.35em 0 0;color:#666">
+    {% for hop in path.hops %}
+    <li>{{ hop.from_name }} <em>{{ (hop.link_type_id or '?')|replace('_', ' ') }}</em>
+        {{ hop.to_name }} &middot; {{ hop.n_documents }} document(s),
+        {% if hop.n_confirmed %}{{ hop.n_confirmed }} confirmed{% else %}unchecked{% endif %}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if report.most_between %}
+<h2>Sits on the most paths between others</h2>
+<p style="color:#666">{{ report.centrality_note }} A different question from the
+table below: an intermediary with three links can matter more than a buyer with
+twenty.</p>
+<table class="rows-and-columns">
+  <thead><tr><th>Page</th><th>Type</th><th>Betweenness</th><th>Links</th></tr></thead>
+  <tbody>
+  {% for node in report.most_between %}
+    <tr>
+      <td><a href="{{ urls.path('/-/orpheus/wiki/' + node.entity_id) }}">{{ node.name }}</a></td>
+      <td>{{ node.type_id }}</td>
+      <td>{{ '%.4f'|format(node.betweenness) }}</td>
+      <td>{{ node.degree }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% elif report.centrality_method == 'degree_only' %}
+<p style="color:#666">{{ report.centrality_note }}</p>
 {% endif %}
 
 {% if report.most_connected %}

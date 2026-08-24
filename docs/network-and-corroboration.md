@@ -98,11 +98,56 @@ readers of a store see the same partition, and labelled so nobody mistakes a
 cluster boundary for a fact. **Where a claim has to hold up, use a component: an
 island is a fact, a community is a reading.**
 
-Communities are label propagation rather than Louvain because the core has no
-third-party dependencies, which rules out networkx. Tarjan's algorithm for
-articulation points is iterative for the same practical reason recursion would
-be wrong — depth would follow the longest path in the corpus, which is not a
-number this can bound.
+### networkx is an optional extra, not a refusal
+
+An earlier draft of this page said the zero-dependency rule "rules out
+networkx". That was wrong, and worth correcting rather than quietly fixing: the
+rule is that the **core** has no third-party dependencies, and there are eleven
+optional extras already. The direct precedent is `match = ["rapidfuzz>=3"]` —
+without it, entity candidates come from exact keys only.
+
+So `graph = ["networkx>=3"]` works the same way:
+
+| Without it | With it |
+|---|---|
+| label propagation | **Louvain**, and `modularity` saying whether the partition means anything |
+| degree | **betweenness centrality** |
+
+Everything else — components, articulation points, isolates, degree, and the
+paths below — is stdlib and always available, because a store has to be
+readable structurally by a script with nothing installed. Every function that
+degrades says which method ran, so two reports are never silently comparing
+different things.
+
+Tarjan's algorithm for articulation points stays hand-rolled and is held to
+networkx's implementation by a test: it is load-bearing, deterministic, and was
+otherwise validated by nothing but itself.
+
+### Paths: how two pages are connected
+
+The question a corpus is actually asked, and the one a list of entities cannot
+answer. It needs no dependency at all — a breadth-first walk over the adjacency
+already built — and blaming networkx for its earlier absence would have been
+wrong.
+
+The Orpheus-specific part is that a chain is a chain of *claims*, so it is only
+as good as its weakest hop:
+
+```
+1 chain(s), shortest 3 hop(s). 0 vouched for at every hop; the rest pass
+through at least one link nobody has checked.
+
+  [UNCHECKED] Ardmore Digital Ltd -> Kestrel Medical Group ->
+              Meridian Systems Ltd -> Halloran Instruments Inc
+      Ardmore  subcontracts_to  Kestrel   2 doc(s), nobody has checked this
+      Kestrel  subcontracts_to  Meridian  1 doc(s), nobody has checked this
+      Meridian subcontracts_to  Halloran  1 doc(s), nobody has checked this
+```
+
+That is a real finding from the test corpus — two otherwise unconnected
+suppliers joined through a shared subcontractor — and reporting it without the
+`UNCHECKED` would invite exactly the conclusion the store exists to prevent.
+Every path names its weakest hop rather than leaving a reader to scan for it.
 
 ### Coverage is the first thing the topology reports
 
@@ -128,7 +173,26 @@ share a director" is the conflict-of-interest question, and it is visible in the
 shape before anybody thinks to ask it.
 
 The lint gained one check the graph makes possible: **`fragile_join`**, an
-articulation point whose links nobody has confirmed. The graph's shape depends
+articulation point whose links nobody has confirmed.
+
+### A defect the run found: proposing twice split every page
+
+Running a real corpus, ingesting one more document and proposing again produced
+a *second* "Kestrel Medical Group" beside the one already there — two pages with
+an identical `naive_key`, which is the strongest evidence of sameness the store
+has. `propose_entities()` always created; it never looked for a page the group
+already belonged to.
+
+Proposing after ingesting more documents is the normal thing to do, so the wiki
+fragmented a little more every round. A group is now attached to an existing
+page when a stated identifier or an exact key matches — the same two bases, in
+the same order, that the grouping itself uses. Anything weaker stays with
+`duplicate_pages()` and a person: attaching on a *similar* name here would be
+resolution by machine, which the design refuses.
+
+Attaching does not rename. The existing title was somebody's decision, or an
+earlier proposal's, and a later batch carrying a longer spelling is not grounds
+to overwrite it. The graph's shape depends
 on that page, and a link's review status does not change the shape — so the
 topology gives no hint that a structural reading rests on an unchecked guess.
 

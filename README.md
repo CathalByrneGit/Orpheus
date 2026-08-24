@@ -62,7 +62,14 @@ changes no confidence value doing it.
 holding it together, clusters that never touch. It leads with how much of the
 corpus reached the graph, because a sparse-looking network over 30% coverage
 means a half-built wiki rather than a thin corpus, and no structural number
-tells those apart.
+tells those apart. `orpheus graph path A --to B` answers *how are these two
+connected*, and names the weakest hop in the chain: one running through a
+relation nobody has checked is not the same finding as one vouched for end to
+end.
+
+Structure that must hold up is deterministic and needs nothing installed.
+`pip install 'orpheus[graph]'` swaps label propagation for Louvain and adds
+betweenness centrality; without it both degrade and say which ran.
 
 ---
 
@@ -146,7 +153,7 @@ top of the page. [Why](docs/conflicts-and-lint.md).
 
 ## Status
 
-504 tests:
+527 tests:
 
 ```bash
 pip install -e '.[dev]'

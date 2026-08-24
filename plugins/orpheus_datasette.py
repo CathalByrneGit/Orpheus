@@ -377,9 +377,25 @@ async def network_page(datasette, request):
     if status != 200:
         return _redirect(datasette, "/-/orpheus",
                          error=report["error"]["message"])
+    # Tracing a connection is a read on two ids the person typed, so a bad one
+    # is a message on the page rather than a redirect that loses the rest of it.
+    path_from = request.args.get("from") or ""
+    path_to = request.args.get("to") or ""
+    paths, path_error = None, None
+    if path_from and path_to:
+        status, found = await _call(datasette, request, "GET", "/graph/paths",
+                                    {"from": path_from, "to": path_to})
+        if status == 200:
+            paths = found
+        else:
+            path_error = found["error"]["message"]
+
     return await _render(datasette, request, "orpheus_network.html", {
         "report": report,
-        "error": request.args.get("error"),
+        "paths": paths,
+        "path_from": path_from,
+        "path_to": path_to,
+        "error": request.args.get("error") or path_error,
     })
 
 

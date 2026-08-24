@@ -272,6 +272,20 @@ print("   %d page(s), %d relation(s), %d island(s)"
       % (counts["entities"], counts["canonical_edges"], counts["components"]))
 '
 
+# Which clustering ran has to be visible: two reports under different methods
+# are not comparable, and the page must not quietly change meaning when
+# networkx is or is not installed.
+printf '%s' "$TOPOLOGY" | python3 -c '
+import json, sys
+report = json.load(sys.stdin)
+assert report["centrality_method"] in (
+    "betweenness_exact", "betweenness_sampled", "degree_only"), report
+for community in report["communities"]:
+    assert community["basis"] == "heuristic", community
+    assert community["method"] in ("louvain", "label_propagation"), community
+print("   clustering:", report["centrality_method"])
+'
+
 say "corroboration: counted in wordings, and it says so"
 "${CURL[@]}" "$BASE/-/orpheus/api/corroboration" | python3 -c '
 import json, sys

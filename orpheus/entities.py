@@ -629,6 +629,13 @@ def propose_entities(store: Store, type_id: str | None = None,
     Mentions carrying the same stated identifier are grouped together even when
     their names differ, because an exact registration number is better evidence
     than a spelling.
+
+    A group whose page **already exists** is attached to it rather than given a
+    second one. Without that, the wiki fragments a little more every time a
+    corpus grows: proposing is the normal thing to do after ingesting more
+    documents, and each round would mint a fresh "Kestrel Medical Group" beside
+    the one already there — two pages with an identical key, which is the
+    strongest evidence of sameness the store has.
     """
     store.assert_writable()
     pending = unlinked_mentions(store, type_id=type_id)
@@ -644,7 +651,7 @@ def propose_entities(store: Store, type_id: str | None = None,
             else (found["type_id"], f"key:{found['naive_key']}")
         groups.setdefault(key, []).append({**found, "identifier": identifier})
 
-    proposed, linked, entities = 0, 0, []
+    proposed, attached, linked, entities = 0, 0, 0, []
     with store.transaction():
         for (found_type, key), members in sorted(groups.items()):
             if len(members) < min_mentions:
@@ -653,10 +660,20 @@ def propose_entities(store: Store, type_id: str | None = None,
             # The longest spelling is the least abbreviated, which is the better
             # page title: "Halloran Instruments, Inc." over "Halloran".
             canonical = max((m["name"] for m in members), key=len)
-            entity_id = create_entity(store, found_type, canonical,
-                                      actor_id=actor_id, source="ai_local",
-                                      status="unconfirmed")
-            proposed += 1
+            identifier = members[0].get("identifier") if basis == "identifier" else None
+            entity_id = _page_for(store, found_type, canonical, identifier)
+            existing = entity_id is not None
+            if existing:
+                # Attached, not renamed. The existing title was somebody's
+                # decision or an earlier proposal's, and a later batch bringing
+                # a longer spelling is not grounds to overwrite it.
+                attached += 1
+                canonical = get_entity(store, entity_id)["canonical_name"]
+            else:
+                entity_id = create_entity(store, found_type, canonical,
+                                          actor_id=actor_id, source="ai_local",
+                                          status="unconfirmed")
+                proposed += 1
             for member in members:
                 link_mention(store, entity_id, member["instance_id"],
                              actor_id=actor_id, basis=basis,
@@ -664,9 +681,42 @@ def propose_entities(store: Store, type_id: str | None = None,
                 linked += 1
             entities.append({"entity_id": entity_id, "type_id": found_type,
                              "canonical_name": canonical,
-                             "n_mentions": len(members), "basis": basis})
-    return {"proposed": proposed, "linked": linked, "entities": entities,
-            "caveat": NAIVE_CAVEAT}
+                             "n_mentions": len(members), "basis": basis,
+                             "existing": existing})
+    return {"proposed": proposed, "attached": attached, "linked": linked,
+            "entities": entities, "caveat": NAIVE_CAVEAT}
+
+
+def _page_for(store: Store, type_id: str, canonical_name: str,
+              identifier: str | None) -> str | None:
+    """The page this group already belongs to, if there is one.
+
+    Matched on the same two bases the grouping itself uses, in the same order:
+    a stated identifier already cited on a page beats a normalised name, and a
+    normalised name beats nothing. Anything weaker than an exact match is left
+    to `duplicate_pages()` and a person -- attaching on a *similar* name here
+    would be resolution by machine, which is what the whole design refuses.
+    """
+    if identifier:
+        table = store.scalar(
+            "SELECT table_name FROM instance_index WHERE type_id = ? LIMIT 1",
+            (type_id,))
+        if table:
+            row = store.one(
+                "SELECT e.entity_id FROM entities e "
+                "JOIN entity_mentions m ON m.entity_id = e.entity_id "
+                "  AND m.unlinked_at IS NULL "
+                f'JOIN "{table}" x ON x.instance_id = m.instance_id '
+                "WHERE e.merged_into IS NULL AND e.type_id = ? "
+                "AND x.registration_number = ? LIMIT 1", (type_id, identifier))
+            if row:
+                return row["entity_id"]
+
+    row = store.one(
+        "SELECT entity_id FROM entities WHERE merged_into IS NULL "
+        "AND type_id = ? AND naive_key = ? LIMIT 1",
+        (type_id, naive_key(canonical_name)))
+    return row["entity_id"] if row else None
 
 
 # ---------------------------------------------------------------------------

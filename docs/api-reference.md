@@ -289,6 +289,8 @@ reviews, "nothing found" says more about how little was checked.
 | `GET` | `/graph/topology` | **administrator** | `?seed=`, `?reviewed_only=1` |
 | `GET` | `/graph/edges` | actor | `?link_type_id=`, `?reviewed_only=1` |
 | `GET` | `/graph/entities/<entity_id>` | actor | `?depth=1` — one page and its neighbours |
+| `GET` | `/graph/paths` | actor | `?from=`, `?to=`, `?max_paths=5`, `?max_length=6` |
+| `GET` | `/graph/centrality` | **administrator** | `?sample=` to approximate betweenness |
 | `GET` | `/corroboration` | **administrator** | `?min_documents=2` |
 | `GET` | `/entities/<entity_id>/corroboration` | actor | Scoped to one page |
 
@@ -314,11 +316,34 @@ to entity pages, so a mention still in the wiki queue contributes nothing. A
 sparse-looking network over 30% coverage means a half-built wiki, not a thin
 corpus — opposite findings that the structural numbers alone cannot distinguish.
 
-`components`, `articulation_points`, `isolates` and degree are deterministic.
-`communities` and the `bridges` defined from them are a **seeded heuristic** and
-say so in a `basis` field on every row: reproducible, but one defensible
+`components`, `articulation_points`, `isolates`, degree and `/graph/paths` are
+deterministic and need nothing installed. `communities` and the `bridges`
+defined from them are a **seeded heuristic** and say so in `basis` on every row,
+alongside the `method` that produced them: reproducible, but one defensible
 partition among several. Where a claim has to hold up, use a component — an
 island is a fact, a community is a reading.
+
+With `orpheus[graph]` installed, communities come from **Louvain** and carry
+`modularity` — the number saying whether the partition means anything at all —
+and `/graph/centrality` adds **betweenness**. Without it, clustering falls back
+to label propagation and centrality returns degree alone, each saying so rather
+than substituting a number that would not mean the same thing.
+
+`/graph/paths` answers *how are these two connected*, and every chain names its
+weakest hop:
+
+```json
+{ "paths": [ { "n_hops": 3, "confirmed_throughout": false,
+               "entities": [ … ],
+               "hops": [ { "link_type_id": "subcontracts_to",
+                           "n_documents": 2, "n_confirmed": 0 } ],
+               "weakest": { "n_confirmed": 0, "n_documents": 1 } } ],
+  "note": "1 chain(s), shortest 3 hop(s). 0 vouched for at every hop…" }
+```
+
+A chain running through a relation nobody has checked is not the same finding as
+one vouched for end to end, and reporting them alike invites the conclusion the
+store exists to prevent.
 
 ### Corroboration
 

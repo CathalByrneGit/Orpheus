@@ -329,11 +329,14 @@ def cmd_wiki(args) -> int:
         if args.json:
             emit(result, True)
             return 0
-        print(f"{result['proposed']} page(s) proposed from {result['linked']} "
-              f"mention(s).")
+        print(f"{result['proposed']} page(s) proposed and "
+              f"{result.get('attached', 0)} attached to pages that already "
+              f"existed, from {result['linked']} mention(s).")
         for entity in result["entities"]:
-            print(f"  {entity['entity_id']}  {entity['canonical_name'][:44]:46} "
-                  f"{entity['n_mentions']:>3} mention(s)  via {entity['basis']}")
+            where = "existing" if entity.get("existing") else "new"
+            print(f"  {entity['entity_id']}  {entity['canonical_name'][:38]:40} "
+                  f"{entity['n_mentions']:>3} mention(s)  via {entity['basis']:<11}"
+                  f" {where}")
         if result["entities"]:
             print(f"\n  {result['caveat']}")
         return 0
@@ -413,6 +416,15 @@ def cmd_graph(args) -> int:
                 store, link_type_id=args.link_type,
                 reviewed_only=args.reviewed_only),
                 "coverage": graph_mod.coverage(store)}
+        elif args.action == "path":
+            if not args.entity_id or not args.to:
+                raise OrpheusError("Give an entity id and --to <entity id>.")
+            result = graph_mod.paths_between(store, args.entity_id, args.to,
+                                             max_paths=args.max_paths,
+                                             max_length=args.max_length)
+        elif args.action == "central":
+            result = graph_mod.centrality(graph_mod.build(store),
+                                          k=args.sample)
         elif args.action == "near":
             if not args.entity_id:
                 raise OrpheusError("Give an entity id to look around.")
@@ -454,6 +466,35 @@ def cmd_graph(args) -> int:
             print(f"\n  related to nothing: "
                   f"{', '.join(i['name'][:24] for i in result['isolates'][:8])}")
         print(f"\n  {result['note']}")
+        return 0
+
+    if args.action == "path":
+        print(result["note"] + "\n")
+        for path in result["paths"]:
+            mark = "checked" if path["confirmed_throughout"] else "UNCHECKED"
+            names = " -> ".join(e["name"][:22] for e in path["entities"])
+            print(f"  [{mark:>9}] {names}")
+            for hop in path["hops"]:
+                state = (f"{hop['n_confirmed']} confirmed"
+                         if hop["n_confirmed"] else "nobody has checked this")
+                print(f"      {hop['from_name'][:20]:22} "
+                      f"{(hop['link_type_id'] or '?')[:18]:20} "
+                      f"{hop['to_name'][:20]:22} "
+                      f"{hop['n_documents']} doc(s), {state}")
+            print()
+        return 0
+
+    if args.action == "central":
+        print(result["note"] + "\n")
+        if result["by_betweenness"] is not None:
+            print("  by betweenness (sits on paths between others):")
+            for node in result["by_betweenness"][:15]:
+                print(f"    {node['name'][:32]:34} {node['betweenness']:.4f}  "
+                      f"{node['degree']} link(s)")
+            print()
+        print("  by degree (appears in the most relations):")
+        for node in result["by_degree"][:15]:
+            print(f"    {node['name'][:32]:34} {node['degree']} link(s)")
         return 0
 
     if args.action == "edges":
@@ -937,9 +978,18 @@ def build_parser() -> argparse.ArgumentParser:
     exporter.add_argument("--limit", type=int, default=1000)
 
     grapher = add("graph", cmd_graph, "the corpus as a network")
-    grapher.add_argument("action", choices=("topology", "edges", "near"))
-    grapher.add_argument("entity_id", nargs="?", help="entity id for `near`")
-    grapher.add_argument("--depth", type=int, default=1)
+    grapher.add_argument("action", choices=("topology", "edges", "near",
+                                            "path", "central"))
+    grapher.add_argument("entity_id", nargs="?",
+                         help="entity id for `near` and `path`")
+    grapher.add_argument("--to", help="the other end, for `path`")
+    grapher.add_argument("--max-paths", type=int, default=5)
+    grapher.add_argument("--sample", type=int,
+                         help="approximate betweenness from this many sources")
+    grapher.add_argument("--depth", type=int, default=1,
+                         help="hops out from the page, for `near`")
+    grapher.add_argument("--max-length", type=int, default=6,
+                         help="longest chain to report, for `path`")
     grapher.add_argument("--link-type")
     grapher.add_argument("--seed", type=int, default=20260824,
                          help="community detection is seeded; change to see "

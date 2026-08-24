@@ -511,3 +511,109 @@ def test_a_merged_page_stops_being_offered(corpus):
     assert duplicate_pages(corpus, type_id="Company")
     merge_entities(corpus, keep, gone, "act_a")
     assert duplicate_pages(corpus, type_id="Company") == []
+
+
+# -- proposing again, on a corpus that grew ----------------------------------
+#
+# The normal thing to do after ingesting more documents. Before this, every
+# round minted a fresh page beside the one already there -- two pages with an
+# identical key, which is the strongest evidence of sameness the store has.
+# Found by running a real corpus twice, not by reading the code.
+
+def test_proposing_twice_does_not_split_a_page(corpus):
+    first = propose_entities(corpus, actor_id="act_a")
+    assert first["proposed"] == 3 and first["attached"] == 0
+
+    # A second document mentioning a company that already has a page.
+    corpus.execute(
+        "INSERT INTO instances_Company (instance_id, document_id, name,"
+        " naive_key, source, confidence, status, created_at)"
+        " VALUES ('i5','doc_2','Kestrel Medical Group PLC',?,'ai_local',0.9,"
+        "'unconfirmed',datetime('now'))", (naive_key("Kestrel Medical Group PLC"),))
+    corpus.execute(
+        "INSERT INTO instance_index (instance_id, type_id, table_name,"
+        " document_id, created_at) VALUES ('i5','Company','instances_Company',"
+        "'doc_2',datetime('now'))")
+    corpus.conn.commit()
+
+    again = propose_entities(corpus, actor_id="act_a")
+    assert again["proposed"] == 0
+    assert again["attached"] == 1
+    assert again["entities"][0]["existing"] is True
+
+    # One page, two mentions -- not two pages with the same key.
+    keys = corpus.query(
+        "SELECT naive_key, COUNT(*) n FROM entities WHERE merged_into IS NULL "
+        "GROUP BY type_id, naive_key HAVING n > 1")
+    assert keys == []
+
+
+def test_attaching_does_not_rename_the_page_it_attaches_to(corpus):
+    # The existing title was somebody's decision, or an earlier proposal's. A
+    # later batch carrying a longer spelling is not grounds to overwrite it.
+    propose_entities(corpus, actor_id="act_a")
+    page = next(e for e in list_entities(corpus)
+                if e["canonical_name"].startswith("Kestrel"))
+    before = page["canonical_name"]
+
+    corpus.execute(
+        "INSERT INTO instances_Company (instance_id, document_id, name,"
+        " naive_key, source, confidence, status, created_at)"
+        " VALUES ('i6','doc_2','Kestrel Medical Group Public Limited Company',?,"
+        "'ai_local',0.9,'unconfirmed',datetime('now'))",
+        (naive_key("Kestrel Medical Group PLC"),))
+    corpus.execute(
+        "INSERT INTO instance_index (instance_id, type_id, table_name,"
+        " document_id, created_at) VALUES ('i6','Company','instances_Company',"
+        "'doc_2',datetime('now'))")
+    corpus.conn.commit()
+
+    propose_entities(corpus, actor_id="act_a")
+    assert get_entity(corpus, page["entity_id"])["canonical_name"] == before
+
+
+def test_a_stated_identifier_attaches_to_the_page_already_citing_it(corpus):
+    # An exact registration number is better evidence than a spelling, so it is
+    # tried first -- a company that renamed still lands on its own page.
+    propose_entities(corpus, actor_id="act_a")
+    halloran = next(e for e in list_entities(corpus)
+                    if e["canonical_name"].startswith("Halloran Instruments"))
+
+    corpus.execute(
+        "INSERT INTO instances_Company (instance_id, document_id, name,"
+        " naive_key, registration_number, source, confidence, status, created_at)"
+        " VALUES ('i7','doc_3','Halloran Scientific Ltd','halloran scientific',"
+        "'482991','ai_local',0.9,'unconfirmed',datetime('now'))")
+    corpus.execute(
+        "INSERT INTO instance_index (instance_id, type_id, table_name,"
+        " document_id, created_at) VALUES ('i7','Company','instances_Company',"
+        "'doc_3',datetime('now'))")
+    corpus.conn.commit()
+
+    again = propose_entities(corpus, actor_id="act_a")
+    assert again["attached"] == 1
+    assert again["entities"][0]["entity_id"] == halloran["entity_id"]
+
+
+def test_a_merged_away_page_is_not_attached_to(corpus):
+    # It points at its successor; hanging new mentions on it would resurrect a
+    # page a person deliberately retired.
+    propose_entities(corpus, actor_id="act_a")
+    pages = [e for e in list_entities(corpus) if e["canonical_name"].startswith("Kestrel")]
+    keep = create_entity(corpus, "Company", "Kestrel Holdings", actor_id="act_a")
+    merge_entities(corpus, keep, pages[0]["entity_id"], actor_id="act_a")
+    corpus.conn.commit()
+
+    corpus.execute(
+        "INSERT INTO instances_Company (instance_id, document_id, name,"
+        " naive_key, source, confidence, status, created_at)"
+        " VALUES ('i8','doc_2','Kestrel Medical Group',?,'ai_local',0.9,"
+        "'unconfirmed',datetime('now'))", (naive_key("Kestrel Medical Group"),))
+    corpus.execute(
+        "INSERT INTO instance_index (instance_id, type_id, table_name,"
+        " document_id, created_at) VALUES ('i8','Company','instances_Company',"
+        "'doc_2',datetime('now'))")
+    corpus.conn.commit()
+
+    again = propose_entities(corpus, actor_id="act_a")
+    assert again["entities"][0]["entity_id"] != pages[0]["entity_id"]
