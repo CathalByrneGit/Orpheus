@@ -11,17 +11,24 @@ by the bundle's `extensions.orpheus` block. The bundle shipped here describes
 public-sector contracts because that is the driving use case and it makes the
 documentation concrete; swapping it swaps the domain.
 
-This documentation covers **Phase 1 only**: ingest and extraction quality.
-Entity resolution, the cross-document relationship graph, conflict-of-interest
-views and the live reading-companion UI are deliberately out of scope — see
-[Open decisions](open-decisions.md) for what is deferred and why.
+This documentation covers **Phase 1**: ingest and extraction quality.
+Conflict-of-interest views and the live reading-companion UI remain out of
+scope — see [Open decisions](open-decisions.md) for what is deferred and why.
 
-One thing Phase 1 does carry beyond extraction quality, because leaving it out
-would have made the wiki misleading rather than merely incomplete: **a verified
-disagreement between two documents has somewhere to live.** Every other review
-verb resolves towards a single answer, so without it two confirmed and
-contradictory facts render in the same voice and read as agreement. See
-[Conflicts and lint](conflicts-and-lint.md).
+Three things Phase 1 carries beyond extraction quality, each because leaving it
+out would have made the wiki misleading rather than merely incomplete:
+
+- **A verified disagreement has somewhere to live.** Every other review verb
+  resolves towards a single answer, so without it two confirmed and
+  contradictory facts render in the same voice and read as agreement. See
+  [Conflicts and lint](conflicts-and-lint.md).
+- **Agreement is counted in wordings, not rows.** Six call-off contracts
+  carrying one framework's boilerplate is one source wearing six hats, and
+  reporting it as six agreeing sources manufactures certainty out of
+  duplication.
+- **The corpus has a shape, and the shape says how much of itself it describes.**
+  Entity resolution and the cross-document relation graph are in; both were
+  previously deferred. See [Network and corroboration](network-and-corroboration.md).
 
 ---
 
@@ -33,6 +40,7 @@ contradictory facts render in the same voice and read as agreement. See
 | [Pipeline walkthrough](pipeline-walkthrough.md) | Steps 1–9, in execution order, with the function that runs each |
 | [Entities: the wiki](entities.md) | Mentions vs entities, and why a page is a projection rather than a document |
 | [Conflicts and lint](conflicts-and-lint.md) | The fourth review verb, the adversarial pass, and the markdown export |
+| [Network and corroboration](network-and-corroboration.md) | The relation graph, counting agreement honestly, and what a budget is denominated in |
 | [Provenance and amendment](provenance-and-amendment.md) | The hardest part: how a machine guess becomes a checked fact, and how extraction quality gets measured |
 | [API reference](api-reference.md) | Every route, its permissions, and its response shape |
 | [Deployment](deployment.md) | Running it, and the WAL trap that catches people |

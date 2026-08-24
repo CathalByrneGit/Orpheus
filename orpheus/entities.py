@@ -687,7 +687,9 @@ def entity_page(store: Store, entity_id: str,
     `include_unconfirmed` is the collapsible half of the page: confirmed facts
     are what the wiki asserts, proposals sit behind a disclosure.
     """
-    from . import tensions as tensions_mod  # tensions read mentions; break the cycle
+    # Both read mentions, so they are imported here rather than at module top.
+    from . import corroboration as corroboration_mod
+    from . import tensions as tensions_mod
 
     entity = get_entity(store, entity_id)
     links = store.query(
@@ -758,6 +760,10 @@ def entity_page(store: Store, entity_id: str,
         record["tensions"] = by_instance.get(record["instance_id"], [])
     contested = {t["property_id"] for t in standing if t["property_id"]}
 
+    # The mirror. Where the documents agree, and -- the part that matters --
+    # whether the agreement is several sources or one sentence copied about.
+    agreement = corroboration_mod.for_entity(store, entity["entity_id"])
+
     return {
         "entity": entity,
         # The one part of the page that is not from a document, kept separate
@@ -773,6 +779,12 @@ def entity_page(store: Store, entity_id: str,
         # page shows every value it has seen either way; this is the difference
         # between "we found two" and "we found two and they really do disagree".
         "contested_properties": sorted(contested),
+        # Only genuinely independent agreement is marked. A value held up by
+        # six copies of one sentence is listed separately, because presenting
+        # it as six agreeing sources is the error corroboration exists to prevent.
+        "corroborated_properties": agreement["corroborated_properties"],
+        "copied_properties": agreement["copied_properties"],
+        "corroboration": agreement,
         "tensions": standing,
         "mentions": mentions,
         "documents": sorted(documents.values(), key=lambda d: d["date_added"] or ""),

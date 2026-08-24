@@ -93,6 +93,10 @@ changed, and both documents were right when they were written.</p>
       <th style="text-align:left">{% if loop.first %}{{ prop }}
         {%- if prop in page.contested_properties %}
         <br><span style="color:#b45309;font-weight:normal">in conflict</span>
+        {%- elif prop in page.corroborated_properties %}
+        <br><span style="color:#166534;font-weight:normal">sources agree</span>
+        {%- elif prop in page.copied_properties %}
+        <br><span style="color:#666;font-weight:normal">copied text</span>
         {%- endif %}{% endif %}</th>
       <td>{{ v.value }}</td>
       <td>{{ v.mentions|length }} mention(s){% if v.n_confirmed %},
@@ -104,6 +108,61 @@ changed, and both documents were right when they were written.</p>
 </table>
 <p style="color:#666">Where two documents disagree, both are shown. Often both
 were true when each was written, and the disagreement is the interesting part.</p>
+
+{# Agreement is evidence, but only when it is several sources rather than one
+   sentence copied about. The two are counted separately and never merged. #}
+{% if page.corroboration.properties %}
+<details style="margin:.5em 0 1em">
+  <summary style="cursor:pointer">How many documents say each of these</summary>
+  <table class="rows-and-columns" style="margin-top:.5em">
+    <thead><tr><th>Property</th><th>Value</th><th>Documents</th><th>Wordings</th><th></th></tr></thead>
+    <tbody>
+    {% for claim in page.corroboration.properties %}
+      <tr>
+        <td>{{ claim.property_id }}</td>
+        <td>{{ claim.value }}</td>
+        <td>{{ claim.n_documents }}</td>
+        <td>{{ claim.n_wordings }}</td>
+        <td>{% if claim.independent %}
+              <span style="color:#166534">independent agreement</span>
+            {% else %}
+              <span style="color:#666">one wording repeated &mdash; a citation
+              chain, not corroboration</span>
+            {% endif %}
+            {%- if claim.n_other_values %}
+            <br><span style="color:#b45309">{{ claim.n_other_values }} other
+            value(s) recorded for this property</span>
+            {%- endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p style="color:#666">Counted in distinct wordings across distinct documents.
+  None of this changes a confidence value &mdash; confidence says how sure one
+  extraction is, this says how many independent sources there are.</p>
+</details>
+{% endif %}
+
+{% if page.corroboration.relations %}
+<h2>Related pages</h2>
+<table class="rows-and-columns">
+  <thead><tr><th>Relation</th><th>Documents</th><th>Wordings</th></tr></thead>
+  <tbody>
+  {% for rel in page.corroboration.relations %}
+    <tr>
+      <td>
+        <a href="{{ urls.path('/-/orpheus/wiki/' + rel.from_entity_id) }}">{{ rel.from_name }}</a>
+        <span style="color:#666">{{ rel.link_type_id|replace('_', ' ') }}</span>
+        <a href="{{ urls.path('/-/orpheus/wiki/' + rel.to_entity_id) }}">{{ rel.to_name }}</a>
+      </td>
+      <td>{{ rel.n_documents }}</td>
+      <td>{{ rel.n_wordings }}{% if not rel.independent %}
+          <span style="color:#666">&mdash; copied</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% else %}
 <p style="color:#666">Nothing yet.</p>
 {% endif %}

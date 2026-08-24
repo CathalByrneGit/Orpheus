@@ -546,9 +546,24 @@ failure now leaves the run `partial`, keeps what was found, and says so.
 
 ## Still out of scope for Phase 1
 
-Unchanged from the architecture: entity resolution and alias merging, the
-cross-document relationship graph, conflict-of-interest and procurement views,
-and the live reading-pane companion.
+Conflict-of-interest and procurement views, and the live reading-pane companion.
+
+**Two things that were on this list are now in.** Entity resolution and alias
+merging arrived with [the wiki](entities.md); the cross-document relation graph
+arrived with [the network](network-and-corroboration.md). Neither was pulled
+forward for its own sake. The wiki needed resolution to have pages at all, and
+the graph turned out to be the only way to say something the store could not
+otherwise express — that four contracts asserting one relation are one claim
+with four sources rather than four unrelated rows.
+
+Building the graph also exposed why it had looked out of scope: **no shipped
+engine had ever returned a relationship**, so `edges` was unreachable and no
+corpus Orpheus had processed could contain one. The table, the normaliser and
+the writer were all correct and all dead. That is fixed.
+
+What remains genuinely deferred is the *analysis* on top: conflict-of-interest
+rules, risk propagation, procurement-specific views. The structure is there and
+the questions are not asked yet.
 
 The one deliberate exception is the step 9 corpus escalation, which is
 best-effort naive name matching, labelled `naive_unresolved` on every result. It

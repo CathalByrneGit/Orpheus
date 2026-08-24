@@ -29,6 +29,7 @@ document.pdf
   → review        confirm / amend / reject, nothing overwritten
   → analyse       versioned rule concepts + optional narrative reading
   → escalate      opt-in comparison against the rest of the corpus
+  → graph         relations between pages, with every source behind each one
   → export        the wiki as a portable markdown bundle
 ```
 
@@ -50,6 +51,18 @@ sides, and **accepted** is a place a reviewer can stop. `orpheus lint` hunts for
 the ones nobody recorded, along with the other ways the store can mislead a
 reader; it reports located rows, never general observations, and it will not
 give a clean bill of health it has not earned.
+
+The mirror case is agreement, and it is counted in **distinct wordings across
+distinct documents** rather than in rows. Six call-off contracts carrying one
+framework's boilerplate is one source wearing six hats;
+`orpheus corroboration` says so instead of reporting six agreeing sources, and
+changes no confidence value doing it.
+
+`orpheus graph topology` reads the corpus as a network — islands, the pages
+holding it together, clusters that never touch. It leads with how much of the
+corpus reached the graph, because a sparse-looking network over 30% coverage
+means a half-built wiki rather than a thin corpus, and no structural number
+tells those apart.
 
 ---
 
@@ -88,12 +101,19 @@ Start at **[docs/index.md](docs/index.md)**.
 | [Pipeline walkthrough](docs/pipeline-walkthrough.md) | The nine steps, with the function that runs each |
 | [Entities: the wiki](docs/entities.md) | Mentions vs entities, and why a page is a projection |
 | [Conflicts and lint](docs/conflicts-and-lint.md) | The fourth review verb, the adversarial pass, and the markdown export |
+| [Network and corroboration](docs/network-and-corroboration.md) | The relation graph, counting agreement honestly, and what a budget is denominated in |
 | [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
 | [Extraction engines](docs/extraction-engines.md) | Four ways to run the model pass, and when each is right |
 | [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
 | [Deployment](docs/deployment.md) | Running it, and the WAL trap that catches people |
 | [Developer guide](docs/developer-guide.md) | Setup, tests, troubleshooting |
 | [Open decisions](docs/open-decisions.md) | What is still undecided, and what the build corrected |
+
+An agent working with a store should read `.claude/skills/orpheus/SKILL.md`
+first. Its load-bearing rule is *never assert something the store does not hold,
+and never assert it more firmly than the store does* — the four review states
+are not interchangeable, and a summary that flattens them is the failure mode
+this whole design exists to prevent.
 
 ---
 
@@ -126,7 +146,7 @@ top of the page. [Why](docs/conflicts-and-lint.md).
 
 ## Status
 
-464 tests:
+504 tests:
 
 ```bash
 pip install -e '.[dev]'
@@ -136,8 +156,8 @@ python3 -m pytest
 They call the core directly, which cannot catch what only goes wrong with a real
 server in the middle. `tests/e2e/browser_loop.sh` drives the whole loop over
 HTTP against a live Datasette — multipart limits, CSRF, upload, extraction,
-grounding, confirm/amend/reject, rollback, the lint page and the markdown
-export — and checks the store agrees with what the browser was told.
+grounding, confirm/amend/reject, rollback, the lint page, the network page and
+the markdown export — and checks the store agrees with what the browser was told.
 
 The core has no third-party dependencies. Every extraction engine, the PDF
 backends and OCR are optional installs, and the code says which one is missing

@@ -363,8 +363,9 @@ def llm_extract(*, store: Store, document: dict, bundle: dict, text: str,
         kwargs["schema"] = extraction_schema(bundle)
     else:
         # No enforcement available, so the shape has to be asked for and then
-        # checked. _parse_chat_json tolerates the fenced reply that follows.
-        kwargs["system"] = instructions + "\n\n" + _JSON_INSTRUCTIONS
+        # checked. _parse_chat_payload tolerates the fenced reply that follows.
+        kwargs["system"] = (instructions + "\n\n" + _JSON_INSTRUCTIONS
+                            + _link_instructions(bundle))
     if config.get("api_key") and isinstance(model, llm_lib.KeyModel):
         kwargs["key"] = config["api_key"]
 
@@ -392,7 +393,7 @@ def llm_extract(*, store: Store, document: dict, bundle: dict, text: str,
     if error:
         raise OrpheusError(f"Extraction failed: {error}")
 
-    return {"extractions": _parse_chat_json(content)}
+    return _parse_chat_payload(content)
 
 
 def _llm_model_id(store: Store | None, tier: str, config: dict) -> str:
@@ -405,8 +406,11 @@ def _llm_model_id(store: Store | None, tier: str, config: dict) -> str:
 
 _JSON_INSTRUCTIONS = (
     "Return JSON only, of the form "
-    '{"extractions": [{"type": "<one of the entity types above>", '
+    '{"extractions": [{"instance_id": "<a short id unique within this reply>", '
+    '"type": "<one of the entity types above>", '
     '"excerpt": "<verbatim text from the document>", "properties": {...}}]}. '
+    "The `instance_id` is a local handle for referring to an extraction from "
+    "`relationships` below; it is not stored. "
     "Every `excerpt` must be copied character for character from the document. "
     "Omit any property the document does not state. Return no prose, no "
     "explanation and no code fence."
@@ -441,13 +445,17 @@ def chat_extract(*, store: Store, document: dict, bundle: dict, text: str,
     schema_lines = []
     for type_id, props in _extractable_types(bundle):
         fields = ", ".join(f'"{p["id"]}"' for p in props)
-        schema_lines.append(f'  {{"type": "{type_id}", "excerpt": "<verbatim text '
-                            f'from the document>", "properties": {{{fields}}}}}')
+        schema_lines.append(
+            f'  {{"instance_id": "<a short id unique within this reply>", '
+            f'"type": "{type_id}", "excerpt": "<verbatim text from the '
+            f'document>", "properties": {{{fields}}}}}')
 
+    links = _link_instructions(bundle)
     instructions = (
         prompt_for(bundle)
         + "\n\nReturn JSON only, of the form:\n"
-          '{"extractions": [\n' + ",\n".join(schema_lines[:3]) + "\n]}\n"
+          '{"extractions": [\n' + ",\n".join(schema_lines[:3]) + "\n],"
+        + links + "\n}\n"
           "Every `excerpt` must be copied character for character from the "
           "document. Omit any property the document does not state. Return no "
           "prose, no explanation and no code fence."
@@ -481,7 +489,7 @@ def chat_extract(*, store: Store, document: dict, bundle: dict, text: str,
     if error:
         raise OrpheusError(f"Extraction failed: {error}")
 
-    return {"extractions": _parse_chat_json(content)}
+    return _parse_chat_payload(content)
 
 
 def _default_base_url(store: Store | None, tier: str) -> str:
@@ -512,7 +520,19 @@ _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 
 
 def _parse_chat_json(content: str) -> list[dict]:
-    """Get the extractions out, tolerating a model that ignored 'no code fence'."""
+    """Just the extractions. Kept for callers that want only those."""
+    return _parse_chat_payload(content)["extractions"]
+
+
+def _parse_chat_payload(content: str) -> dict:
+    """Extractions *and* relationships, tolerating a fenced reply.
+
+    Relationships were the missing half. `population.normalise_population()`
+    has always accepted them and `extract()` has always written them to
+    `edges`, but every engine returned `{"extractions": [...]}` and nothing
+    else -- so the table, the normaliser and the writer were all correct and
+    permanently unreachable, and the corpus could never have a relation in it.
+    """
     text = content.strip()
     fenced = _FENCE.search(text)
     if fenced:
@@ -522,13 +542,44 @@ def _parse_chat_json(content: str) -> list[dict]:
     except json.JSONDecodeError:
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end <= start:
-            return []
+            return {"extractions": [], "relationships": []}
         try:
             parsed = json.loads(text[start:end + 1])
         except json.JSONDecodeError:
-            return []
-    items = parsed.get("extractions") if isinstance(parsed, dict) else parsed
-    return [i for i in (items or []) if isinstance(i, dict)]
+            return {"extractions": [], "relationships": []}
+
+    if not isinstance(parsed, dict):
+        return {"extractions": [i for i in (parsed or []) if isinstance(i, dict)],
+                "relationships": []}
+    items = parsed.get("extractions") or parsed.get("entities") or []
+    links = parsed.get("relationships") or parsed.get("relations") or []
+    return {"extractions": [i for i in items if isinstance(i, dict)],
+            "relationships": [l for l in links if isinstance(l, dict)]}
+
+
+def _link_instructions(bundle: dict) -> str:
+    """Ask for relations, in the link types the bundle actually declares.
+
+    Constrained to declared types rather than left open: an undeclared link
+    type is dropped by `extract()` and recorded as a schema amendment, so
+    inviting free-form relation names produces a pile of amendments instead of
+    a graph.
+    """
+    links = [l for l in bundle.get("links", []) if l.get("id")]
+    if not links:
+        return ""
+    described = "; ".join(
+        f'{l["id"]} ({l.get("from", "?")} -> {l.get("to", "?")})' for l in links)
+    return (
+        '\n"relationships": [\n'
+        '  {"from_instance_id": "<an instance_id you returned above>", '
+        '"to_instance_id": "<another instance_id you returned above>", '
+        '"link_type_id": "<one of the types below>", '
+        '"evidence": "<verbatim text from the document>"}\n'
+        "]\n"
+        f"Link types: {described}.\n"
+        "Use only these link types, and only ids you returned in `extractions`. "
+        "Omit `relationships` entirely if the document states no relation.")
 
 
 register_engine("gliner2", gliner2_extract)

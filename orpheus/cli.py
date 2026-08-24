@@ -399,6 +399,152 @@ def cmd_export(args) -> int:
     return 0
 
 
+def cmd_graph(args) -> int:
+    """The corpus as a network: islands, cut vertices, clusters, neighbourhoods."""
+    from . import graph as graph_mod
+
+    store = open_store(args, mode="read")
+    try:
+        if args.action == "topology":
+            result = graph_mod.topology(store, seed=args.seed,
+                                        reviewed_only=args.reviewed_only)
+        elif args.action == "edges":
+            result = {"edges": graph_mod.canonical_edges(
+                store, link_type_id=args.link_type,
+                reviewed_only=args.reviewed_only),
+                "coverage": graph_mod.coverage(store)}
+        elif args.action == "near":
+            if not args.entity_id:
+                raise OrpheusError("Give an entity id to look around.")
+            result = graph_mod.neighbourhood(store, args.entity_id,
+                                             depth=args.depth)
+        else:
+            raise OrpheusError(f"Unknown action {args.action!r}.")
+    finally:
+        store.close()
+
+    if args.json:
+        emit(result, True)
+        return 0
+
+    if args.action == "topology":
+        # Coverage first, on purpose: every number after it is conditional on
+        # how much of the corpus reached the graph.
+        print(result["coverage"]["note"])
+        counts = result["counts"]
+        print(f"\n  {counts['entities']} page(s), {counts['connected_entities']} "
+              f"connected by {counts['canonical_edges']} relation(s)")
+        print(f"  {counts['components']} island(s), {counts['isolated_entities']} "
+              f"page(s) related to nothing")
+
+        if result["components"]:
+            print("\n  islands (deterministic):")
+            for island in result["components"]:
+                names = ", ".join(t["name"][:24] for t in island["top_entities"])
+                print(f"    {island['n_entities']:>3} page(s)  {names}")
+        if result["articulation_points"]:
+            print("\n  pages holding the graph together (deterministic):")
+            for point in result["articulation_points"]:
+                print(f"    {point['name'][:36]:38} {point['degree']} link(s)")
+        if result["disconnected_pairs"]:
+            print("\n  clusters that never touch (heuristic):")
+            for pair in result["disconnected_pairs"][:10]:
+                print(f"    {pair['labels'][0][:26]:28} <-> {pair['labels'][1][:26]}")
+        if result["isolates"]:
+            print(f"\n  related to nothing: "
+                  f"{', '.join(i['name'][:24] for i in result['isolates'][:8])}")
+        print(f"\n  {result['note']}")
+        return 0
+
+    if args.action == "edges":
+        print(result["coverage"]["note"] + "\n")
+        for edge in result["edges"]:
+            print(f"  {edge['from_name'][:24]:26} {edge['link_type_id'][:18]:20} "
+                  f"{edge['to_name'][:24]:26} {edge['n_documents']} doc(s)")
+        return 0
+
+    entity = result["entity"]
+    print(f"{entity['canonical_name']}  [{entity['type_id']}]  "
+          f"{result['n_nodes']} page(s), {result['n_edges']} relation(s) within "
+          f"{result['depth']} hop(s)\n")
+    for edge in result["edges"]:
+        print(f"  {edge['from_name'][:24]:26} {edge['link_type_id'][:18]:20} "
+              f"{edge['to_name'][:24]:26} {edge['n_documents']} doc(s)")
+    return 0
+
+
+def cmd_corroboration(args) -> int:
+    """Where the corpus agrees with itself -- and where it is quoting itself."""
+    from . import corroboration as corroboration_mod
+
+    store = open_store(args, mode="read")
+    try:
+        if args.entity_id:
+            result = corroboration_mod.for_entity(store, args.entity_id)
+        else:
+            result = corroboration_mod.summary(
+                store, min_documents=args.min_documents)
+    finally:
+        store.close()
+
+    if args.json:
+        emit(result, True)
+        return 0
+
+    if "headline" in result:
+        print(result["headline"] + "\n")
+    for claim in result["properties"]:
+        mark = "*" if claim["independent"] else "copied"
+        print(f"  [{mark:>6}] {claim['subject_name'][:28]:30} "
+              f"{claim['property_id']:<16} {str(claim['value'])[:26]:28} "
+              f"{claim['n_documents']} doc(s) / {claim['n_wordings']} wording(s)")
+    for claim in result["relations"]:
+        mark = "*" if claim["independent"] else "copied"
+        print(f"  [{mark:>6}] {claim['from_name'][:24]:26} "
+              f"{claim['link_type_id'][:16]:18} {claim['to_name'][:24]:26} "
+              f"{claim['n_documents']} doc(s) / {claim['n_wordings']} wording(s)")
+    if "note" in result:
+        print(f"\n  {result['note']}")
+    return 0
+
+
+def cmd_budget(args) -> int:
+    """What has been sent to the cloud tier, against the cap."""
+    from .llm import budget_status
+
+    if args.set_limit is not None or args.window or args.price is not None:
+        store = open_store(args)
+        try:
+            if args.set_limit is not None:
+                store.set_setting("cloud_budget_chars", str(args.set_limit),
+                                  args.actor_id)
+            if args.window:
+                store.set_setting("cloud_budget_window", args.window,
+                                  args.actor_id)
+            if args.price is not None:
+                store.set_setting("cloud_price_per_million_chars",
+                                  str(args.price), args.actor_id)
+            status = budget_status(store)
+        finally:
+            store.close()
+    else:
+        store = open_store(args, mode="read")
+        try:
+            status = budget_status(store)
+        finally:
+            store.close()
+
+    if args.json:
+        emit(status, True)
+        return 0
+    print(status["note"])
+    print(f"  {status['estimated_cost_note']}")
+    if status["estimated_cost"] is not None:
+        print(f"  estimated: {status['estimated_cost']}")
+    # Non-zero when spent, so a corpus script can stop before the gate refuses.
+    return 1 if status["exceeded"] else 0
+
+
 def cmd_lint(args) -> int:
     """Look for where the store is misleading a reader, and say where."""
     from . import lint as lint_mod
@@ -789,6 +935,30 @@ def build_parser() -> argparse.ArgumentParser:
     exporter.add_argument("--confirmed-only", action="store_true",
                           help="leave out anything a person has not checked")
     exporter.add_argument("--limit", type=int, default=1000)
+
+    grapher = add("graph", cmd_graph, "the corpus as a network")
+    grapher.add_argument("action", choices=("topology", "edges", "near"))
+    grapher.add_argument("entity_id", nargs="?", help="entity id for `near`")
+    grapher.add_argument("--depth", type=int, default=1)
+    grapher.add_argument("--link-type")
+    grapher.add_argument("--seed", type=int, default=20260824,
+                         help="community detection is seeded; change to see "
+                              "how stable the partition is")
+    grapher.add_argument("--reviewed-only", action="store_true")
+
+    agreeing = add("corroboration", cmd_corroboration,
+                   "where the corpus agrees with itself")
+    agreeing.add_argument("entity_id", nargs="?")
+    agreeing.add_argument("--min-documents", type=int, default=2)
+
+    budget = add("budget", cmd_budget, "the cloud tier's cap, and what is left")
+    budget.add_argument("--set-limit", type=int,
+                        help="characters that may be sent per window")
+    budget.add_argument("--window", choices=("total", "day", "month"))
+    budget.add_argument("--price", type=float,
+                        help="this deployment's rate per million characters, "
+                             "for an estimate that is labelled an estimate")
+    budget.add_argument("--actor-id")
 
     linter = add("lint", cmd_lint, "look for where the store misleads a reader")
     linter.add_argument("--document-id")

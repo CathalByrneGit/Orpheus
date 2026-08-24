@@ -252,6 +252,34 @@ grep -q "Where this store misleads a reader" "$WORK/lint.html" \
 grep -q "how little has been checked\|located problem" "$WORK/lint.html" \
   || fail "the lint headline neither reported findings nor stated its limit"
 
+say "the network page: structure, with how much of the corpus it describes"
+"${CURL[@]}" "$BASE/-/orpheus/network" > "$WORK/network.html"
+grep -q "corpus as a network" "$WORK/network.html" || fail "the network page did not render"
+# Coverage is the first thing on it, because every number below is conditional
+# on it. A structural picture without it is a confident read of whatever
+# happened to have been linked.
+grep -q "reached the graph\|no relation material" "$WORK/network.html" \
+  || fail "the network page did not say how much of the corpus it describes"
+
+TOPOLOGY="$("${CURL[@]}" "$BASE/-/orpheus/api/graph/topology")"
+printf '%s' "$TOPOLOGY" | python3 -c '
+import json, sys
+report = json.load(sys.stdin)
+assert list(report)[0] == "coverage", list(report)[:3]
+assert "island is a fact" in report["note"]
+counts = report["counts"]
+print("   %d page(s), %d relation(s), %d island(s)"
+      % (counts["entities"], counts["canonical_edges"], counts["components"]))
+'
+
+say "corroboration: counted in wordings, and it says so"
+"${CURL[@]}" "$BASE/-/orpheus/api/corroboration" | python3 -c '
+import json, sys
+report = json.load(sys.stdin)
+assert "does not change any confidence value" in report["note"], report["note"]
+print("  ", report["headline"][:72])
+'
+
 say "the export: a markdown bundle nothing has to read the store to use"
 python3 - "$WORK" <<'EXPORTPY'
 import pathlib, re, sys

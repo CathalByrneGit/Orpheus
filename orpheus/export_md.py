@@ -131,6 +131,7 @@ def entity_markdown(page: dict, links: dict, confirmed_only: bool = False) -> st
         "orpheus_sources": page["counts"]["mentions"],
         "orpheus_confirmed_sources": page["counts"]["confirmed_links"],
         "orpheus_tensions": len(tensions),
+        "orpheus_corroborated": page.get("corroborated_properties") or None,
     }), "", f"# {entity['canonical_name']}", ""]
 
     if page.get("description"):
@@ -170,8 +171,12 @@ def entity_markdown(page: dict, links: dict, confirmed_only: bool = False) -> st
         out += ["## What the sources say", "",
                 "| Property | Value | Sources | Confirmed |",
                 "|---|---|---|---|"]
+        corroborated = set(page.get("corroborated_properties") or [])
+        copied = set(page.get("copied_properties") or [])
         for prop, values in page["properties"].items():
-            mark = " ⚠︎" if prop in contested else ""
+            mark = (" ⚠︎" if prop in contested else
+                    " ✓" if prop in corroborated else
+                    " ⧉" if prop in copied else "")
             for i, value in enumerate(values):
                 if confirmed_only and not value["n_confirmed"]:
                     continue
@@ -180,7 +185,30 @@ def entity_markdown(page: dict, links: dict, confirmed_only: bool = False) -> st
                            f"{len(value['mentions'])} | {value['n_confirmed']} |")
         out += ["",
                 "Where two sources disagree both values are listed; neither was "
-                "chosen. A ⚠︎ marks a disagreement somebody verified.", ""]
+                "chosen. ⚠︎ marks a disagreement somebody verified, ✓ marks "
+                "agreement between documents that word it differently, and ⧉ "
+                "marks the same sentence appearing in several documents — a "
+                "citation chain rather than corroboration.", ""]
+
+    relations = (page.get("corroboration") or {}).get("relations") or []
+    if relations:
+        out += ["## Related pages", "",
+                "| Relation | Documents | Distinct wordings |",
+                "|---|---|---|"]
+        for relation in relations:
+            other = (relation["to_name"]
+                     if relation["from_entity_id"] == entity["entity_id"]
+                     else relation["from_name"])
+            other_id = (relation["to_entity_id"]
+                        if relation["from_entity_id"] == entity["entity_id"]
+                        else relation["from_entity_id"])
+            target = links["entities"].get(other_id)
+            cite = f"[{other}]({target})" if target else other
+            note = "" if relation["independent"] else " (one wording, copied)"
+            out.append(f"| {relation['link_type_id'].replace('_', ' ')} {cite} | "
+                       f"{relation['n_documents']} | "
+                       f"{relation['n_wordings']}{note} |")
+        out.append("")
 
     shown = [m for m in page["mentions"]
              if not confirmed_only

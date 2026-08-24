@@ -26,6 +26,8 @@ from . import analysis, auth, bundle as bundle_mod, classify, concepts
 from . import entities as entities_mod
 from . import engines, extract as extract_mod, ingest as ingest_mod
 from . import export_md
+from . import corroboration as corroboration_mod
+from . import graph as graph_mod
 from . import lint as lint_mod
 from . import llm, quality, review, rubric, tensions as tensions_mod
 from . import textract
@@ -563,6 +565,65 @@ def post_tension_withdraw(store, tension_id, actor, body, **_):
 def get_document_tensions(store, document_id, **_):
     """Every tension this document is a side of, however it is scoped."""
     return {"tensions": tensions_mod.tensions_for_document(store, document_id)}
+
+
+# ---------------------------------------------------------------------------
+# The corpus as a network
+# ---------------------------------------------------------------------------
+#
+# All of these project instance-level rows up to entity pages, so what they can
+# see is bounded by how much of the wiki has been built. Every one of them
+# carries `coverage` for that reason.
+
+@route("GET", "/graph/topology")
+def get_topology(store, actor, body, **_):
+    """The whole structural picture. Administrator only.
+
+    Spans every document in the store, including ones this actor cannot read --
+    the same reason `/quality` is administrator-only. A neighbourhood around one
+    page is the scoped view and needs no such thing.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "The corpus topology spans documents you may not be able to read, "
+            "so it is an administrator view. GET /graph/entities/<id> is scoped "
+            "to one page and its neighbours.")
+    return graph_mod.topology(
+        store, seed=int(body.get("seed", graph_mod.DEFAULT_SEED)),
+        reviewed_only=body.get("reviewed_only") in ("1", "true", "True", True))
+
+
+@route("GET", "/graph/edges")
+def get_graph_edges(store, body, **_):
+    """Canonical relations between pages, each with every source behind it."""
+    return {"edges": graph_mod.canonical_edges(
+        store, link_type_id=body.get("link_type_id"),
+        reviewed_only=body.get("reviewed_only") in ("1", "true", "True", True)),
+        "coverage": graph_mod.coverage(store)}
+
+
+@route("GET", r"/graph/entities/(?P<entity_id>ent_[^/]+)")
+def get_neighbourhood(store, entity_id, body, **_):
+    """One page and what surrounds it. The view an agent or reviewer wants."""
+    return graph_mod.neighbourhood(store, entity_id,
+                                   depth=int(body.get("depth", 1)))
+
+
+@route("GET", "/corroboration")
+def get_corroboration(store, actor, body, **_):
+    """Where the corpus agrees with itself, and where it is quoting itself."""
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Corpus-wide corroboration spans documents you may not be able to "
+            "read, so it is an administrator view. An entity page carries its "
+            "own.")
+    return corroboration_mod.summary(
+        store, min_documents=int(body.get("min_documents", 2)))
+
+
+@route("GET", r"/entities/(?P<entity_id>ent_[^/]+)/corroboration")
+def get_entity_corroboration(store, entity_id, **_):
+    return corroboration_mod.for_entity(store, entity_id)
 
 
 # ---------------------------------------------------------------------------

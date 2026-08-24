@@ -44,6 +44,10 @@ def cloud_policy(store: Store) -> dict:
         "policy": policy,
         "available": policy != "disabled",
         "send_mode": "full_document",
+        # What a run may still send. `/capabilities` is where a deployment
+        # checks what it is allowed to do, and a cap it cannot see is a cap it
+        # discovers by hitting it mid-corpus.
+        "budget": budget_status(store),
         "send_mode_note": ("The whole document text is sent. Excerpt selection "
                            "is not implemented; classification is the only pass "
                            "that truncates, and it says so per call."),
@@ -76,6 +80,101 @@ def assert_cloud_allowed(store: Store, opt_in: bool,
             "Cloud processing needs an explicit per-request opt-in. It is never "
             "inferred from the policy."
         )
+
+    # The third condition. Checked here rather than at the call site so it
+    # cannot be forgotten by a new engine, and before any text is prepared so a
+    # refused call sends nothing.
+    budget = budget_status(store)
+    if budget["exceeded"]:
+        raise OrpheusError(
+            f"The cloud budget for this deployment is spent: {budget['note']} "
+            "An administrator raises `cloud_budget_chars` or clears the window."
+        )
+
+
+# ---------------------------------------------------------------------------
+# What may leave the building
+# ---------------------------------------------------------------------------
+#
+# Denominated in characters sent, not in currency, and that is deliberate.
+#
+# Orpheus talks to OpenRouter and the rest over plain HTTP and knows nothing
+# about their price lists. A cap in euro would need a hardcoded table of
+# per-model rates that goes stale the week a provider changes one, and a budget
+# that silently stops matching the invoice is worse than no budget -- it is a
+# control somebody is relying on.
+#
+# Characters are exact, always available, and measure the thing a public body
+# actually has to answer for: how much of its material left the building. The
+# spend question is downstream of that one. A deployment that knows its own
+# rate can set `cloud_price_per_million_chars` and get an estimate, labelled as
+# an estimate, on top of a number that is not one.
+
+WINDOWS = ("total", "day", "month")
+
+
+def budget_status(store: Store) -> dict:
+    """How much has been sent to the cloud tier, against the cap.
+
+    Counts every `llm_calls` row in the window, failures included: a call that
+    errored sent its payload just the same, which is the same reason the audit
+    records it.
+    """
+    raw = store.setting("cloud_budget_chars")
+    window = store.setting("cloud_budget_window", "month")
+    if window not in WINDOWS:
+        window = "month"
+
+    clause = {
+        "total": "",
+        "day": " AND created_at >= date('now', 'start of day')",
+        "month": " AND created_at >= date('now', 'start of month')",
+    }[window]
+    used = store.scalar(
+        "SELECT COALESCE(SUM(prompt_chars), 0) FROM llm_calls "
+        f"WHERE tier = 'cloud'{clause}") or 0
+
+    limit = None
+    if raw not in (None, ""):
+        try:
+            limit = int(raw)
+        except (TypeError, ValueError):
+            limit = None
+
+    estimate = None
+    price = store.setting("cloud_price_per_million_chars")
+    if price not in (None, ""):
+        try:
+            # Four decimal places, not two: a rate per *million* characters
+            # over a small corpus rounds to 0.00 at two, and a budget report
+            # that says a run cost nothing is worse than one that says nothing.
+            estimate = round(float(price) * used / 1_000_000, 4)
+        except (TypeError, ValueError):
+            estimate = None
+
+    if limit is None:
+        note = (f"{used:,} character(s) sent to the cloud tier this {window}. "
+                f"No cap is set, so nothing will stop a run.")
+    elif used >= limit:
+        note = (f"{used:,} of {limit:,} character(s) allowed this {window}.")
+    else:
+        note = (f"{used:,} of {limit:,} character(s) allowed this {window}; "
+                f"{limit - used:,} left.")
+
+    return {
+        "window": window, "chars_used": used, "chars_limit": limit,
+        "chars_remaining": None if limit is None else max(0, limit - used),
+        "exceeded": limit is not None and used >= limit,
+        # Present only where a deployment has told us its own rate. Never
+        # guessed from the model name.
+        "estimated_cost": estimate,
+        "estimated_cost_note": (
+            "An estimate from the rate this deployment configured, not a price "
+            "read from the provider." if estimate is not None else
+            "No rate configured, so no cost is estimated. Set "
+            "`cloud_price_per_million_chars` to get one."),
+        "note": note,
+    }
 
 
 # ---------------------------------------------------------------------------

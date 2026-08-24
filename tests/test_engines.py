@@ -455,3 +455,75 @@ def test_extraction_records_that_it_sent_the_whole_document(seeded, chat_server)
     # The whole page text, not a selection from it.
     from orpheus.population import document_text
     assert row["prompt_chars"] == len(document_text(store, document_id))
+
+
+# -- the budget ---------------------------------------------------------------
+#
+# A third condition on the cloud gate, alongside the org policy and the
+# per-request opt-in. Denominated in characters because Orpheus does not know
+# any provider's price list, and a budget that silently stops matching the
+# invoice is a control somebody is relying on.
+
+def test_no_budget_set_means_nothing_stops_a_run(store):
+    from orpheus.llm import budget_status
+    status = budget_status(store)
+    assert status["chars_limit"] is None
+    assert status["exceeded"] is False
+    assert "nothing will stop a run" in status["note"]
+
+
+def test_the_gate_refuses_once_the_budget_is_spent(store):
+    from orpheus.llm import assert_cloud_allowed, budget_status, record_llm_call
+    from orpheus.utils import OrpheusError
+
+    store.set_setting("cloud_ai_policy", "org_allow")
+    store.set_setting("cloud_budget_chars", "1000")
+    store.set_setting("cloud_budget_window", "total")
+    assert_cloud_allowed(store, opt_in=True)  # policy and opt-in both satisfied
+
+    record_llm_call(store, tier="cloud", purpose="extract", prompt_chars=600)
+    assert_cloud_allowed(store, opt_in=True)
+    record_llm_call(store, tier="cloud", purpose="extract", prompt_chars=600)
+
+    assert budget_status(store)["exceeded"] is True
+    with pytest.raises(OrpheusError) as caught:
+        assert_cloud_allowed(store, opt_in=True)
+    assert "budget" in str(caught.value)
+
+
+def test_a_failed_call_still_spends_the_budget(store):
+    # It sent its payload just the same, which is why the audit records it.
+    from orpheus.llm import budget_status, record_llm_call
+    store.set_setting("cloud_budget_chars", "1000")
+    store.set_setting("cloud_budget_window", "total")
+    record_llm_call(store, tier="cloud", purpose="extract", prompt_chars=1200,
+                    error="502 from the provider")
+    assert budget_status(store)["exceeded"] is True
+
+
+def test_the_local_tier_is_not_charged_against_the_cloud_budget(store):
+    from orpheus.llm import budget_status, record_llm_call
+    store.set_setting("cloud_budget_chars", "1000")
+    store.set_setting("cloud_budget_window", "total")
+    record_llm_call(store, tier="local", purpose="extract", prompt_chars=5000)
+    assert budget_status(store)["chars_used"] == 0
+
+
+def test_no_cost_is_estimated_without_a_configured_rate(store):
+    # Never guessed from the model name -- a wrong price is worse than none.
+    from orpheus.llm import budget_status, record_llm_call
+    record_llm_call(store, tier="cloud", purpose="extract", prompt_chars=1_000_000)
+    status = budget_status(store)
+    assert status["estimated_cost"] is None
+    assert "No rate configured" in status["estimated_cost_note"]
+
+    store.set_setting("cloud_price_per_million_chars", "3.5")
+    priced = budget_status(store)
+    assert priced["estimated_cost"] == 3.5
+    assert "not a price read from the provider" in priced["estimated_cost_note"]
+
+
+def test_capabilities_shows_the_cap_before_a_run_hits_it(store):
+    from orpheus.llm import cloud_policy
+    store.set_setting("cloud_budget_chars", "500")
+    assert cloud_policy(store)["budget"]["chars_limit"] == 500

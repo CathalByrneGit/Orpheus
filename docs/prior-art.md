@@ -206,6 +206,41 @@ a place for a person to write knowledge that has no source behind it.
 
 ---
 
+## sift-kg — the closest neighbour
+
+[sift-kg][sift] is the same pipeline as Orpheus aimed at a different user: a CLI
+with no server and no permissions, NetworkX and JSON in place of SQLite. Ingest,
+schema discovery, LLM extraction, graph, human-approved entity resolution,
+narrative, viewer. Its sibling [Civic Table][civic] adds "a 4-tier verification
+system where analysts and JDs validate AI-extracted facts before they're treated
+as evidence" — Orpheus's review model under another name, and independent
+evidence that the model is the right one for evidentiary work.
+
+[sift]: https://github.com/juanceresa/sift-kg
+[civic]: https://github.com/juanceresa/forensic_analysis_platform
+
+**Converged on independently:** human-in-the-loop resolution with the LLM
+proposing merges; deterministic pre-dedup before the expensive pass (their
+`prededup.py` strips title prefixes where `naive_key()` strips legal forms — the
+same idea, a different domain's noise); provenance to document and passage; and
+a discovered schema saved and reused so types stay consistent across chunks,
+which is what having a bundle up front solves.
+
+**Taken from it:** canonical edges with their sources kept whole, which became
+[the network](network-and-corroboration.md) and, with it, corroboration; the
+structural vocabulary of bridges, islands and disconnected clusters; a budget
+cap; and the bundled agent skill.
+
+**Not taken, and why:** it auto-approves merges above 0.85 and records them as
+`CONFIRMED`, indistinguishable from a person's decision — Orpheus's `basis`
+column exists so those never collapse into one another. Its `add_entity` merge
+keeps the first context quote and discards later ones, so a node cites one
+passage however many documents mention it. And it combines confidence across
+sources by product-complement, which assumes an independence a document corpus
+rarely has.
+
+---
+
 ## What nothing else does
 
 Searched for specifically, not found:
@@ -222,7 +257,18 @@ Searched for specifically, not found:
 
 The nearest neighbours each cover one piece: `datasette-comments` has discussion
 but not typed amendments; Rowfill has source-traceability but not amendment
-history; LangExtract has grounding but no review state at all.
+history; LangExtract has grounding but no review state at all; sift-kg has the
+graph and the resolution loop but reviews merges rather than facts, and has no
+`amended`.
+
+Two more found nowhere else, added since:
+
+- **A verified conflict as a terminal state.** Every review vocabulary examined
+  resolves towards one answer; none has a way to record that two sources
+  disagree and both are right.
+- **Agreement counted in distinct wordings.** Every system that counts
+  corroboration counts rows, so copied boilerplate reads as independent
+  confirmation.
 
 That combination is the part of Orpheus worth keeping regardless of what happens
 to the layers around it.

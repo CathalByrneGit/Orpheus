@@ -238,3 +238,43 @@ def test_a_shallow_pass_skips_the_expensive_comparisons(one_page):
     shallow = lint(corpus, deep=False)
     assert "smoothed_conflict" not in shallow["checks_run"]
     assert "uncited_page" in shallow["checks_run"]
+
+
+def test_a_join_the_graph_depends_on_with_no_confirmed_evidence_is_flagged(corpus):
+    # The topology gives no hint of this: a link's review status does not
+    # change the shape of the graph.
+    from orpheus.entities import create_entity, link_mention
+
+    middle = create_entity(corpus, "Company", "Bridging Ltd", actor_id="act_a")
+    ends = {}
+    for n, name in ((8, "Left Ltd"), (9, "Right Ltd")):
+        document_id = f"doc_{n}"
+        corpus.execute(
+            "INSERT INTO documents (document_id, filename, file_hash, byte_size,"
+            " n_pages, date_added, created_by, visibility, review_status)"
+            " VALUES (?,?,?,100,1,datetime('now'),'act_a','private','unreviewed')",
+            (document_id, f"{document_id}.pdf", document_id))
+        for suffix, who in ((f"m{n}", "Bridging Ltd"), (f"e{n}", name)):
+            corpus.execute(
+                "INSERT INTO instances_Company (instance_id, document_id, name,"
+                " naive_key, source, confidence, status, created_at)"
+                " VALUES (?,?,?,?,'ai_local',0.9,'unconfirmed',datetime('now'))",
+                (suffix, document_id, who, who.lower()))
+            corpus.execute(
+                "INSERT INTO instance_index (instance_id, type_id, table_name,"
+                " document_id, created_at) VALUES (?,'Company',"
+                "'instances_Company',?,datetime('now'))", (suffix, document_id))
+        ends[n] = create_entity(corpus, "Company", name, actor_id="act_a")
+        link_mention(corpus, middle, f"m{n}", actor_id="act_a", basis="naive_key")
+        link_mention(corpus, ends[n], f"e{n}", actor_id="act_a", basis="naive_key")
+        corpus.execute(
+            "INSERT INTO edges (edge_id, from_instance_id, to_instance_id,"
+            " link_type_id, document_id, evidence, source, confidence, status,"
+            " created_at) VALUES (?,?,?,'subcontracts_to',?,'x','ai_local',0.8,"
+            "'unconfirmed',datetime('now'))",
+            (f"edge{n}", f"m{n}", f"e{n}", document_id))
+    corpus.conn.commit()
+
+    found = findings_of(lint(corpus), "fragile_join")
+    assert [f["where"]["entity_id"] for f in found] == [middle]
+    assert "falls into two" in found[0]["suggestion"]

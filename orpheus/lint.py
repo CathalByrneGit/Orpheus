@@ -276,6 +276,40 @@ def unreviewed_groupings(store: Store, min_documents: int = 3,
         for r in rows]
 
 
+def fragile_joins(store: Store, limit: int = 25) -> list[dict]:
+    """Pages the graph's shape depends on, resting on evidence nobody checked.
+
+    An articulation point is a page whose removal splits the corpus in two. If
+    the only links holding it there are unconfirmed machine guesses, then the
+    structure a reader is drawing conclusions from rests on a claim nobody has
+    looked at -- and the topology gives no hint of it, because a link's review
+    status does not change the shape of the graph.
+    """
+    from . import graph as graph_mod
+
+    graph = graph_mod.build(store)
+    out = []
+    for point in graph_mod.articulation_points(graph):
+        confirmed = store.scalar(
+            "SELECT COUNT(*) FROM entity_mentions "
+            "WHERE entity_id = ? AND unlinked_at IS NULL "
+            "AND status IN ('confirmed','amended')", (point["entity_id"],)) or 0
+        if confirmed:
+            continue
+        out.append(_finding(
+            "fragile_join", "medium",
+            {"entity_id": point["entity_id"], "name": point["name"]},
+            (f"{point['name']} holds two parts of the corpus together across "
+             f"{point['degree']} link(s), and no mention of it has been "
+             f"confirmed"),
+            ("Confirm the links or split the page. Remove this page and the "
+             "graph falls into two, so any structural reading depends on it "
+             "being right.")))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _short(text: str | None, width: int = 60) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= width else text[:width - 1] + "…"
@@ -295,6 +329,7 @@ CHECKS = {
     "unextracted_document": lambda s, d: unextracted_documents(s),
     "stale_evaluation": lambda s, d: stale_evaluations(s),
     "unreviewed_grouping": lambda s, d: unreviewed_groupings(s),
+    "fragile_join": lambda s, d: fragile_joins(s),
 }
 
 # The cheap ones. `smoothed_conflict` and `split_page` both compare every

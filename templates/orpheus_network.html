@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Network{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus') }}">&larr; Orpheus</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/wiki') }}">Wiki</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/lint') }}">Lint</a></p>
+
+<h1>The corpus as a network</h1>
+
+{# Coverage first and unmissable. Every number below it is conditional on how
+   much of the corpus reached the graph, and a reader who skips this will draw
+   confident conclusions from whatever happens to have been linked. #}
+<p class="{% if report.coverage.projected_rate and report.coverage.projected_rate < 0.5 %}message-error{% else %}message-info{% endif %}">
+  {{ report.coverage.note }}
+</p>
+
+<table class="rows-and-columns" style="margin-bottom:1.5em">
+  <tbody>
+    <tr><th style="text-align:left">Pages</th><td>{{ report.counts.entities }}</td>
+        <td><span style="color:#888">{{ report.counts.connected_entities }} joined to something,
+            {{ report.counts.isolated_entities }} to nothing</span></td></tr>
+    <tr><th style="text-align:left">Relations between pages</th>
+        <td>{{ report.counts.canonical_edges }}</td>
+        <td><span style="color:#888">one row per relation, however many documents assert it</span></td></tr>
+    <tr><th style="text-align:left">Islands</th><td>{{ report.counts.components }}</td>
+        <td><span style="color:#888">groups reachable from each other and nothing else</span></td></tr>
+  </tbody>
+</table>
+
+<h2>Islands</h2>
+<p style="color:#666">Deterministic &mdash; no seed, no threshold. Two islands
+mean the corpus knows about two worlds and has not connected them. That is
+either a fact about the domain or a gap in the linking, and both are worth a
+look.</p>
+{% for island in report.components %}
+<div style="border-left:3px solid #1d4ed8;padding:.6em 1em;margin-bottom:.5em;background:#fafafa">
+  <p style="margin:0"><strong>{{ island.label }}</strong>
+    <span style="color:#666">&middot; {{ island.n_entities }} page(s)
+    &middot; {% for type, n in island.entity_types.items() %}{{ n }} {{ type }}{% if not loop.last %}, {% endif %}{% endfor %}</span></p>
+  <p style="margin:.3em 0 0">
+    {% for top in island.top_entities %}
+    <a href="{{ urls.path('/-/orpheus/wiki/' + top.entity_id) }}">{{ top.name }}</a><span style="color:#888">({{ top.degree }})</span>{% if not loop.last %} &middot; {% endif %}
+    {% endfor %}
+  </p>
+</div>
+{% endfor %}
+{% if not report.components %}<p style="color:#666">No page is related to any other yet.</p>{% endif %}
+
+{% if report.articulation_points %}
+<h2>Pages holding the graph together</h2>
+<p style="color:#666">Remove one of these and the graph splits in two.
+Deterministic, and worth knowing before it turns out one of them rests on a
+single unconfirmed link.</p>
+<ul>
+  {% for point in report.articulation_points %}
+  <li><a href="{{ urls.path('/-/orpheus/wiki/' + point.entity_id) }}">{{ point.name }}</a>
+      <span style="color:#666">&middot; {{ point.type_id }} &middot; {{ point.degree }} link(s)</span></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if report.disconnected_pairs %}
+<h2>Clusters that never touch</h2>
+<p style="color:#666">Two clusters with no relation between them &mdash; things
+the corpus knows about separately and has never connected. A question to ask,
+not a gap to fill in silently. <em>Heuristic:</em> the clustering is seeded and
+reproducible, but it is one defensible partition among several.</p>
+<ul>
+  {% for pair in report.disconnected_pairs %}
+  <li>{{ pair.labels[0] }} &nbsp;&harr;&nbsp; {{ pair.labels[1] }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if report.most_connected %}
+<h2>Most connected</h2>
+<table class="rows-and-columns">
+  <thead><tr><th>Page</th><th>Type</th><th>Links</th></tr></thead>
+  <tbody>
+  {% for node in report.most_connected %}
+    <tr>
+      <td><a href="{{ urls.path('/-/orpheus/wiki/' + node.entity_id) }}">{{ node.name }}</a></td>
+      <td>{{ node.type_id }}</td>
+      <td>{{ node.degree }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if report.isolates %}
+<h2>Related to nothing</h2>
+<p style="color:#666">Not necessarily a problem &mdash; a page can be a
+well-cited fact that no clause relates to anything. It is a problem when there
+are many, which usually means relations were never extracted rather than that
+the corpus has none.</p>
+<p>{% for node in report.isolates %}
+   <a href="{{ urls.path('/-/orpheus/wiki/' + node.entity_id) }}">{{ node.name }}</a>{% if not loop.last %} &middot; {% endif %}
+   {% endfor %}</p>
+{% endif %}
+
+<p style="color:#666;margin-top:2em">{{ report.note }}</p>
+{% endblock %}

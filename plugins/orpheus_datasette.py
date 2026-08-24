@@ -239,6 +239,7 @@ def register_routes():
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)$", document_page),
         (r"^/-/orpheus/review$", review),
         (r"^/-/orpheus/lint$", lint_page),
+        (r"^/-/orpheus/network$", network_page),
         (r"^/-/orpheus/wiki$", wiki_index),
         (r"^/-/orpheus/wiki/queue$", wiki_queue),
         (r"^/-/orpheus/wiki/act$", wiki_act),
@@ -364,6 +365,20 @@ async def lint_page(datasette, request):
     return await _render(datasette, request, "orpheus_lint.html", {
         "report": report,
         "shallow": shallow,
+        "error": request.args.get("error"),
+    })
+
+
+async def network_page(datasette, request):
+    """The structural view. Administrator-only in the core, rendered as told."""
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    status, report = await _call(datasette, request, "GET", "/graph/topology")
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus",
+                         error=report["error"]["message"])
+    return await _render(datasette, request, "orpheus_network.html", {
+        "report": report,
         "error": request.args.get("error"),
     })
 

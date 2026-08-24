@@ -282,6 +282,61 @@ observations is one nobody acts on. When nothing is found the headline says how
 much has been reviewed rather than reporting an all-clear — over a handful of
 reviews, "nothing found" says more about how little was checked.
 
+### The corpus as a network
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| `GET` | `/graph/topology` | **administrator** | `?seed=`, `?reviewed_only=1` |
+| `GET` | `/graph/edges` | actor | `?link_type_id=`, `?reviewed_only=1` |
+| `GET` | `/graph/entities/<entity_id>` | actor | `?depth=1` — one page and its neighbours |
+| `GET` | `/corroboration` | **administrator** | `?min_documents=2` |
+| `GET` | `/entities/<entity_id>/corroboration` | actor | Scoped to one page |
+
+`/graph/edges` returns one row per `(from_page, link_type, to_page)`, with every
+contributing edge kept whole underneath it — its document, evidence, confidence
+and review status. Four contracts asserting one subcontracting relation is one
+edge with four sources, not four unrelated rows.
+
+Every response carries **`coverage`**, and it is the first key in the topology
+on purpose:
+
+```json
+{ "coverage": { "n_edges_total": 40, "n_edges_projected": 12,
+                "projected_rate": 0.3, "n_unlinked_mentions": 61,
+                "note": "Only 30% of extracted relations reached the graph…" },
+  "counts": { "entities": 18, "canonical_edges": 12, "components": 2 },
+  "components": [ … ], "articulation_points": [ … ],
+  "communities": [ … ], "disconnected_pairs": [ … ] }
+```
+
+The graph is a projection: an edge exists only where **both** endpoints resolve
+to entity pages, so a mention still in the wiki queue contributes nothing. A
+sparse-looking network over 30% coverage means a half-built wiki, not a thin
+corpus — opposite findings that the structural numbers alone cannot distinguish.
+
+`components`, `articulation_points`, `isolates` and degree are deterministic.
+`communities` and the `bridges` defined from them are a **seeded heuristic** and
+say so in a `basis` field on every row: reproducible, but one defensible
+partition among several. Where a claim has to hold up, use a component — an
+island is a fact, a community is a reading.
+
+### Corroboration
+
+Counted in **distinct wordings across distinct documents**, never in rows:
+
+```json
+{ "property_id": "address", "value": "12 Ushers Quay, Dublin 8",
+  "n_documents": 6, "n_wordings": 1, "independent": false,
+  "note": "6 documents, one wording. The same sentence appears in each, so this
+           is one source quoted several times rather than several sources agreeing." }
+```
+
+Six call-off contracts carrying one framework's boilerplate is one source
+wearing six hats. **No confidence value is changed by any of this** — confidence
+says how sure one extraction is, corroboration says how many independent sources
+there are, and combining them would put a number on the rubric that no reviewer
+could state.
+
 ### Administration
 
 | Method | Path | Permission | Body |
@@ -294,6 +349,27 @@ reviews, "nothing found" says more about how little was checked.
 `cloud_ai_policy` is validated against `disabled` / `per_user` / `org_allow`; an
 unrecognised value is rejected rather than stored, so the gate can never be left
 in a state it cannot interpret.
+
+**The cloud budget** is the third condition on that gate, alongside the org
+policy and the per-request opt-in, and is checked before any text is prepared so
+a refused call sends nothing. It is denominated in **characters sent, not
+currency**: Orpheus talks to its providers over plain HTTP and knows nothing
+about their price lists, and a cap in euro would need a hardcoded rate table
+that goes stale the week a provider changes one — a budget that silently stops
+matching the invoice is a control somebody is relying on. Characters are exact,
+always available, and measure the thing a public body has to answer for anyway:
+how much of its material left the building.
+
+| Setting | Meaning |
+|---|---|
+| `cloud_budget_chars` | Characters that may be sent per window. Unset means no cap. |
+| `cloud_budget_window` | `total`, `day` or `month` (default `month`) |
+| `cloud_price_per_million_chars` | Optional. A deployment's own rate, for an estimate labelled as one. |
+
+Failed calls count: a call that errored sent its payload just the same, which is
+the same reason `llm_calls` records it. The current state is on
+`GET /capabilities` under `cloud.budget`, so a deployment sees the cap before a
+run hits it, and `orpheus budget` exits non-zero when it is spent.
 
 ---
 
