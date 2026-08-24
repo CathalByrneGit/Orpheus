@@ -201,6 +201,35 @@ assert not os.path.exists(f"{work}/orpheus.sqlite.orpheus-writer"), \
 print("   store checks passed")
 PY
 
+say "the wiki: propose, then read a page"
+# Templates are only exercised by rendering them; a missing variable or a bad
+# filter is invisible to the unit tests, which call the projection directly.
+"${CURL[@]}" "$BASE/-/orpheus/wiki" > "$WORK/wiki.html"
+grep -q "What needs doing" "$WORK/wiki.html" || fail "the wiki front page did not render"
+# `|| true`: a grep that matches nothing exits 1, and under `set -e` that kills
+# the script from inside a command substitution with no message at all.
+WIKI_CSRF="$(grep -o 'name="csrftoken" value="[^"]*"' "$WORK/wiki.html" | head -1 |
+             sed 's/.*value="//;s/"//' || true)"
+[ -n "$WIKI_CSRF" ] || fail "no CSRF token on the wiki page"
+"${CURL[@]}" -o /dev/null -X POST --data-urlencode "csrftoken=$WIKI_CSRF" \
+  --data-urlencode "action=propose" "$BASE/-/orpheus/wiki/act"
+
+"${CURL[@]}" "$BASE/-/orpheus/wiki" > "$WORK/wiki2.html"
+ENT="$(grep -o '/-/orpheus/wiki/ent_[a-f0-9]*' "$WORK/wiki2.html" | head -1 |
+       sed 's#.*/##' || true)"
+if [ -n "$ENT" ]; then
+  "${CURL[@]}" "$BASE/-/orpheus/wiki/$ENT" > "$WORK/entity.html"
+  grep -q "What the documents say" "$WORK/entity.html" || fail "entity page did not render"
+  grep -q "Sources" "$WORK/entity.html" || fail "entity page has no sources section"
+  say "  rendered a page for $ENT"
+else
+  say "  no Named instances extracted, so no pages -- the deterministic pass"
+  say "  finds dates and amounts, which carry no name"
+fi
+
+"${CURL[@]}" "$BASE/-/orpheus/wiki/queue" > "$WORK/queue.html"
+grep -q "Mentions with no page" "$WORK/queue.html" || fail "the queue did not render"
+
 say "the loop ran clean, and the server never fell over"
 if grep -q "Traceback" "$WORK/server.log"; then
   echo "--- server log ---"; cat "$WORK/server.log"

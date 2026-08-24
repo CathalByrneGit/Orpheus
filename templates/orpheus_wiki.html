@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Wiki{% endblock %}
+{% block content %}
+<h1>Wiki</h1>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+{% if note %}<p class="message-info">{{ note }}</p>{% endif %}
+
+<p style="color:#666">
+  A page here is a <em>projection</em> of the documents behind it, not a place to
+  write things down. Every line on one points at a document, a page and an
+  excerpt &mdash; so a claim with nothing behind it cannot be written.
+</p>
+
+<h2>What needs doing</h2>
+<table class="rows-and-columns">
+  <tbody>
+    <tr>
+      <th style="text-align:left">Mentions with no page</th>
+      <td>{{ queue_size }}</td>
+      <td>
+        {% if queue_size %}
+        <a href="{{ urls.path('/-/orpheus/wiki/queue') }}">Work through them &rarr;</a>
+        {% else %}<span style="color:#888">nothing waiting</span>{% endif %}
+      </td>
+    </tr>
+    <tr>
+      <th style="text-align:left">Pages awaiting review</th>
+      <td>{{ unreviewed|length }}</td>
+      <td><span style="color:#888">proposed by the machine, unconfirmed</span></td>
+    </tr>
+    <tr>
+      <th style="text-align:left">Pages that may be one thing</th>
+      <td>{{ duplicates|length }}</td>
+      <td><span style="color:#888">close names the exact grouping split apart</span></td>
+    </tr>
+  </tbody>
+</table>
+
+{% if duplicates %}
+<h3>Possible duplicates</h3>
+<p style="color:#666">Pages are grouped on exact keys, so a name that normalises
+two ways becomes two pages &mdash; and the queue goes quiet, because every
+mention has a home. These are candidates only.</p>
+{% for pair in duplicates %}
+<form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post"
+      style="margin-bottom:.5em">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <input type="hidden" name="action" value="merge">
+  <input type="hidden" name="entity_id" value="{{ pair.keep.entity_id }}">
+  <input type="hidden" name="merge_id" value="{{ pair.merge.entity_id }}">
+  <a href="{{ urls.path('/-/orpheus/wiki/' + pair.keep.entity_id) }}">{{ pair.keep.canonical_name }}</a>
+  <span style="color:#666">({{ pair.keep.n_mentions }})</span>
+  &nbsp;&harr;&nbsp;
+  <a href="{{ urls.path('/-/orpheus/wiki/' + pair.merge.entity_id) }}">{{ pair.merge.canonical_name }}</a>
+  <span style="color:#666">({{ pair.merge.n_mentions }}) &middot; {{ pair.evidence }}</span>
+  <button type="submit">Merge into the first</button>
+</form>
+{% endfor %}
+{% endif %}
+
+<form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post" style="margin:1em 0">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <input type="hidden" name="action" value="propose">
+  <button type="submit">Propose pages from unlinked mentions</button>
+  <span style="color:#666">&nbsp;Groups on stated identifiers first, then on
+  normalised names. Everything it makes is unconfirmed.</span>
+</form>
+
+<h2>Pages</h2>
+<form method="get" style="margin-bottom:1em">
+  <input type="search" name="q" value="{{ query }}" placeholder="name contains&hellip;"
+         style="width:20em">
+  <button type="submit">Search</button>
+  <a href="{{ table_url }}" style="margin-left:1em">Browse all in Datasette &rarr;</a>
+  <span style="color:#666">&nbsp;faceted, sortable, exportable</span>
+</form>
+
+{% if entities %}
+<table class="rows-and-columns">
+  <thead><tr><th>Page</th><th>Type</th><th>Status</th><th>Documents</th><th>Confirmed</th></tr></thead>
+  <tbody>
+  {% for e in entities %}
+    <tr>
+      <td><a href="{{ urls.path('/-/orpheus/wiki/' + e.entity_id) }}">{{ e.canonical_name }}</a></td>
+      <td>{{ e.type_id }}</td>
+      <td>{{ e.status }}</td>
+      <td>{{ e.n_documents }}</td>
+      <td>{{ e.n_confirmed or 0 }} / {{ e.n_mentions }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No pages yet. Propose some from the mentions already extracted.</p>
+{% endif %}
+{% endblock %}

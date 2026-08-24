@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Unlinked mentions{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus/wiki') }}">&larr; Wiki</a></p>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+{% if note %}<p class="message-info">{{ note }}</p>{% endif %}
+
+<h1>Mentions with no page</h1>
+<p style="color:#666">
+  The machine has grouped what it could. Everything it could not is here, with
+  the pages it might belong to &mdash; ranked by the strength of the evidence,
+  not by how similar the spelling looks. An exact stated identifier beats a close
+  name, always.
+</p>
+
+{% for m in mentions %}
+<div style="border:1px solid #ddd;padding:1em;margin-bottom:1em">
+  <p style="margin-top:0">
+    <strong>{{ m.name }}</strong>
+    <span style="color:#666">&middot; {{ m.type_id }} &middot;
+      <a href="{{ urls.path('/-/orpheus/document/' + m.document_id) }}">the document</a>
+    </span>
+  </p>
+
+  {% if m.candidates %}
+  <form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+    <input type="hidden" name="action" value="link">
+    <input type="hidden" name="instance_id" value="{{ m.instance_id }}">
+    <input type="hidden" name="back" value="/-/orpheus/wiki/queue">
+    <table class="rows-and-columns">
+      <tbody>
+      {% for c in m.candidates %}
+        <tr>
+          <td><input type="radio" name="entity_id" value="{{ c.entity_id }}"
+                     {% if loop.first %}checked{% endif %}></td>
+          <td><a href="{{ urls.path('/-/orpheus/wiki/' + c.entity_id) }}">{{ c.canonical_name }}</a></td>
+          <td style="color:#666">{{ c.evidence }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p><button type="submit">Link to the selected page</button></p>
+  </form>
+  {% else %}
+  <p style="color:#666">No existing page looks like this one.</p>
+  {% endif %}
+
+  <form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+    <input type="hidden" name="action" value="create">
+    <input type="hidden" name="instance_id" value="{{ m.instance_id }}">
+    <input type="hidden" name="type_id" value="{{ m.type_id }}">
+    <input type="text" name="canonical_name" value="{{ m.name }}" style="width:24em">
+    <button type="submit">Start a new page from this</button>
+  </form>
+</div>
+{% else %}
+<p>Every mention has a page. Nothing to do here.</p>
+{% endfor %}
+{% endblock %}

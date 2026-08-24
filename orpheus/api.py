@@ -362,6 +362,15 @@ def post_entity(store, actor, body, **_):
     return {"entity_id": entity_id}
 
 
+@route("GET", "/entities/duplicates")
+def get_duplicate_pages(store, body, **_):
+    """Pages that look like one thing. The queue cannot show these: every
+    mention has a home, so the split is invisible exactly when the machine has
+    finished."""
+    return {"pairs": entities_mod.duplicate_pages(
+        store, type_id=body.get("type_id"), limit=int(body.get("limit", 50)))}
+
+
 @route("GET", r"/entities/(?P<entity_id>[^/]+)")
 def get_entity_page(store, entity_id, body, **_):
     """The page. A projection of mentions, so every line carries a source."""

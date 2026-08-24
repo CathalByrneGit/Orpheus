@@ -269,3 +269,99 @@ reaches it.
 ---
 
 [← Back to index](index.md) | [Prior art →](prior-art.md)
+
+---
+
+## A second survey, when the wiki needed a UI
+
+Before hand-rolling entity pages, the 319 `datasette-*` packages on PyPI were
+checked for anything that already did the job. Four looked directly relevant.
+Two work, two do not, and the reason the two fail matters more than the plugins
+themselves.
+
+### `datasette-rapidfuzz` — adopted
+
+SQL functions for fuzzy string matching, via a `prepare_connection` hook.
+Measured against the name pairs entity resolution actually gets wrong,
+`token_sort_ratio` separates them cleanly:
+
+| | |
+|---|---|
+| `Ernst & Young` / `Ernst and Young` | 85.7 — same |
+| `Ardmore Digital Limited` / `Ardmore Digital Ltd` | 90.5 — same |
+| **threshold 80** | |
+| `Kestrel Medical Group` / `Kestrel Medical Ltd` | 75.0 — different |
+| `CRH Group` / `CRH plc` | 62.5 — different |
+
+The core uses `rapidfuzz` directly as a library rather than the plugin, since it
+must work without Datasette; the plugin is a bonus for ad-hoc SQL. See
+[Entities](entities.md).
+
+### `datasette-jellyfish` — read, not adopted
+
+The same idea, and its headline function is the wrong one. **Jaro-Winkler scores
+`Kestrel Medical Group` against `Kestrel Medical Ltd` at 0.921 — higher than it
+scores several true matches** — so using it would recreate exactly the false
+merge that stripping `group` as a suffix caused. A reminder that "fuzzy
+matching" is not one thing.
+
+### `datasette-reconcile` — right idea, broken
+
+Exposes a table as an [OpenRefine reconciliation
+service](https://reconciliation-api.github.io/specs/latest/), the W3C-track
+protocol that data-cleaning tools speak. `entities` maps onto it with **no code
+at all** — four field names in config:
+
+```yaml
+datasette-reconcile:
+  id_field: entity_id
+  name_field: canonical_name
+  description_field: description
+  type_field: type_id
+```
+
+That is exactly the "repurposable for other projects" story: anyone with a messy
+list of company names could reconcile it against the wiki using standard tooling.
+
+It does not run. `AttributeError: 'Datasette' object has no attribute
+'permission_allowed'` — the method became `ensure_permission` in Datasette 1.0,
+and this plugin is from 2024.
+
+### `datasette-comments` — right idea, broken the same way
+
+Comment threads on tables, rows and values, which is the *debate* gap: the store
+records what was decided, not why. Same failure, same line.
+
+Worse, it fails **loudly and everywhere**: it injects a body script into every
+HTML page, so with it installed *every* page in the install returned 500 —
+including tables it had nothing to do with. A broken plugin here is not
+contained to its own routes.
+
+### What this says about the ecosystem
+
+Datasette 1.0 is required for this project — browser upload needs
+`request.form(files=True)`, which 0.x lacks. But 1.0 renamed the permission API,
+and much of the plugin ecosystem is still on 0.x. Both plugins that failed here
+failed on that one method.
+
+So the ecosystem is a source of **ideas and protocols** more than of running
+code, at least until 1.0 lands properly. The two conclusions worth carrying:
+
+- **Implement the reconciliation protocol directly.** It is a published spec, it
+  is small, and it is the strongest available answer to "how does this get
+  reused elsewhere". Not doing it because one plugin is broken would be the
+  wrong lesson.
+- **Pin what you depend on and test it at your version.** Every plugin here was
+  installed and run before being judged; the two failures were found in minutes
+  and would otherwise have been found in a deployment.
+
+### What Datasette does give free
+
+Checked rather than assumed: with the broken plugins removed, `entities` renders
+as an ordinary Datasette table — sortable, searchable, faceted by `type_id` and
+`status`, exportable as JSON and CSV, with a row page per entity — for nothing
+but a config block. So the wiki **index** does not need to be built.
+
+What Datasette cannot give is the page itself, because it is a projection
+computed in Python, and the review actions, because they must go through core
+functions rather than raw SQL. Those are the parts worth writing.

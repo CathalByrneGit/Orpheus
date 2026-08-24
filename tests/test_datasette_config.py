@@ -132,3 +132,15 @@ def test_the_serve_command_is_not_immutable_by_default():
     assert "--immutable" not in command
     assert "--metadata" in command and "--config" in command
     assert "--immutable" in serve_command(immutable=True)
+
+
+def test_the_wiki_index_is_datasettes_own_table_page(generated):
+    """It needs no code. Datasette renders `entities` sortable, searchable,
+    faceted and exportable from config alone -- checked by serving it, not
+    assumed. Only the page projection and the review actions are worth
+    writing."""
+    config, _, _ = generated
+    entities = config["databases"]["orpheus"]["tables"]["entities"]
+    assert entities["facets"] == ["type_id", "status"]
+    assert config["databases"]["orpheus"]["tables"]["entity_mentions"]["facets"] \
+        == ["basis", "status"]

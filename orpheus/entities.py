@@ -42,7 +42,7 @@ from .utils import (NotFound, OrpheusError, naive_key, new_id, now,
 # What a link rests on. Not a confidence score — a kind of evidence. An exact
 # registration number and a normalised name are not the same claim, and the
 # difference has to survive into anything built on top.
-BASES = ("human", "identifier", "naive_key", "search")
+BASES = ("human", "identifier", "naive_key", "similar", "search")
 
 BASIS_CONFIDENCE = {
     "human": CONFIDENCE["explicit"],
@@ -51,8 +51,47 @@ BASIS_CONFIDENCE = {
     "identifier": CONFIDENCE["named"],
     # A normalised name. The caveat that follows this everywhere is the point.
     "naive_key": CONFIDENCE["implied"],
+    # Names that are close but not equal after normalising. Weaker than an
+    # exact key by definition -- it is offered as a candidate, never linked
+    # automatically.
+    "similar": CONFIDENCE["inferred"],
     "search": CONFIDENCE["inferred"],
 }
+
+# Above this, two names are worth *offering* as the same thing. Never worth
+# linking on: everything at this basis arrives unconfirmed.
+#
+# Measured on the cases that matter here, with `token_sort_ratio` over
+# lowercased names:
+#
+#   Halloran Instruments, Inc. / Halloran Instruments Inc   96.0   same
+#   O'Sullivan Engineering     / OSullivan Engineering      97.7   same
+#   MERIDIAN SYSTEMS LTD       / Meridian Systems Limited   90.9   same
+#   Ardmore Digital Limited    / Ardmore Digital Ltd        90.5   same
+#   Ernst & Young              / Ernst and Young            85.7   same
+#   ---------------------------------------------------------- 80 --
+#   Kestrel Medical Group      / Kestrel Medical Ltd        75.0   different
+#   Ardmore Holdings plc       / Ardmore Ltd                64.5   different
+#   Kestrel Medical Group      / Kestrel Dental Group       63.4   different
+#   CRH Group                  / CRH plc                    62.5   different
+#   Halloran Instruments       / Halloran Group             47.1   different
+#
+# Two things that had to be measured rather than assumed:
+#
+# **Case must be normalised first.** On raw names the same table overlaps
+# catastrophically -- "MERIDIAN SYSTEMS LTD" against "Meridian Systems Limited"
+# scores 22.7, well below pairs that are genuinely different companies.
+#
+# **Jaro-Winkler is the wrong scorer**, despite being the obvious choice and
+# what `datasette-jellyfish` leads with. It scores "Kestrel Medical Group"
+# against "Kestrel Medical Ltd" at 0.921 -- higher than it scores several true
+# matches -- so it would recreate the false merge that stripping `group` as a
+# suffix caused.
+#
+# Ten cases chosen by hand is not a calibration. The gap here is 75 to 85.7 and
+# the threshold sits in the middle of it; that wants revisiting against a real
+# corpus, which is why it is a module setting and an argument.
+SIMILARITY_THRESHOLD = 80.0
 
 NAIVE_CAVEAT = (
     "Links made on a normalised name are candidates, not resolution. Two "
@@ -401,12 +440,118 @@ def merge_entities(store: Store, keep_id: str, merge_id: str, actor_id: str,
 # Proposing
 # ---------------------------------------------------------------------------
 
+def similar_names(store: Store, name: str, type_id: str,
+                  threshold: float | None = None,
+                  limit: int = 5) -> list[dict]:
+    """Entity names close to this one but not equal after normalising.
+
+    Catches what `naive_key` cannot by construction: it compares keys for
+    equality, so a spelling that normalises differently is invisible to it
+    however obviously it is the same thing. `"Ernst & Young"` and `"Ernst and
+    Young"` are the documented example -- the ampersand becomes a space and the
+    word does not, and no amount of suffix rules fixes that.
+
+    Optional. Without rapidfuzz installed this returns nothing rather than
+    failing, because exact matching still works and is what the rest of the
+    system is built on.
+    """
+    try:
+        from rapidfuzz import fuzz, process
+    except ImportError:
+        return []
+
+    rows = store.query(
+        "SELECT entity_id, canonical_name, status FROM entities "
+        "WHERE type_id = ? AND merged_into IS NULL AND status != 'rejected'",
+        (type_id,))
+    if not rows:
+        return []
+
+    cutoff = threshold if threshold is not None else SIMILARITY_THRESHOLD
+    # Lowercased before scoring, and nothing more. Stripping suffixes here would
+    # be `naive_key` again, and stripping them is what caused the false merges
+    # this is meant to complement rather than repeat.
+    by_folded: dict[str, dict] = {}
+    for row in rows:
+        by_folded.setdefault(row["canonical_name"].lower(), row)
+    matches = process.extract(name.lower(), list(by_folded),
+                              scorer=fuzz.token_sort_ratio,
+                              limit=limit, score_cutoff=cutoff)
+    out = []
+    for folded, score, _ in matches:
+        row = by_folded[folded]
+        matched = row["canonical_name"]
+        # An exact key match is reported as `naive_key` by the caller; this is
+        # only for the ones that differ.
+        if naive_key(matched) == naive_key(name):
+            continue
+        out.append({**dict(row), "basis": "similar", "score": round(score, 1),
+                    "evidence": f"name {score:.0f}% similar to {matched!r}"})
+    return out
+
+
+def duplicate_pages(store: Store, type_id: str | None = None,
+                    threshold: float | None = None,
+                    limit: int = 50) -> list[dict]:
+    """Pages that look like the same thing, offered for merging.
+
+    `propose_entities()` makes one page per group, and it groups on exact keys.
+    So a name that normalises two ways becomes two pages -- `"Ernst & Young"`
+    and `"Ernst and Young"` are the standing example -- and nothing surfaces
+    them, because every mention has a home and the queue is empty. The split is
+    invisible precisely when the machine has finished its work.
+
+    This is the other half of `similar_names()`: that one catches a mention with
+    no page, this one catches two pages that should be one. Neither ever merges
+    anything; both produce candidates for a person.
+    """
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        return []
+
+    clause = "AND type_id = ?" if type_id else ""
+    rows = store.query(
+        "SELECT entity_id, type_id, canonical_name, status FROM entities "
+        f"WHERE merged_into IS NULL AND status != 'rejected' {clause} "
+        "ORDER BY canonical_name", (type_id,) if type_id else ())
+
+    cutoff = threshold if threshold is not None else SIMILARITY_THRESHOLD
+    counts = {row["entity_id"]: store.scalar(
+        "SELECT COUNT(*) FROM entity_mentions WHERE entity_id = ? "
+        "AND unlinked_at IS NULL", (row["entity_id"],)) or 0 for row in rows}
+
+    pairs = []
+    for index, left in enumerate(rows):
+        for right in rows[index + 1:]:
+            if left["type_id"] != right["type_id"]:
+                continue
+            score = fuzz.token_sort_ratio(left["canonical_name"].lower(),
+                                          right["canonical_name"].lower())
+            if score < cutoff:
+                continue
+            # The page with more evidence behind it is the better survivor, so
+            # it is named first -- but this is a suggestion, and merge() takes
+            # whichever order a person chooses.
+            a, b = ((left, right) if counts[left["entity_id"]]
+                    >= counts[right["entity_id"]] else (right, left))
+            pairs.append({
+                "keep": {**dict(a), "n_mentions": counts[a["entity_id"]]},
+                "merge": {**dict(b), "n_mentions": counts[b["entity_id"]]},
+                "score": round(score, 1),
+                "evidence": f"names {score:.0f}% similar",
+            })
+    pairs.sort(key=lambda p: -p["score"])
+    return pairs[:limit]
+
+
 def candidates_for_mention(store: Store, instance_id: str,
                            limit: int = 10) -> list[dict]:
     """Which existing entities could this mention be?
 
     Ordered by the strength of the evidence, not by similarity: an exact stated
-    identifier beats a normalised name however close the spelling.
+    identifier beats a normalised name however close the spelling, and a close
+    spelling is the weakest of the three.
     """
     found = mention(store, instance_id)
     properties = found["properties"]
@@ -436,7 +581,13 @@ def candidates_for_mention(store: Store, instance_id: str,
             out.setdefault(row["entity_id"], {**dict(row), "basis": "naive_key",
                                               "evidence": f"name key {key!r}"})
 
-    ranked = sorted(out.values(), key=lambda c: BASES.index(c["basis"]))
+    if name:
+        for candidate in similar_names(store, name, found["type_id"],
+                                       limit=limit):
+            out.setdefault(candidate["entity_id"], candidate)
+
+    ranked = sorted(out.values(), key=lambda c: (BASES.index(c["basis"]),
+                                                 -c.get("score", 0)))
     return ranked[:limit]
 
 

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}{{ entity.canonical_name }}{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus/wiki') }}">&larr; Wiki</a></p>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+{% if note %}<p class="message-info">{{ note }}</p>{% endif %}
+
+<h1>{{ entity.canonical_name }}</h1>
+<p style="color:#666">
+  {{ entity.type_id }} &middot; {{ entity.status }} &middot;
+  {{ page.counts.documents }} document(s) &middot;
+  {{ page.counts.confirmed_links }} of {{ page.counts.mentions }} source(s) confirmed
+  {%- if page.aliases %}<br>also written: {{ page.aliases|join(', ') }}{% endif %}
+</p>
+
+{% if page.caveat %}
+<p class="message-warning" style="border-left:3px solid #d90;padding-left:1em;color:#666">
+  {{ page.caveat }}
+</p>
+{% endif %}
+
+{# The one part of the page that is not from a document, kept visibly apart. #}
+<h2>Notes</h2>
+<form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <input type="hidden" name="action" value="describe">
+  <input type="hidden" name="entity_id" value="{{ entity.entity_id }}">
+  <p>
+    <textarea name="description" rows="3" style="width:100%"
+      placeholder="What a person knows about this, in their own words. Everything below comes from documents; this does not.">{{ page.description or '' }}</textarea>
+  </p>
+  <p><button type="submit">Save notes</button></p>
+</form>
+
+<h2>What the documents say</h2>
+{% if page.properties %}
+<table class="rows-and-columns">
+  <thead><tr><th>Property</th><th>Value</th><th>Sources</th></tr></thead>
+  <tbody>
+  {% for prop, values in page.properties.items() %}
+    {% for v in values %}
+    <tr>
+      <th style="text-align:left">{% if loop.first %}{{ prop }}{% endif %}</th>
+      <td>{{ v.value }}</td>
+      <td>{{ v.mentions|length }} mention(s){% if v.n_confirmed %},
+          <strong>{{ v.n_confirmed }} confirmed</strong>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  {% endfor %}
+  </tbody>
+</table>
+<p style="color:#666">Where two documents disagree, both are shown. Often both
+were true when each was written, and the disagreement is the interesting part.</p>
+{% else %}
+<p style="color:#666">Nothing yet.</p>
+{% endif %}
+
+<h2>Sources</h2>
+{% macro source(m, confirmed) %}
+<div style="border:1px solid #ddd;padding:1em;margin-bottom:.75em">
+  <p style="margin-top:0">
+    <a href="{{ urls.path('/-/orpheus/document/' + m.document_id) }}">{{ m.document.filename }}</a>
+    {% if m.evidence and m.evidence.page_no %}&middot; page {{ m.evidence.page_no }}{% endif %}
+    &middot; linked on {{ m.link.basis }}
+    {%- if m.evidence and not m.evidence.alignment %}
+    &middot; <span style="color:#a00">quotation not found in the document</span>
+    {% endif %}
+  </p>
+  {% if m.evidence and m.evidence.excerpt %}
+  <blockquote style="color:#444;border-left:3px solid #ccc;padding-left:1em;margin:.5em 0">
+    {{ m.evidence.excerpt }}
+  </blockquote>
+  {% endif %}
+  <form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post" style="display:inline">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+    <input type="hidden" name="entity_id" value="{{ entity.entity_id }}">
+    <input type="hidden" name="instance_id" value="{{ m.instance_id }}">
+    <input type="text" name="note" placeholder="why (optional)" style="width:16em">
+    {% if not confirmed %}
+    <button type="submit" name="action" value="confirm_link">This is the same thing</button>
+    {% endif %}
+    <button type="submit" name="action" value="unlink">Not this</button>
+  </form>
+</div>
+{% endmacro %}
+
+{% for m in confirmed %}{{ source(m, True) }}{% endfor %}
+{% if not confirmed %}<p style="color:#666">None confirmed yet.</p>{% endif %}
+
+{% if proposed %}
+<details style="margin-top:1em">
+  <summary style="cursor:pointer"><strong>{{ proposed|length }} proposed source(s)</strong>
+    &mdash; suggested by the machine, not yet checked</summary>
+  <div style="margin-top:1em">
+    {% for m in proposed %}{{ source(m, False) }}{% endfor %}
+  </div>
+</details>
+{% endif %}
+
+<h2>This page</h2>
+<form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <input type="hidden" name="entity_id" value="{{ entity.entity_id }}">
+  <p>
+    <input type="text" name="canonical_name" value="{{ entity.canonical_name }}" style="width:24em">
+    <button type="submit" name="action" value="rename">Rename</button>
+  </p>
+  <p>
+    <input type="text" name="note" placeholder="why (optional)" style="width:22em">
+    <button type="submit" name="action" value="confirm">Confirm this is one real thing</button>
+    <button type="submit" name="action" value="reject">Reject</button>
+  </p>
+</form>
+
+{% if mergeable %}
+<form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <input type="hidden" name="entity_id" value="{{ entity.entity_id }}">
+  <input type="hidden" name="action" value="merge">
+  <p>
+    <label>Merge another page into this one
+      <select name="merge_id">
+        {% for e in mergeable %}
+        <option value="{{ e.entity_id }}">{{ e.canonical_name }} ({{ e.n_documents }} doc)</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Merge</button>
+  </p>
+  <p style="color:#666">The merged page keeps its row and points here, so a link
+  made before the merge still resolves. Splitting is the reverse and is two
+  steps on purpose: unlink what belongs elsewhere, then make its page.</p>
+</form>
+{% endif %}
+{% endblock %}

@@ -56,13 +56,71 @@ has checked it.
 |---|---|---|
 | `human` | A person said so | `explicit` |
 | `identifier` | A stated registration number matched exactly | `named` |
-| `naive_key` | A normalised name matched | `implied` |
+| `naive_key` | A normalised name matched exactly | `implied` |
+| `similar` | Names close but not equal after normalising | `inferred` |
 | `search` | A full-text hit | `inferred` |
 
 These are different **kinds** of claim, not points on one scale, and collapsing
 them would lose the distinction permanently. An exact company number is better
 evidence than any spelling, however close — so `propose_entities()` groups on
 identifiers first and falls back to names.
+
+### `similar` catches what an exact key cannot
+
+`naive_key` compares keys for **equality**, so a name that normalises
+differently is invisible to it however obviously it is the same thing.
+`"Ernst & Young"` and `"Ernst and Young"` is the documented case — the ampersand
+becomes a space and the word does not, and no suffix rule fixes that.
+
+`similar_names()` closes it with `rapidfuzz`, scoring `token_sort_ratio` over
+lowercased names above a threshold of 80. That number is the midpoint of a
+measured gap:
+
+```
+Halloran Instruments, Inc. / Halloran Instruments Inc   96.0  same
+O'Sullivan Engineering     / OSullivan Engineering      97.7  same
+MERIDIAN SYSTEMS LTD       / Meridian Systems Limited   90.9  same
+Ernst & Young              / Ernst and Young            85.7  same
+------------------------------------------------------- 80 --
+Kestrel Medical Group      / Kestrel Medical Ltd        75.0  different
+Kestrel Medical Group      / Kestrel Dental Group       63.4  different
+CRH Group                  / CRH plc                    62.5  different
+Halloran Instruments       / Halloran Group             47.1  different
+```
+
+Two things there had to be measured rather than assumed. **Case must be
+normalised first** — on raw names that table overlaps catastrophically, with
+`MERIDIAN SYSTEMS LTD` scoring 22.7 against its own expansion. And
+**Jaro-Winkler is the wrong scorer**, despite being the obvious pick: it rates
+`Kestrel Medical Group` against `Kestrel Medical Ltd` at 0.921, higher than
+several true matches, so it would recreate the false merge that stripping
+`group` as a suffix caused.
+
+Ten hand-picked pairs is not a calibration. The threshold is a module setting
+and a function argument for that reason, and it wants revisiting against a real
+corpus.
+
+It is optional (`pip install 'orpheus[match]'`). Without it, candidates come
+from exact keys and stated identifiers only — which is what the rest of the
+system rests on, so nothing breaks.
+
+### The other half: two pages that are one thing
+
+`similar_names()` helps a mention with no page. It cannot help the opposite
+case, which is worse because it hides.
+
+`propose_entities()` groups on exact keys, so `"Ernst & Young"` and `"Ernst and
+Young"` become **two pages**. Every mention then has a home, so the review queue
+is empty — the split is invisible exactly when the machine has finished its
+work, and nothing prompts anyone to look.
+
+`duplicate_pages()` closes that: same scorer, same threshold, run over the page
+names rather than the mention names. It surfaces on the wiki's front page as
+candidates for merging, with the page carrying more evidence offered as the
+survivor. Found by running the thing, not by reasoning about it — a three-line
+corpus produced four pages where three were right.
+
+Neither function ever merges anything.
 
 ---
 
@@ -125,6 +183,12 @@ orpheus --db data/orpheus.sqlite wiki show ent_...
 orpheus --db data/orpheus.sqlite wiki show ent_... --confirmed-only
 ```
 
+In the browser, `/-/orpheus/wiki` is the front page: what needs doing, and the
+actions. Browsing links to Datasette's own `entities` table, which is sortable,
+searchable, faceted and exportable for nothing but a config block — so the index
+is not rebuilt here. `/-/orpheus/wiki/<id>` is the page, `/-/orpheus/wiki/queue`
+the work queue.
+
 `--confirmed-only` is the collapsible half of the page: what the wiki *asserts*,
 as against what it is *offering*. The default shows both, proposals included.
 
@@ -139,6 +203,7 @@ Over the API, on the same dispatch table as everything else:
 | `POST` | `/entities/<id>/merge` | `{"merge_id": …}` — two pages are one thing |
 | `POST` | `/entities/<id>/mentions` | Link a mention |
 | `POST` | `/entities/<id>/mentions/<iid>/confirm` · `/unlink` | Review one link |
+| `GET` | `/entities/duplicates` | Pages that look like one thing |
 | `GET` | `/mentions/unlinked` | The work queue |
 | `GET` | `/mentions/<iid>/candidates` | Which pages this could belong to |
 | `GET` | `/documents/<id>/entities` | The reverse view |

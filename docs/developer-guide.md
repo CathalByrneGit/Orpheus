@@ -20,6 +20,7 @@ not do.
 | `pdftotext` (poppler) **or** `pdfminer.six` | PDF text | For PDFs |
 | `docling` | Layout-aware parsing: reading order, tables | Optional, heavy |
 | `sqlite-utils` | Full-text search, and renaming/dropping a property | `[search]` / `[schema]` |
+| `rapidfuzz` | Fuzzy name candidates for entity resolution | `[match]` |
 | `tesseract` + `pytesseract` | OCR | For scanned documents |
 | One of `langextract` / `gliner2` / `llm` | The model pass | Unless you register your own populator |
 
@@ -44,7 +45,7 @@ deliberate — the engine choice is a setting, not an architecture. See
 python3 -m pytest
 ```
 
-380 tests, no skips with the `dev` extra installed.
+389 tests, no skips with the `dev` extra installed.
 
 ### How the tests are built
 

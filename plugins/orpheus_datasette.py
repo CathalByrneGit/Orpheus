@@ -131,6 +131,10 @@ def register_routes():
         (r"^/-/orpheus/upload$", upload),
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)$", document_page),
         (r"^/-/orpheus/review$", review),
+        (r"^/-/orpheus/wiki$", wiki_index),
+        (r"^/-/orpheus/wiki/queue$", wiki_queue),
+        (r"^/-/orpheus/wiki/act$", wiki_act),
+        (r"^/-/orpheus/wiki/(?P<entity_id>ent_[^/]+)$", entity_page),
         (r"^/-/orpheus/api/(?P<rest>.*)$", api_route),
     ]
 
@@ -139,7 +143,8 @@ def register_routes():
 def menu_links(datasette, actor):
     if not actor:
         return []
-    return [{"href": datasette.urls.path("/-/orpheus"), "label": "Documents"}]
+    return [{"href": datasette.urls.path("/-/orpheus"), "label": "Documents"},
+            {"href": datasette.urls.path("/-/orpheus/wiki"), "label": "Wiki"}]
 
 
 @hookimpl
@@ -154,6 +159,170 @@ def table_actions(datasette, actor, database, table):
     return [{"href": datasette.urls.path("/-/orpheus"),
              "label": "Add a document",
              "description": "Ingest and extract a new document"}]
+
+
+# ---------------------------------------------------------------------------
+# The wiki
+# ---------------------------------------------------------------------------
+
+async def wiki_index(datasette, request):
+    """The wiki's front page: what needs doing, and a way in.
+
+    Deliberately not a listing. Datasette already renders `entities` sortable,
+    searchable, faceted by type and status and exportable as JSON or CSV, from
+    a config block and no code -- so browsing links there rather than being
+    rebuilt worse here. What Datasette cannot do is the actions.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+
+    query = request.args.get("q") or ""
+    _, listing = await _call(datasette, request, "GET", "/entities",
+                             {"q": query, "limit": "50"})
+    _, queue = await _call(datasette, request, "GET", "/mentions/unlinked",
+                           {"limit": "200"})
+    # The split the queue cannot show: once every mention has a home it is
+    # empty, and two pages that are one thing sit there unremarked.
+    _, dupes = await _call(datasette, request, "GET", "/entities/duplicates",
+                           {"limit": "20"})
+    entities = (listing or {}).get("entities", [])
+    return await _render(datasette, request, "orpheus_wiki.html", {
+        "entities": entities,
+        "query": query,
+        "queue_size": len((queue or {}).get("mentions", [])),
+        "unreviewed": [e for e in entities if e["status"] == "unconfirmed"],
+        "duplicates": (dupes or {}).get("pairs", []),
+        "table_url": datasette.urls.path(
+            f"/{_config(datasette).get('database', DEFAULT_DATABASE)}/entities"),
+        "error": request.args.get("error"),
+        "note": request.args.get("note"),
+    })
+
+
+async def entity_page(datasette, request):
+    """One page. Confirmed facts asserted, proposals behind a disclosure."""
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    entity_id = request.url_vars["entity_id"]
+
+    status, page = await _call(datasette, request, "GET", f"/entities/{entity_id}")
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus/wiki", error=page["error"]["message"])
+
+    # Split here rather than in the template: what the wiki *asserts* and what
+    # it is *offering* are different claims, and the page should not have to
+    # work that out in a loop.
+    confirmed = [m for m in page["mentions"]
+                 if m["link"]["status"] in ("confirmed", "amended")]
+    proposed = [m for m in page["mentions"] if m not in confirmed]
+
+    _, others = await _call(datasette, request, "GET", "/entities",
+                            {"type_id": page["entity"]["type_id"], "limit": "200"})
+    return await _render(datasette, request, "orpheus_entity.html", {
+        "page": page,
+        "entity": page["entity"],
+        "confirmed": confirmed,
+        "proposed": proposed,
+        "mergeable": [e for e in (others or {}).get("entities", [])
+                      if e["entity_id"] != page["entity"]["entity_id"]],
+        "error": request.args.get("error"),
+        "note": request.args.get("note"),
+    })
+
+
+async def wiki_queue(datasette, request):
+    """Mentions with no page yet, each with the pages it might belong to.
+
+    The screen where a wiki actually gets built: the machine has grouped what
+    it could, and everything it could not is here with its candidates.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+
+    _, queue = await _call(datasette, request, "GET", "/mentions/unlinked",
+                           {"limit": "50"})
+    mentions = (queue or {}).get("mentions", [])
+    for found in mentions:
+        _, result = await _call(
+            datasette, request,
+            "GET", f"/mentions/{found['instance_id']}/candidates", {"limit": "5"})
+        found["candidates"] = (result or {}).get("candidates", [])
+    return await _render(datasette, request, "orpheus_queue.html", {
+        "mentions": mentions,
+        "error": request.args.get("error"),
+        "note": request.args.get("note"),
+    })
+
+
+async def wiki_act(datasette, request):
+    """Every write the wiki pages make, through one form handler."""
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    if request.method != "POST":
+        return _redirect(datasette, "/-/orpheus/wiki")
+
+    form = await request.post_vars()
+    action = form.get("action")
+    entity_id = form.get("entity_id") or ""
+    instance_id = form.get("instance_id") or ""
+    note = form.get("note") or None
+    back = form.get("back") or (f"/-/orpheus/wiki/{entity_id}" if entity_id
+                                else "/-/orpheus/wiki")
+
+    routes = {
+        "propose": ("POST", "/entities/propose", {}),
+        "confirm": ("POST", f"/entities/{entity_id}/confirm", {"note": note}),
+        "reject": ("POST", f"/entities/{entity_id}/reject", {"note": note}),
+        "rename": ("POST", f"/entities/{entity_id}/rename",
+                   {"canonical_name": form.get("canonical_name"), "note": note}),
+        "describe": ("POST", f"/entities/{entity_id}/describe",
+                     {"description": form.get("description"), "note": note}),
+        "merge": ("POST", f"/entities/{entity_id}/merge",
+                  {"merge_id": form.get("merge_id"), "note": note}),
+        "confirm_link": ("POST",
+                         f"/entities/{entity_id}/mentions/{instance_id}/confirm",
+                         {"note": note}),
+        "unlink": ("POST", f"/entities/{entity_id}/mentions/{instance_id}/unlink",
+                   {"note": note}),
+        "link": ("POST", f"/entities/{entity_id}/mentions",
+                 {"instance_id": instance_id, "basis": "human", "note": note}),
+        "create": ("POST", "/entities",
+                   {"type_id": form.get("type_id"),
+                    "canonical_name": form.get("canonical_name")}),
+    }
+    if action not in routes:
+        return _redirect(datasette, back, error=f"Unknown action {action!r}.")
+
+    method, path, body = routes[action]
+    status, result = await _call(datasette, request, method, path, body)
+    if status != 200:
+        return _redirect(datasette, back, error=result["error"]["message"])
+
+    if action == "create" and form.get("instance_id"):
+        # Creating a page from the queue links the mention that prompted it,
+        # so the person who said "this is a new company" does not then have to
+        # say which mention made them think so.
+        new_id = result["entity_id"]
+        link_status, link_result = await _call(
+            datasette, request, "POST", f"/entities/{new_id}/mentions",
+            {"instance_id": form["instance_id"], "basis": "human"})
+        if link_status != 200:
+            return _redirect(datasette, back,
+                             error=link_result["error"]["message"])
+        return _redirect(datasette, f"/-/orpheus/wiki/{new_id}",
+                         note="Page created.")
+
+    if action == "propose":
+        return _redirect(datasette, "/-/orpheus/wiki",
+                         note=f"{result['proposed']} page(s) proposed from "
+                              f"{result['linked']} mention(s).")
+    if action == "merge":
+        return _redirect(datasette, f"/-/orpheus/wiki/{result['kept']}",
+                         note=f"Merged, moving {result['mentions_moved']} "
+                              "mention(s).")
+    if action == "reject":
+        return _redirect(datasette, "/-/orpheus/wiki", note="Page rejected.")
+    return _redirect(datasette, back, note=f"Done: {action.replace('_', ' ')}.")
 
 
 # ---------------------------------------------------------------------------

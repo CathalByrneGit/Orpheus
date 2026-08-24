@@ -149,6 +149,13 @@ def build_config(bundle: dict, database_name: str = "orpheus",
         "databases": {database_name: {
             "tables": {
                 "actor_tokens": {"allow": False},
+            # The wiki's index needs no code: Datasette renders `entities`
+            # sortable, searchable, faceted and exportable from this alone.
+            # What it cannot render is a page -- that is a projection computed
+            # in Python -- or the review actions, which go through core
+            # functions rather than raw SQL.
+            "entities": {"facets": ["type_id", "status"], "sort": "canonical_name"},
+            "entity_mentions": {"facets": ["basis", "status"]},
                 "actors": {"allow": {"is_admin": 1}},
                 "llm_calls": {"allow": {"is_admin": 1}},
                 "edit_history": {"sort": "seq"},

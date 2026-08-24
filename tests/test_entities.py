@@ -387,3 +387,127 @@ def test_an_unknown_entity_or_mention_is_a_not_found(corpus):
 def test_an_entity_type_the_bundle_lacks_is_refused(corpus):
     with pytest.raises(OrpheusError, match="no object type"):
         create_entity(corpus, "Spaceship", "Enterprise", actor_id="act_a")
+
+
+# -- fuzzy candidates --------------------------------------------------------
+
+pytest.importorskip("rapidfuzz")
+
+
+def test_a_close_spelling_is_offered_that_an_exact_key_cannot_see(corpus):
+    """`naive_key` compares keys for equality, so a name that normalises
+    differently is invisible to it however obviously it is the same thing.
+
+    "Ernst & Young" against "Ernst and Young" is the documented case: the
+    ampersand becomes a space and the word does not, and no suffix rule fixes
+    it.
+    """
+    from orpheus.entities import similar_names
+
+    create_entity(corpus, "Company", "Ernst & Young", actor_id="act_a")
+    hits = similar_names(corpus, "Ernst and Young", "Company")
+    assert [h["canonical_name"] for h in hits] == ["Ernst & Young"]
+    assert hits[0]["basis"] == "similar"
+    assert hits[0]["score"] >= 85
+
+
+def test_a_holding_company_is_not_offered_as_its_subsidiary(corpus):
+    # The false merge this whole area keeps trying to make. Jaro-Winkler scores
+    # this pair *higher* than a true match, which is why token_sort_ratio is
+    # the scorer.
+    from orpheus.entities import similar_names
+
+    create_entity(corpus, "Company", "Kestrel Medical Group", actor_id="act_a")
+    assert similar_names(corpus, "Kestrel Medical Ltd", "Company") == []
+    create_entity(corpus, "Company", "Ardmore Holdings plc", actor_id="act_a")
+    assert similar_names(corpus, "Ardmore Ltd", "Company") == []
+
+
+def test_an_exact_key_match_is_not_reported_twice(corpus):
+    # It is already a `naive_key` candidate, which is the stronger basis.
+    from orpheus.entities import similar_names
+
+    create_entity(corpus, "Company", "Halloran Instruments, Inc.",
+                  actor_id="act_a")
+    hits = similar_names(corpus, "Halloran Instruments Inc", "Company")
+    assert hits == []
+
+
+def test_candidates_rank_evidence_before_similarity(corpus):
+    """An exact stated identifier beats a close spelling, always."""
+    exact = create_entity(corpus, "Company", "Halloran Instruments, Inc.",
+                          actor_id="act_a")
+    link_mention(corpus, exact, "i1", actor_id="act_a")
+    create_entity(corpus, "Company", "Halloran Instrument Inc.", actor_id="act_a")
+
+    candidates = candidates_for_mention(corpus, "i2")
+    assert candidates[0]["entity_id"] == exact
+    assert candidates[0]["basis"] == "identifier"
+    assert "similar" in {c["basis"] for c in candidates}
+
+
+def test_similarity_degrades_to_nothing_without_rapidfuzz(corpus, monkeypatch):
+    # Exact matching still works, and it is what the rest of the system rests
+    # on, so a missing optional install must not break candidate generation.
+    import builtins
+    from orpheus.entities import similar_names
+
+    real_import = builtins.__import__
+
+    def no_rapidfuzz(name, *args, **kwargs):
+        if name.startswith("rapidfuzz"):
+            raise ImportError("not installed")
+        return real_import(name, *args, **kwargs)
+
+    create_entity(corpus, "Company", "Ernst & Young", actor_id="act_a")
+    monkeypatch.setattr(builtins, "__import__", no_rapidfuzz)
+    assert similar_names(corpus, "Ernst and Young", "Company") == []
+    assert candidates_for_mention(corpus, "i1") == []
+
+
+def test_a_false_split_shows_up_as_two_pages_to_merge(corpus):
+    """The gap the queue cannot show.
+
+    `propose_entities()` groups on exact keys, so a name that normalises two
+    ways becomes two pages -- and every mention then has a home, so the queue
+    is empty and the split is invisible exactly when the machine has finished.
+    """
+    from orpheus.entities import duplicate_pages
+
+    create_entity(corpus, "Company", "Ernst & Young", actor_id="act_a")
+    create_entity(corpus, "Company", "Ernst and Young", actor_id="act_a")
+    create_entity(corpus, "Company", "Kestrel Medical Group", actor_id="act_a")
+    create_entity(corpus, "Company", "Kestrel Medical Ltd", actor_id="act_a")
+
+    pairs = duplicate_pages(corpus, type_id="Company")
+    names = {frozenset((p["keep"]["canonical_name"],
+                        p["merge"]["canonical_name"])) for p in pairs}
+    assert frozenset({"Ernst & Young", "Ernst and Young"}) in names
+    # And the pair that must never be offered.
+    assert frozenset({"Kestrel Medical Group", "Kestrel Medical Ltd"}) not in names
+
+
+def test_the_page_with_more_evidence_is_offered_as_the_survivor(corpus):
+    from orpheus.entities import duplicate_pages
+
+    keep = create_entity(corpus, "Company", "Halloran Instruments, Inc.",
+                         actor_id="act_a")
+    thin = create_entity(corpus, "Company", "Halloran Instruments Inc.",
+                         actor_id="act_a")
+    link_mention(corpus, keep, "i1", actor_id="act_a")
+    link_mention(corpus, keep, "i2", actor_id="act_a")
+
+    pair = duplicate_pages(corpus, type_id="Company")[0]
+    assert pair["keep"]["entity_id"] == keep
+    assert pair["merge"]["entity_id"] == thin
+    assert pair["keep"]["n_mentions"] == 2
+
+
+def test_a_merged_page_stops_being_offered(corpus):
+    from orpheus.entities import duplicate_pages
+
+    keep = create_entity(corpus, "Company", "Ernst & Young", actor_id="act_a")
+    gone = create_entity(corpus, "Company", "Ernst and Young", actor_id="act_a")
+    assert duplicate_pages(corpus, type_id="Company")
+    merge_entities(corpus, keep, gone, "act_a")
+    assert duplicate_pages(corpus, type_id="Company") == []
