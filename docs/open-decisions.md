@@ -369,6 +369,33 @@ extraction pipeline nobody has measured is answerable only by measuring it.
 
 ---
 
+## Reconciliation: how this gets reused elsewhere
+
+**Status: open, and the clearest answer available.**
+
+The point of a wiki whose every line is cited is that the next project can use
+it. The
+[Reconciliation Service API](https://reconciliation-api.github.io/specs/latest/)
+is the standard way that happens: a small JSON protocol for matching messy names
+against a canonical list, spoken by OpenRefine and a W3C community group's worth
+of tooling. Someone with a spreadsheet of supplier names could point OpenRefine
+at an Orpheus store and reconcile against it.
+
+`entities` maps onto it with no code — `entity_id`, `canonical_name`,
+`description`, `type_id` are exactly its four fields. `datasette-reconcile`
+implements the protocol as a plugin and would need only config, but it is
+unmaintained (last commit February 2024) and still calls `permission_allowed`,
+removed in Datasette 1.0. See
+[Datasette ecosystem](datasette-ecosystem.md#datasette-reconcile--right-idea-unmaintained).
+
+**What would settle it:** implementing the manifest and `queries` endpoints
+directly. They are small, the spec is stable, and the candidate scoring already
+exists in `entities.similar_names()`. The reason to wait is that the scoring
+threshold is calibrated on ten hand-picked pairs, and exposing a matching
+service on an uncalibrated threshold publishes a guess.
+
+---
+
 ## Revisit when triggered
 
 Deferred with an explicit trigger rather than a date.

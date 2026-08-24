@@ -1,10 +1,11 @@
 ← [Back to index](index.md)
 
-# Four Datasette plugins, and what each is worth here
+# The Datasette ecosystem, and what is worth taking from it
 
-`datasette-accounts`, `datasette-agent`, `datasette-apps`, `datasette-paper`.
-Researched because the direction is Datasette-first and the Datasette team keeps
-building things Orpheus would otherwise build badly.
+Three passes, recorded in order: four plugins researched when the direction was
+first set, a search for anything that already built the wiki UI, and then the
+directory itself. Every verdict below came from installing the thing and making
+a request; two of them contradicted what the metadata implied.
 
 The headline question was whether **`datasette-agent` removes the need for R and
 the Plumber API**. The answer was no to the first half and yes to the second, but
@@ -272,12 +273,10 @@ reaches it.
 
 ---
 
-## A second survey, when the wiki needed a UI
+## Second pass: when the wiki needed a UI
 
 Before hand-rolling entity pages, the 319 `datasette-*` packages on PyPI were
 checked for anything that already did the job. Four looked directly relevant.
-Two work, two do not, and the reason the two fail matters more than the plugins
-themselves.
 
 ### `datasette-rapidfuzz` — adopted
 
@@ -305,7 +304,7 @@ scores several true matches** — so using it would recreate exactly the false
 merge that stripping `group` as a suffix caused. A reminder that "fuzzy
 matching" is not one thing.
 
-### `datasette-reconcile` — right idea, broken
+### `datasette-reconcile` — right idea, unmaintained
 
 Exposes a table as an [OpenRefine reconciliation
 service](https://reconciliation-api.github.io/specs/latest/), the W3C-track
@@ -324,36 +323,119 @@ That is exactly the "repurposable for other projects" story: anyone with a messy
 list of company names could reconcile it against the wiki using standard tooling.
 
 It does not run. `AttributeError: 'Datasette' object has no attribute
-'permission_allowed'` — the method became `ensure_permission` in Datasette 1.0,
-and this plugin is from 2024.
+'permission_allowed'` — the method became `ensure_permission` in Datasette 1.0.
+Unlike `datasette-comments`, this is not a stale release in front of a live
+repo: the current `main` still calls the old method, and the last commit is
+February 2024. The protocol is worth implementing directly.
 
-### `datasette-comments` — right idea, broken the same way
+### `datasette-comments` — maintained, but unreleased
 
 Comment threads on tables, rows and values, which is the *debate* gap: the store
-records what was decided, not why. Same failure, same line.
+records what was decided, not why.
 
-Worse, it fails **loudly and everywhere**: it injects a body script into every
-HTML page, so with it installed *every* page in the install returned 500 —
-including tables it had nothing to do with. A broken plugin here is not
-contained to its own routes.
+The PyPI release (0.1.0, November 2023) fails the same way as reconcile, and it
+fails **loudly and everywhere**: it injects a body script into every HTML page,
+so with it installed *every* page in the install returned 500 — including tables
+it had nothing to do with. A broken plugin here is not contained to its own
+routes.
+
+**But that is the release, not the project.** `main` has no `permission_allowed`
+anywhere and requires `datasette>=1.0a21`. Installing from git gets past that
+and then fails on `ValueError: Entrypoint src/content_script/index.tsx not found
+in manifest` — the TypeScript front end is not built in a source checkout.
+
+So: alive, 1.0-ready in git, needs either a release or a frontend build. Worth
+revisiting rather than replacing, which is the opposite of the conclusion the
+PyPI version alone would support. 941 downloads a month.
+
+## Third pass: the directory itself
+
+`datasette.io/plugins` is unreachable from this environment, but the site is
+built from a public repo, so the same data came from
+`simonw/datasette.io/plugin_repos.yml` (the curated list) and
+`simonw/package-stats/stats.json` (downloads). **158 plugins are curated, against
+319 `datasette-*` packages on PyPI** — so roughly half of what is published is
+listed, and the directory is the maintained subset.
+
+The categories that bear on this project, with 30-day downloads:
+
+| Category | Notable | /mo |
+|---|---|---|
+| Enrichment | `datasette-enrichments` | 992 |
+| AI | `datasette-extract` | 1,171 |
+| UI | `datasette-write-ui` | 1,476 |
+| Search | `datasette-search-all` | 1,704 |
+| Collaboration | `datasette-comments` | 941 |
+| SQL Functions | `datasette-jellyfish` | 308 |
+
+### 1.0-readiness, checked at source
+
+The releases lag the repos, so both were checked. `permission_allowed` in the
+current `main` is the test — it is the method 1.0 renamed to `ensure_permission`:
+
+| Plugin | `main` | Declares |
+|---|---|---|
+| `datasette-extract` | clean | `>=1.0a26` |
+| `datasette-enrichments` | clean | `>=1.0a21` |
+| `datasette-comments` | clean | `>=1.0a21` |
+| `datasette-checkbox` | clean | `>=1.0a19` |
+| `datasette-edit-schema` | clean | `>=1.0a21` |
+| `datasette-search-all` | clean | `>=1.0a20` |
+| `datasette-create-view` | clean | `>=1.0a21` |
+| `datasette-query-assistant` | clean | `>=1.0a21` |
+| **`datasette-write-ui`** | **uses it** | `>=1.0a21` |
+| **`datasette-embeddings`** | **uses it** | unpinned |
+| **`datasette-reconcile`** | **uses it** | unpinned, last commit Feb 2024 |
+
+Worth noting that `datasette-write-ui` is both the most-downloaded UI plugin and
+still on the old API in its own `main` while declaring `>=1.0a21`. A declared
+floor is not evidence of compatibility.
+
+### The closest existing tool: `datasette-extract`
+
+Worth being precise about, because it is what someone would reasonably ask why
+this project is not. It imports unstructured text and images into structured
+tables: you name the columns and types in a form, pick a model through
+`datasette-llm`, and rows appear.
+
+| | `datasette-extract` | Orpheus |
+|---|---|---|
+| Schema | Column names and types, per run | A versioned ontology bundle with interfaces, codelists and an amendment queue |
+| Grounding | The model's output *is* the row | Every excerpt located in the source; one that cannot be found is scored down, not stored as fact |
+| Provenance | — | `source`, `confidence`, `alignment`, page, excerpt, character span |
+| Review | Rows land as data | Four states, append-only history, nothing overwritten |
+| Measurement | — | Accuracy by confidence, calibration verdict, fabrication rate |
+
+That is not a criticism of it. It does a different job well, and 1,171 downloads
+a month says the shape — extract into a Datasette table — is one people want.
+What it confirms is the gap: it gets structured data out fast, and Orpheus
+exists to say **whether the structured data is any good**, which is the whole of
+Phase 1.
+
+`datasette-llm`, which it depends on for model management and API keys, is a
+real alternative to `orpheus/llm.py`'s configuration half. It is not an
+alternative to the gate: the two-condition opt-in and the `llm_calls` audit are
+policy, not plumbing.
 
 ### What this says about the ecosystem
 
-Datasette 1.0 is required for this project — browser upload needs
-`request.form(files=True)`, which 0.x lacks. But 1.0 renamed the permission API,
-and much of the plugin ecosystem is still on 0.x. Both plugins that failed here
-failed on that one method.
+Datasette 1.0 is required here — browser upload needs `request.form(files=True)`,
+which 0.x lacks. 1.0 renamed the permission API, and the ecosystem is mid-
+migration: the plugins that failed all failed on that one method, and the
+releases lag their repos by more than a year in places.
 
-So the ecosystem is a source of **ideas and protocols** more than of running
-code, at least until 1.0 lands properly. The two conclusions worth carrying:
+Three conclusions worth carrying:
 
-- **Implement the reconciliation protocol directly.** It is a published spec, it
-  is small, and it is the strongest available answer to "how does this get
-  reused elsewhere". Not doing it because one plugin is broken would be the
-  wrong lesson.
-- **Pin what you depend on and test it at your version.** Every plugin here was
-  installed and run before being judged; the two failures were found in minutes
-  and would otherwise have been found in a deployment.
+- **Judge the repo, not the release.** The PyPI version said `datasette-comments`
+  was dead; `main` says it is 1.0-ready and waiting on a build step. The
+  opposite mistake is just as easy: `datasette-write-ui` declares `>=1.0a21` and
+  does not work.
+- **Implement the reconciliation protocol directly.** `datasette-reconcile` is
+  genuinely unmaintained — last commit February 2024, still on the old API — but
+  the spec it implements is stable and small, and it is the strongest available
+  answer to "how does this get reused elsewhere".
+- **Install and run before judging.** Every verdict here came from an install
+  and a request, and two of them contradicted what the metadata implied.
 
 ### What Datasette does give free
 
