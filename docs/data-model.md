@@ -210,6 +210,20 @@ An engine that uses its own vocabulary — `pending`/`approved`, say — is
 translated at the boundary in `engines.py`, so the store has one vocabulary
 rather than two.
 
+All four resolve towards a single answer standing, which is right for grading an
+extraction and wrong for a corpus. **Tensions** are the second axis, and they
+have their own vocabulary:
+
+| Status | Meaning |
+|---|---|
+| `open` | Raised; nobody has ruled |
+| `accepted` | A person looked, and the conflict is real — a *finished* review |
+| `resolved` | Settled; `resolution` is required and says how |
+| `withdrawn` | Not a real conflict; kept as evidence about detection |
+
+A tension is not uncertainty — `confidence` is that axis. It is a conflict
+somebody verified. See [Conflicts and lint](conflicts-and-lint.md).
+
 ---
 
 ## Tables
@@ -245,6 +259,22 @@ contract mailed round twice under different names is one document.
 `concept_evaluations` carries `scope` (`document` or `database`),
 `resolution_quality` (set to `naive_unresolved` for corpus results),
 `corpus_context_used`, and `stale` with a `stale_reason`.
+
+### Conflicts
+
+| Table | Purpose |
+|---|---|
+| `tensions` | One verified conflict: `scope`, `subject_id`, `kind`, `property_id`, `summary`, `status`, `resolution` |
+| `tension_sides` | The cited sides: `instance_id`, `document_id`, `position` |
+
+A tension carries **at least two sides**, each an instance with provenance,
+enforced in `tensions.py`. The same rule as the entity page and for the same
+reason: without it, a tension is an unfalsifiable opinion, and one of those in a
+store built on citations is the single row nobody can check.
+
+`kind` is one of `conflicting_value`, `competing_authority`, `ambiguous_wording`
+or `unexplained` — deliberately about the *shape* of a disagreement rather than
+about contracts, so another domain describes its conflicts in the same words.
 
 ### Audit
 

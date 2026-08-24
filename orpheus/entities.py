@@ -687,6 +687,8 @@ def entity_page(store: Store, entity_id: str,
     `include_unconfirmed` is the collapsible half of the page: confirmed facts
     are what the wiki asserts, proposals sit behind a disclosure.
     """
+    from . import tensions as tensions_mod  # tensions read mentions; break the cycle
+
     entity = get_entity(store, entity_id)
     links = store.query(
         "SELECT instance_id, document_id, basis, confidence, status, "
@@ -743,6 +745,19 @@ def entity_page(store: Store, entity_id: str,
                       if m["properties"].get("name")}
                      - {entity["canonical_name"]})
 
+    # Conflicts somebody verified, and which mention is a side of which. Read
+    # here rather than left to the caller because the page is where the damage
+    # happens: two confirmed mentions that contradict each other, rendered in
+    # the same voice one under the other, read as though they agree. A property
+    # carrying a standing tension must not be renderable without it.
+    standing = tensions_mod.tensions_for_entity(store, entity["entity_id"],
+                                                standing_only=True)
+    by_instance = tensions_mod.tensions_for_instances(
+        store, [m["instance_id"] for m in mentions])
+    for record in mentions:
+        record["tensions"] = by_instance.get(record["instance_id"], [])
+    contested = {t["property_id"] for t in standing if t["property_id"]}
+
     return {
         "entity": entity,
         # The one part of the page that is not from a document, kept separate
@@ -754,6 +769,11 @@ def entity_page(store: Store, entity_id: str,
                         key=lambda v: (-v["n_confirmed"], -len(v["mentions"])))
             for key, values in sorted(properties.items())
         },
+        # Which properties a person has said are genuinely in conflict. The
+        # page shows every value it has seen either way; this is the difference
+        # between "we found two" and "we found two and they really do disagree".
+        "contested_properties": sorted(contested),
+        "tensions": standing,
         "mentions": mentions,
         "documents": sorted(documents.values(), key=lambda d: d["date_added"] or ""),
         "counts": {
@@ -771,6 +791,7 @@ def entity_page(store: Store, entity_id: str,
         # been verified by hand.
         "resolution_quality": ("resolved" if _settled(entity, mentions)
                                else "naive_unresolved"),
+        "n_tensions": len(standing),
         "caveat": None if _settled(entity, mentions) else NAIVE_CAVEAT,
     }
 
@@ -807,7 +828,13 @@ def list_entities(store: Store, type_id: str | None = None,
         "       COUNT(m.instance_id) AS n_mentions, "
         "       COUNT(DISTINCT m.document_id) AS n_documents, "
         "       SUM(CASE WHEN m.status IN ('confirmed','amended') THEN 1 ELSE 0 END) "
-        "         AS n_confirmed "
+        "         AS n_confirmed, "
+        # Carried on the index so a contested page is visible before it is
+        # opened. A conflict findable only by clicking through is a conflict
+        # most people will not find.
+        "       (SELECT COUNT(*) FROM tensions t WHERE t.scope = 'entity' "
+        "        AND t.subject_id = e.entity_id "
+        "        AND t.status IN ('open','accepted')) AS n_tensions "
         "FROM entities e "
         "LEFT JOIN entity_mentions m ON m.entity_id = e.entity_id "
         "  AND m.unlinked_at IS NULL "

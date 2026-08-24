@@ -29,6 +29,7 @@ document.pdf
   → review        confirm / amend / reject, nothing overwritten
   → analyse       versioned rule concepts + optional narrative reading
   → escalate      opt-in comparison against the rest of the corpus
+  → export        the wiki as a portable markdown bundle
 ```
 
 Every fact carries `source` (`ai_local` / `ai_cloud` / `human`), a `confidence`
@@ -40,6 +41,15 @@ answers the question Phase 1 actually turns on: **is extraction good enough to
 build on yet?** `orpheus report` computes it — accuracy by confidence level,
 whether the rubric ranks reliability at all, which rule concepts over-fire, and
 which fields people keep fixing.
+
+`confirm / amend / reject` all resolve towards one answer, which is right for
+grading an extraction and wrong for a corpus, because a corpus is full of
+documents that disagree and are both correct. So there is a fourth verb.
+`orpheus tension` records a conflict two sources really are in — cited on both
+sides, and **accepted** is a place a reviewer can stop. `orpheus lint` hunts for
+the ones nobody recorded, along with the other ways the store can mislead a
+reader; it reports located rows, never general observations, and it will not
+give a clean bill of health it has not earned.
 
 ---
 
@@ -77,6 +87,7 @@ Start at **[docs/index.md](docs/index.md)**.
 | [Data model](docs/data-model.md) | Tables, the ontology bundle, the confidence rubric |
 | [Pipeline walkthrough](docs/pipeline-walkthrough.md) | The nine steps, with the function that runs each |
 | [Entities: the wiki](docs/entities.md) | Mentions vs entities, and why a page is a projection |
+| [Conflicts and lint](docs/conflicts-and-lint.md) | The fourth review verb, the adversarial pass, and the markdown export |
 | [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
 | [Extraction engines](docs/extraction-engines.md) | Four ways to run the model pass, and when each is right |
 | [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
@@ -105,11 +116,17 @@ shows a site missing rows. [Why](docs/deployment.md#the-wal-and-immutable-mode-t
 and update the row's status; rejected rows are excluded, never deleted. That is
 both the audit story and the only way to measure whether extraction is improving.
 
+**Disagreement is a finding, not a defect.** Two confirmed extractions that
+contradict each other are usually both right about the moment each document was
+written. Rendered in the same voice one under the other, they read as though
+they agree — so a verified conflict gets its own record, its own state, and the
+top of the page. [Why](docs/conflicts-and-lint.md).
+
 ---
 
 ## Status
 
-396 tests:
+464 tests:
 
 ```bash
 pip install -e '.[dev]'
@@ -119,8 +136,8 @@ python3 -m pytest
 They call the core directly, which cannot catch what only goes wrong with a real
 server in the middle. `tests/e2e/browser_loop.sh` drives the whole loop over
 HTTP against a live Datasette — multipart limits, CSRF, upload, extraction,
-grounding, confirm/amend/reject, rollback — and checks the store agrees with
-what the browser was told.
+grounding, confirm/amend/reject, rollback, the lint page and the markdown
+export — and checks the store agrees with what the browser was told.
 
 The core has no third-party dependencies. Every extraction engine, the PDF
 backends and OCR are optional installs, and the code says which one is missing

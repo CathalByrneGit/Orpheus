@@ -160,6 +160,52 @@ reading for how they present source-traceability.
 
 ---
 
+## Markdown as the agent-maintained knowledge format
+
+Four projects arrived independently at the same architecture: a directory of
+markdown, one concept per file, maintained by an agent, with no database and no
+proprietary platform.
+
+| Project | What it applies the pattern to |
+|---|---|
+| Karpathy's **LLM-wiki** | The pattern proposed as a pattern |
+| **MemPalace** | Personal memory, with retrieval benchmarks |
+| Google's **Open Knowledge Format** v0.1 (2026-06-12) | A published spec: bundles, YAML frontmatter, `type` as the only required field, `index.md`, `log.md` |
+| **DocIt** | Codebase documentation, with human notes flowing upward |
+
+The shared surface is one concept per file, directory structure as taxonomy,
+cross-linking via ordinary markdown links, an index for progressive disclosure,
+and the agent as the runtime for reads and writes. The format is both
+human-readable and machine-parseable with no tooling.
+
+Two findings from that group carry directly:
+
+**Store fully, structure the index.** MemPalace measured it: raw verbatim
+storage scores 96.6% R@5 on LongMemEval against 84.2% for their lossy
+compression dialect — a 12-point regression, because compression strips the
+context retrieval depends on. Orpheus keeps `provenance.excerpt` rather than a
+summary for the same reason, and this is the empirical case for a decision that
+was otherwise argued from principle alone.
+
+**Consensus docs are dangerous.** DocIt's `> **Tension**:` convention exists
+because an agent summarising a body of knowledge produces accurate,
+well-formatted, smoothed-over output, and the genuine conflicts disappear into
+it. Orpheus had no equivalent until [conflicts](conflicts-and-lint.md); its
+review vocabulary resolved only towards agreement.
+
+Orpheus does not store markdown — it stores rows, because per-document
+permissions, an append-only history and a confidence rubric enforced at the
+persistence boundary are not things a directory of files does well. But
+`orpheus export` projects the wiki out into this shape, which is what makes the
+knowledge reusable by something that is not Orpheus.
+
+Three things Orpheus has that none of the four do: provenance that locates every
+quotation in its source, a review state on every claim, and per-document
+permissions. Two things they have that Orpheus does not: no runtime at all, and
+a place for a person to write knowledge that has no source behind it.
+
+---
+
 ## What nothing else does
 
 Searched for specifically, not found:

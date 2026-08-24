@@ -238,6 +238,7 @@ def register_routes():
         (r"^/-/orpheus/upload$", upload),
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)$", document_page),
         (r"^/-/orpheus/review$", review),
+        (r"^/-/orpheus/lint$", lint_page),
         (r"^/-/orpheus/wiki$", wiki_index),
         (r"^/-/orpheus/wiki/queue$", wiki_queue),
         (r"^/-/orpheus/wiki/act$", wiki_act),
@@ -292,6 +293,12 @@ async def wiki_index(datasette, request):
     # empty, and two pages that are one thing sit there unremarked.
     _, dupes = await _call(datasette, request, "GET", "/entities/duplicates",
                            {"limit": "20"})
+    # Standing conflicts, corpus-wide. Counted from the tension rows rather
+    # than from the listing above, which is capped at 50 pages -- a conflict
+    # that falls off the end of a page of results has not gone away.
+    _, standing = await _call(datasette, request, "GET", "/tensions",
+                              {"standing": "1", "limit": "200"})
+    tensions = (standing or {}).get("tensions", [])
     entities = (listing or {}).get("entities", [])
     return await _render(datasette, request, "orpheus_wiki.html", {
         "entities": entities,
@@ -299,6 +306,8 @@ async def wiki_index(datasette, request):
         "queue_size": len((queue or {}).get("mentions", [])),
         "unreviewed": [e for e in entities if e["status"] == "unconfirmed"],
         "duplicates": (dupes or {}).get("pairs", []),
+        "contested": [e for e in entities if e.get("n_tensions")],
+        "unchecked_tensions": sum(1 for t in tensions if t["status"] == "open"),
         "table_url": datasette.urls.path(
             f"/{_config(datasette).get('database', DEFAULT_DATABASE)}/entities"),
         "error": request.args.get("error"),
@@ -337,6 +346,28 @@ async def entity_page(datasette, request):
     })
 
 
+async def lint_page(datasette, request):
+    """The adversarial pass, where a reviewer will actually see it.
+
+    Administrator-only in the core, so this renders whatever the API says
+    rather than deciding for itself -- a second permission rule here is a
+    second rule to keep in step with `auth.can()`.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    shallow = request.args.get("shallow") in ("1", "true", "on")
+    status, report = await _call(datasette, request, "GET", "/lint",
+                                 {"deep": "0" if shallow else "1"})
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus",
+                         error=report["error"]["message"])
+    return await _render(datasette, request, "orpheus_lint.html", {
+        "report": report,
+        "shallow": shallow,
+        "error": request.args.get("error"),
+    })
+
+
 async def wiki_queue(datasette, request):
     """Mentions with no page yet, each with the pages it might belong to.
 
@@ -372,6 +403,7 @@ async def wiki_act(datasette, request):
     action = form.get("action")
     entity_id = form.get("entity_id") or ""
     instance_id = form.get("instance_id") or ""
+    tension_id = form.get("tension_id") or ""
     note = form.get("note") or None
     back = form.get("back") or (f"/-/orpheus/wiki/{entity_id}" if entity_id
                                 else "/-/orpheus/wiki")
@@ -396,6 +428,22 @@ async def wiki_act(datasette, request):
         "create": ("POST", "/entities",
                    {"type_id": form.get("type_id"),
                     "canonical_name": form.get("canonical_name")}),
+        # Conflicts. `accept` is the one that matters: every other verb on this
+        # page makes a disagreement go away, and a reviewer who cannot say "yes,
+        # this is real" ends up picking a side to clear the queue.
+        "find_conflicts": ("POST", "/tensions/propose", {"entity_id": entity_id}),
+        "accept_tension": ("POST", f"/tensions/{tension_id}/accept",
+                           {"note": note}),
+        "resolve_tension": ("POST", f"/tensions/{tension_id}/resolve",
+                            {"resolution": note}),
+        "withdraw_tension": ("POST", f"/tensions/{tension_id}/withdraw",
+                             {"reason": note}),
+        "raise_tension": ("POST", "/tensions",
+                          {"kind": form.get("kind") or "unexplained",
+                           "summary": form.get("summary"),
+                           "scope": "entity", "subject_id": entity_id,
+                           "property_id": form.get("property_id") or None,
+                           "sides": form.get("sides") or ""}),
     }
     if action not in routes:
         return _redirect(datasette, back, error=f"Unknown action {action!r}.")

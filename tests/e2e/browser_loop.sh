@@ -242,6 +242,49 @@ fi
 "${CURL[@]}" "$BASE/-/orpheus/wiki/queue" > "$WORK/queue.html"
 grep -q "Mentions with no page" "$WORK/queue.html" || fail "the queue did not render"
 
+say "the lint page: located problems, and no all-clear it has not earned"
+"${CURL[@]}" "$BASE/-/orpheus/lint" > "$WORK/lint.html"
+grep -q "Where this store misleads a reader" "$WORK/lint.html" \
+  || fail "the lint page did not render"
+# The deterministic pass leaves an unclassified document and unreviewed
+# findings, so this store has things to say. What it must never say is that
+# everything is fine on the strength of a handful of reviews.
+grep -q "how little has been checked\|located problem" "$WORK/lint.html" \
+  || fail "the lint headline neither reported findings nor stated its limit"
+
+say "the export: a markdown bundle nothing has to read the store to use"
+python3 - "$WORK" <<'EXPORTPY'
+import pathlib, re, sys
+from orpheus.export_md import export
+from orpheus.store import Store
+
+work = sys.argv[1]
+store = Store(f"{work}/orpheus.sqlite", mode="read")
+result = export(store, f"{work}/bundle")
+store.close()
+
+root = pathlib.Path(work) / "bundle"
+assert (root / "index.md").exists() and (root / "log.md").exists()
+index = (root / "index.md").read_text()
+# The bundle names the domain it describes, not the tool that wrote it.
+assert 'title: "Core contract ontology"' in index, index[:400]
+assert "immutable" in index
+
+# Every relative link between files resolves. A bundle whose cross-references
+# are broken is a directory of orphans, however well each page reads.
+for path in root.rglob("*.md"):
+    for target in re.findall(r"\]\(([^)]+\.md)\)", path.read_text()):
+        assert (path.parent / target).resolve().exists(), f"{path} -> {target}"
+
+# The uploaded PDF is exported as a source document, and says out loud that
+# nothing was linked from it -- a gap, rather than a silent omission.
+sources = list((root / "documents").glob("*.md"))
+assert sources, "no source document was written"
+assert any('type: "source"' in p.read_text() for p in sources)
+print(f"   {result['n_files']} file(s): {result['n_entities']} page(s), "
+      f"{result['n_documents']} source(s)")
+EXPORTPY
+
 say "the loop ran clean, and the server never fell over"
 if grep -q "Traceback" "$WORK/server.log"; then
   echo "--- server log ---"; cat "$WORK/server.log"

@@ -227,6 +227,61 @@ matters: `monotonic` means the rubric ranks reliability, and any `inversions`
 name a level the machine was more sure about that turned out less often right
 than one below it. Every rate covers reviewed rows only — see [Provenance and amendment](provenance-and-amendment.md#measuring-extraction-quality).
 
+### Conflicts
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| `GET` | `/tensions` | actor | `?scope=`, `?subject_id=`, `?status=`, `?kind=`, `?standing=1` |
+| `POST` | `/tensions` | actor | `kind`, `summary`, `sides` (2+), `subject_id` |
+| `GET` | `/tensions/conflicts` | actor | Properties whose reviewed mentions disagree. Reads only |
+| `POST` | `/tensions/propose` | actor | Raise the ones not already recorded, at `open` |
+| `GET` | `/tensions/<id>` | actor | The tension and its cited sides |
+| `POST` | `/tensions/<id>/accept` | actor | The conflict is real and it stands |
+| `POST` | `/tensions/<id>/resolve` | actor | `resolution` **required** |
+| `POST` | `/tensions/<id>/withdraw` | actor | `reason` **required** |
+| `GET` | `/documents/<id>/tensions` | view | Every tension this document is a side of |
+
+`sides` is two or more instance ids, or objects of `{"instance_id", "position"}`.
+Fewer than two distinct existing instances is a 400: one claim on its own is an
+assertion, and if it is wrong the verb is `reject`.
+
+`accept` is the one worth knowing about. Every other review verb in the API
+makes a disagreement go away, and a reviewer with no way to say *this conflict
+is real* has only two exits — pick a side, or leave it looking unreviewed. An
+accepted tension is finished review work, and the wiki renders it as an
+assertion. `resolve` requires a reason for one: a settled conflict with no
+account of the reasoning looks decided and cannot be checked.
+
+A settled tension is never reopened. Raise a new one instead, so what was
+decided then stays readable. See [Conflicts and lint](conflicts-and-lint.md).
+
+### Lint and export
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| `GET` | `/lint` | **administrator** | `?deep=0` for the cheap checks, `?checks=a,b` |
+| `POST` | `/export` | **administrator** | `out` (server path), `?confirmed_only=1` |
+
+Both span the whole corpus, including documents the caller may not be able to
+read. `/export` writes every page in the store to a directory the caller names,
+which is a sharper reason again.
+
+```json
+{ "headline": "1 located problem(s) across 9 check(s): 1 high. Most-serious first.",
+  "checks_run": ["uncited_page", "ungrounded_quotation", "smoothed_conflict"],
+  "counts": { "high": 1, "medium": 0, "low": 0 },
+  "findings": [ { "check": "smoothed_conflict", "severity": "high",
+                  "where": { "entity_id": "ent_…", "name": "Ardmore Digital Ltd",
+                             "property_id": "address" },
+                  "finding": "… has 2 confirmed values for address and no recorded conflict",
+                  "suggestion": "Raise a tension. …" } ] }
+```
+
+Every finding carries a `where` naming a row, because a report of general
+observations is one nobody acts on. When nothing is found the headline says how
+much has been reviewed rather than reporting an all-clear — over a handful of
+reviews, "nothing found" says more about how little was checked.
+
 ### Administration
 
 | Method | Path | Permission | Body |

@@ -423,6 +423,66 @@ MIGRATIONS: list[dict] = [
             "ON entity_mentions (document_id)",
         ],
     },
+    {
+        "version": 7,
+        "name": "tensions",
+        "statements": [
+            # Every review verb in the store so far resolves *towards*
+            # agreement: confirm, amend, reject. That is the right shape for
+            # "was the machine right", and the wrong shape for "these two
+            # documents disagree and both are correct". Without somewhere to
+            # put the second, an entity page renders two confirmed mentions
+            # that contradict each other side by side, in the same voice, and
+            # reads as though they agree. The disagreement is usually the part
+            # worth knowing.
+            #
+            # A tension is not uncertainty -- `confidence` is already the
+            # uncertainty axis, five levels of it. A tension is a conflict
+            # somebody *verified*. So `accepted` is a perfectly good place for
+            # one to stay: it means a person looked, and the conflict is real.
+            """
+            CREATE TABLE IF NOT EXISTS tensions (
+                tension_id   TEXT PRIMARY KEY,
+                scope        TEXT NOT NULL,
+                subject_id   TEXT,
+                kind         TEXT NOT NULL,
+                property_id  TEXT,
+                summary      TEXT NOT NULL,
+                detail       TEXT,
+                status       TEXT NOT NULL DEFAULT 'open',
+                resolution   TEXT,
+                source       TEXT NOT NULL,
+                confidence   REAL NOT NULL,
+                raised_by    TEXT REFERENCES actors(actor_id),
+                raised_at    TEXT NOT NULL,
+                settled_by   TEXT REFERENCES actors(actor_id),
+                settled_at   TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_tensions_subject "
+            "ON tensions (scope, subject_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tensions_status ON tensions (status)",
+
+            # The sides of the argument, each an instance that carries
+            # provenance. Two of them at minimum, enforced in `tensions.py`.
+            #
+            # This is the same rule as the entity page: a claim with no mention
+            # behind it cannot be written. Without it a tension is an opinion,
+            # and a store full of unfalsifiable opinions is exactly what the
+            # provenance model exists to prevent.
+            """
+            CREATE TABLE IF NOT EXISTS tension_sides (
+                tension_id  TEXT NOT NULL REFERENCES tensions(tension_id),
+                instance_id TEXT NOT NULL,
+                document_id TEXT REFERENCES documents(document_id),
+                position    TEXT,
+                PRIMARY KEY (tension_id, instance_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_tension_sides_instance "
+            "ON tension_sides (instance_id)",
+        ],
+    },
 ]
 
 

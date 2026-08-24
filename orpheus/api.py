@@ -25,7 +25,10 @@ from typing import Any, Callable
 from . import analysis, auth, bundle as bundle_mod, classify, concepts
 from . import entities as entities_mod
 from . import engines, extract as extract_mod, ingest as ingest_mod
-from . import llm, quality, review, rubric, textract
+from . import export_md
+from . import lint as lint_mod
+from . import llm, quality, review, rubric, tensions as tensions_mod
+from . import textract
 from .store import Store
 from .utils import NotFound, OrpheusError, PermissionDenied
 
@@ -470,6 +473,99 @@ def get_document_entities(store, document_id, **_):
 
 
 # ---------------------------------------------------------------------------
+# Tensions: conflicts that survive review
+# ---------------------------------------------------------------------------
+#
+# Registered before nothing and after the entity routes on purpose: the paths
+# here are all `/tensions...`, which no earlier pattern can swallow. The entity
+# routes learned that lesson the hard way -- `/entities/duplicates` registered
+# after `/entities/<id>` is a page called "duplicates".
+
+@route("GET", "/tensions")
+def get_tensions(store, body, **_):
+    return {"tensions": tensions_mod.list_tensions(
+        store, scope=body.get("scope"), subject_id=body.get("subject_id"),
+        status=body.get("status"), kind=body.get("kind"),
+        open_only=body.get("standing") in ("1", "true", "True", True),
+        limit=int(body.get("limit", 200)))}
+
+
+@route("POST", "/tensions")
+def post_tension(store, actor, body, **_):
+    """Record a conflict. Needs at least two cited sides, and says why if not."""
+    if not body.get("kind") or not body.get("summary"):
+        raise ApiError(400, "Give `kind` and `summary`.")
+    sides = body.get("sides") or []
+    if isinstance(sides, str):
+        sides = [s.strip() for s in sides.split(",") if s.strip()]
+    tension_id = tensions_mod.raise_tension(
+        store, kind=body["kind"], summary=body["summary"], sides=sides,
+        actor_id=_actor_id(actor), scope=body.get("scope", "entity"),
+        subject_id=body.get("subject_id"), property_id=body.get("property_id"),
+        detail=body.get("detail"))
+    return {"tension_id": tension_id}
+
+
+@route("GET", "/tensions/conflicts")
+def get_conflicts(store, body, **_):
+    """Properties whose reviewed mentions disagree, whether or not recorded.
+
+    Reads only. Turning these into rows is `POST /tensions/propose`, because
+    the machine can see that two values differ and cannot see whether the
+    difference matters.
+    """
+    return {"conflicts": tensions_mod.detect_conflicts(
+        store, entity_id=body.get("entity_id"), type_id=body.get("type_id"),
+        reviewed_only=body.get("reviewed_only", "1") not in
+        ("0", "false", "False", False))}
+
+
+@route("POST", "/tensions/propose")
+def post_tensions_propose(store, actor, body, **_):
+    return tensions_mod.propose_tensions(
+        store, actor_id=_actor_id(actor), entity_id=body.get("entity_id"),
+        type_id=body.get("type_id"),
+        reviewed_only=body.get("reviewed_only", "1") not in
+        ("0", "false", "False", False))
+
+
+@route("GET", r"/tensions/(?P<tension_id>tns_[^/]+)")
+def get_tension(store, tension_id, **_):
+    return tensions_mod.get_tension(store, tension_id)
+
+
+@route("POST", r"/tensions/(?P<tension_id>tns_[^/]+)/accept")
+def post_tension_accept(store, tension_id, actor, body, **_):
+    """The conflict is real and it stands. A finished piece of review work."""
+    return tensions_mod.accept_tension(
+        store, tension_id, _actor_id(actor), note=body.get("note"))
+
+
+@route("POST", r"/tensions/(?P<tension_id>tns_[^/]+)/resolve")
+def post_tension_resolve(store, tension_id, actor, body, **_):
+    if not body.get("resolution"):
+        raise ApiError(400, "Give `resolution` -- a resolved tension with no "
+                            "account of the reasoning looks decided and cannot "
+                            "be checked.")
+    return tensions_mod.resolve_tension(
+        store, tension_id, _actor_id(actor), body["resolution"])
+
+
+@route("POST", r"/tensions/(?P<tension_id>tns_[^/]+)/withdraw")
+def post_tension_withdraw(store, tension_id, actor, body, **_):
+    if not body.get("reason"):
+        raise ApiError(400, "Give `reason`.")
+    return tensions_mod.withdraw_tension(
+        store, tension_id, _actor_id(actor), body["reason"])
+
+
+@route("GET", r"/documents/(?P<document_id>[^/]+)/tensions", permission="view")
+def get_document_tensions(store, document_id, **_):
+    """Every tension this document is a side of, however it is scoped."""
+    return {"tensions": tensions_mod.tensions_for_document(store, document_id)}
+
+
+# ---------------------------------------------------------------------------
 # Quality and administration
 # ---------------------------------------------------------------------------
 
@@ -489,6 +585,44 @@ def get_quality(store, actor, body, **_):
             "GET /documents/<id>/quality is scoped to one document.")
     return quality.quality_report(store,
                                   min_reviewed=int(body.get("min_reviewed", 5)))
+
+
+@route("POST", "/export")
+def post_export(store, actor, body, **_):
+    """Write the markdown bundle to a directory on the server.
+
+    Administrator only, and for a sharper reason than `/quality`: this writes
+    every page in the store to a path the caller names. Scoping it per document
+    would not help -- a bundle is a corpus-wide artefact by definition.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "An export writes every page in the store to disk, so it is an "
+            "administrator action.")
+    if not body.get("out"):
+        raise ApiError(400, "Give `out` -- the directory to write into.")
+    return export_md.export(
+        store, body["out"], type_id=body.get("type_id"),
+        confirmed_only=body.get("confirmed_only") in ("1", "true", "True", True))
+
+
+@route("GET", "/lint")
+def get_lint(store, actor, body, **_):
+    """The adversarial pass. Administrator only, same reason as `/quality`.
+
+    Not a health check: it reports located problems and, when it finds none,
+    says why that proves less than it looks like it proves.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "The lint spans documents you may not be able to read, so it is an "
+            "administrator view.")
+    checks = body.get("checks")
+    if isinstance(checks, str):
+        checks = [c.strip() for c in checks.split(",") if c.strip()]
+    return lint_mod.lint(
+        store, deep=body.get("deep", "1") not in ("0", "false", "False", False),
+        document_id=body.get("document_id"), checks=checks or None)
 
 
 @route("GET", "/grounding")

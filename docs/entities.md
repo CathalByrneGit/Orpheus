@@ -207,6 +207,27 @@ Over the API, on the same dispatch table as everything else:
 | `GET` | `/mentions/unlinked` | The work queue |
 | `GET` | `/mentions/<iid>/candidates` | Which pages this could belong to |
 | `GET` | `/documents/<id>/entities` | The reverse view |
+| `GET` | `/tensions/conflicts` · `POST /tensions/propose` | Where the page's sources disagree |
+
+---
+
+## When the sources disagree
+
+A page never picks a winner. A property comes back as the set of values seen,
+each with the mentions asserting it and how many a person has confirmed —
+because choosing here would bury the judgement, and often both values were true
+of the moment each document was written.
+
+That is right, and on its own it is not enough. Two confirmed values rendered
+one under the other in the same voice read as though they agree, and the reader
+who needed to know they conflict is the one who will not notice. So a verified
+conflict gets its own record: `entity_page()` returns `tensions` and
+`contested_properties`, each mention carries the tensions it is a side of, and
+the wiki renders them above the facts they are about rather than below.
+
+`accepted` is a terminal state — *checked, and it stands* — which is what lets a
+reviewer finish with the disagreement intact instead of picking a side to clear
+the queue. See [Conflicts and lint](conflicts-and-lint.md).
 
 ---
 
@@ -227,4 +248,4 @@ mention there to link.
 
 ---
 
-[← Back to index](index.md) | [Next: Provenance and amendment →](provenance-and-amendment.md)
+[← Back to index](index.md) | [Next: Conflicts and lint →](conflicts-and-lint.md)

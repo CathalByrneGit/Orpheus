@@ -3,6 +3,10 @@
 {% block content %}
 <h1>Documents</h1>
 
+<p><a href="{{ urls.path('/-/orpheus/wiki') }}">Wiki</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/lint') }}">Lint</a>
+   <span style="color:#666">&mdash; where the store misleads a reader</span></p>
+
 {% if error %}<p class="message-error">{{ error }}</p>{% endif %}
 
 {% if capabilities %}

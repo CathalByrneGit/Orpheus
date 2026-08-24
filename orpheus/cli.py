@@ -374,6 +374,156 @@ def cmd_wiki(args) -> int:
     raise OrpheusError(f"Unknown action {args.action!r}.")
 
 
+def cmd_export(args) -> int:
+    """Write the wiki out as a portable markdown bundle."""
+    from . import export_md
+
+    store = open_store(args, mode="read")
+    try:
+        result = export_md.export(store, args.out, type_id=args.type_id,
+                                  confirmed_only=args.confirmed_only,
+                                  limit=args.limit)
+    finally:
+        store.close()
+
+    if args.json:
+        emit(result, True)
+        return 0
+    print(f"{result['n_files']} file(s) written to {result['root']} "
+          f"({result['format']}): {result['n_entities']} page(s), "
+          f"{result['n_documents']} source(s).")
+    for entry in result["skipped"]:
+        # Refused rather than silently dropped: a bundle of uncited assertions
+        # is what this format exists to prevent, and so is a quiet omission.
+        print(f"  not written: {entry['name']} -- {entry['reason']}")
+    return 0
+
+
+def cmd_lint(args) -> int:
+    """Look for where the store is misleading a reader, and say where."""
+    from . import lint as lint_mod
+
+    store = open_store(args, mode="read")
+    try:
+        report = lint_mod.lint(store, deep=not args.shallow,
+                               document_id=args.document_id,
+                               checks=args.check or None)
+    finally:
+        store.close()
+
+    if args.json:
+        emit(report, True)
+        return 0
+
+    print(report["headline"])
+    print()
+    for found in report["findings"]:
+        where = found["where"]
+        # The located part. A finding a person cannot open is one nobody acts on.
+        anchor = (where.get("entity_id") or where.get("instance_id")
+                  or where.get("document_id") or where.get("tension_id") or "")
+        print(f"  [{found['severity']:>6}] {found['check']}")
+        print(f"           {found['finding']}")
+        print(f"           {anchor}"
+              + (f"  {where['name']}" if where.get("name") else "")
+              + (f"  {where['filename']}" if where.get("filename") else ""))
+        print(f"           -> {found['suggestion']}")
+        print()
+    # Non-zero on a high finding, so this can gate a corpus run in a script.
+    return 1 if report["counts"]["high"] else 0
+
+
+def cmd_tension(args) -> int:
+    """Conflicts that survive review: find them, sign them, settle them."""
+    from . import tensions as tensions_mod
+
+    if args.action == "find":
+        store = open_store(args, mode="read")
+        try:
+            conflicts = tensions_mod.detect_conflicts(
+                store, entity_id=args.subject, type_id=args.type_id,
+                reviewed_only=not args.include_unreviewed)
+        finally:
+            store.close()
+        if args.json:
+            emit({"conflicts": conflicts}, True)
+            return 0
+        if not conflicts:
+            print("  No property has two different reviewed values. That is a "
+                  "real answer only if enough has been reviewed to argue about.")
+            return 0
+        for conflict in conflicts:
+            mark = "recorded" if conflict["existing_tension_id"] else "NEW"
+            print(f"  [{mark:>8}] {conflict['subject_name'][:32]:34} "
+                  f"{conflict['property_id']:<18} "
+                  f"{conflict['n_values']} values")
+        return 0
+
+    if args.action == "propose":
+        store = open_store(args)
+        try:
+            result = tensions_mod.propose_tensions(
+                store, actor_id=args.actor_id, entity_id=args.subject,
+                type_id=args.type_id, reviewed_only=not args.include_unreviewed)
+        finally:
+            store.close()
+        if args.json:
+            emit(result, True)
+            return 0
+        print(f"{result['n_raised']} raised, {result['already_recorded']} already "
+              f"recorded, of {result['n_conflicts']} conflict(s) found.")
+        return 0
+
+    if args.action == "list":
+        store = open_store(args, mode="read")
+        try:
+            rows = tensions_mod.list_tensions(
+                store, subject_id=args.subject, status=args.status,
+                kind=args.kind, open_only=args.standing, limit=args.limit)
+        finally:
+            store.close()
+        if args.json:
+            emit({"tensions": rows}, True)
+            return 0
+        for row in rows:
+            print(f"  {row['tension_id']}  {row['status']:<10} "
+                  f"{row['kind']:<20} {row['summary'][:60]}")
+            for side in row["sides"]:
+                excerpt = " ".join((side.get("excerpt") or "").split())[:40]
+                print(f"      {side.get('filename', '?')[:20]:22} "
+                      f"p{side.get('page_no') or '?':<3} "
+                      f"{(side.get('position') or '')[:24]:26} {excerpt!r}")
+        return 0
+
+    verbs = {"accept": tensions_mod.accept_tension,
+             "resolve": tensions_mod.resolve_tension,
+             "withdraw": tensions_mod.withdraw_tension}
+    if args.action in verbs:
+        if not args.subject:
+            raise OrpheusError(f"Give a tension id to {args.action}.")
+        if args.action != "accept" and not args.note:
+            raise OrpheusError(
+                f"--note is required to {args.action}: a conflict settled with "
+                "no account of the reasoning looks decided and cannot be checked.")
+        store = open_store(args)
+        try:
+            if args.action == "accept":
+                result = verbs["accept"](store, args.subject, args.actor_id,
+                                         note=args.note)
+            else:
+                result = verbs[args.action](store, args.subject, args.actor_id,
+                                            args.note)
+        finally:
+            store.close()
+        if args.json:
+            emit(result, True)
+            return 0
+        print(f"{result['tension_id']} is now {result['status']}.")
+        return 0
+
+    raise OrpheusError(f"Unknown action {args.action!r}.")
+
+
 def _print_page(page: dict) -> None:
     entity = page["entity"]
     print(f"{entity['canonical_name']}  [{entity['type_id']}] "
@@ -632,6 +782,36 @@ def build_parser() -> argparse.ArgumentParser:
     wiki.add_argument("--confirmed-only", action="store_true",
                       help="show only what a person has confirmed")
     wiki.add_argument("--limit", type=int, default=100)
+
+    exporter = add("export", cmd_export, "write the wiki out as markdown")
+    exporter.add_argument("out", help="directory to write the bundle into")
+    exporter.add_argument("--type-id")
+    exporter.add_argument("--confirmed-only", action="store_true",
+                          help="leave out anything a person has not checked")
+    exporter.add_argument("--limit", type=int, default=1000)
+
+    linter = add("lint", cmd_lint, "look for where the store misleads a reader")
+    linter.add_argument("--document-id")
+    linter.add_argument("--shallow", action="store_true",
+                        help="skip the checks that compare every mention")
+    linter.add_argument("--check", action="append",
+                        help="run only this check (repeatable)")
+
+    tension = add("tension", cmd_tension, "conflicts that survive review")
+    tension.add_argument("action", choices=("find", "propose", "list", "accept",
+                                            "resolve", "withdraw"))
+    tension.add_argument("subject", nargs="?",
+                         help="entity id for find/propose, tension id to settle")
+    tension.add_argument("--type-id")
+    tension.add_argument("--status")
+    tension.add_argument("--kind")
+    tension.add_argument("--actor-id")
+    tension.add_argument("--note", help="why. Required to resolve or withdraw.")
+    tension.add_argument("--standing", action="store_true",
+                         help="only conflicts still live on a page")
+    tension.add_argument("--include-unreviewed", action="store_true",
+                         help="argue over unconfirmed extractions too")
+    tension.add_argument("--limit", type=int, default=200)
 
     searcher = add("search", cmd_search, "search the corpus")
     searcher.add_argument("query", nargs="?")

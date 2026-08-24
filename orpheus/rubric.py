@@ -24,6 +24,37 @@ STATUSES = ("unconfirmed", "confirmed", "amended", "rejected")
 REVIEWED_STATUSES = ("confirmed", "amended", "rejected")
 EXCLUDED_STATUSES = ("rejected",)
 
+# The other axis. `confidence` says how sure the machine is; `STATUSES` says
+# whether a person has checked. Neither can express "two people checked, they
+# disagree, and both are right" -- every value in both vocabularies resolves
+# toward a single answer. TENSION_STATUSES is that missing axis.
+#
+# `accepted` is a terminal state on purpose. Most review vocabularies have no
+# way to stop at "this conflict is real", so a reviewer's only exits are to
+# pick a side or leave it looking unreviewed; both bury the finding.
+TENSION_STATUSES = ("open", "accepted", "resolved", "withdrawn")
+SETTLED_TENSIONS = ("resolved", "withdrawn")
+
+# Where a tension came from. `SOURCES` plus `lint`, which is neither a model nor
+# a person: the detector compares values that are already in the store and
+# invents nothing, so calling it `ai_local` would overstate what it did.
+TENSION_SOURCES = SOURCES + ("lint",)
+
+# What kind of conflict. Deliberately about the *shape* of the disagreement
+# rather than about contracts, so a bundle from another domain describes its
+# own conflicts in the same four words.
+TENSION_KINDS = (
+    # Two sources give different values for the same property of one thing.
+    "conflicting_value",
+    # Both sources claim to govern the same question.
+    "competing_authority",
+    # One source can be read two ways and the readings differ materially.
+    "ambiguous_wording",
+    # Something is verifiably so and nothing explains why. The residual, and
+    # the honest place for "this surprised me and I could not resolve it".
+    "unexplained",
+)
+
 ACTIONS = ("view", "edit", "share", "delete")
 SHARE_ROLES = ("viewer", "editor")
 # Matches datasette-paper's three levels, which is not a coincidence: the same

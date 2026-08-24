@@ -16,6 +16,13 @@ Entity resolution, the cross-document relationship graph, conflict-of-interest
 views and the live reading-companion UI are deliberately out of scope — see
 [Open decisions](open-decisions.md) for what is deferred and why.
 
+One thing Phase 1 does carry beyond extraction quality, because leaving it out
+would have made the wiki misleading rather than merely incomplete: **a verified
+disagreement between two documents has somewhere to live.** Every other review
+verb resolves towards a single answer, so without it two confirmed and
+contradictory facts render in the same voice and read as agreement. See
+[Conflicts and lint](conflicts-and-lint.md).
+
 ---
 
 ## Contents
@@ -25,6 +32,7 @@ views and the live reading-companion UI are deliberately out of scope — see
 | [Data model](data-model.md) | Every table in the store, the ontology bundle, and the confidence rubric |
 | [Pipeline walkthrough](pipeline-walkthrough.md) | Steps 1–9, in execution order, with the function that runs each |
 | [Entities: the wiki](entities.md) | Mentions vs entities, and why a page is a projection rather than a document |
+| [Conflicts and lint](conflicts-and-lint.md) | The fourth review verb, the adversarial pass, and the markdown export |
 | [Provenance and amendment](provenance-and-amendment.md) | The hardest part: how a machine guess becomes a checked fact, and how extraction quality gets measured |
 | [API reference](api-reference.md) | Every route, its permissions, and its response shape |
 | [Deployment](deployment.md) | Running it, and the WAL trap that catches people |

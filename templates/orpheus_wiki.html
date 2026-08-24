@@ -34,8 +34,30 @@
       <td>{{ duplicates|length }}</td>
       <td><span style="color:#888">close names the exact grouping split apart</span></td>
     </tr>
+    {# Not a queue item to be cleared. Listed here because a conflict nobody
+       has looked at is work, and a conflict somebody signed is a finding. #}
+    <tr>
+      <th style="text-align:left">Documents that disagree</th>
+      <td>{{ contested|length }}</td>
+      <td><span style="color:#888">{{ unchecked_tensions }} not yet checked</span></td>
+    </tr>
   </tbody>
 </table>
+
+{% if contested %}
+<h3>Pages where the documents disagree</h3>
+<p style="color:#666">Two sources saying different things about one page. Often
+both were right when they were written &mdash; a company that moved, a fee that
+changed &mdash; which is why these are shown rather than resolved.</p>
+<ul>
+  {% for e in contested %}
+  <li>
+    <a href="{{ urls.path('/-/orpheus/wiki/' + e.entity_id) }}">{{ e.canonical_name }}</a>
+    <span style="color:#666">&middot; {{ e.n_tensions }} conflict(s)</span>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
 
 {% if duplicates %}
 <h3>Possible duplicates</h3>
@@ -78,7 +100,7 @@ mention has a home. These are candidates only.</p>
 
 {% if entities %}
 <table class="rows-and-columns">
-  <thead><tr><th>Page</th><th>Type</th><th>Status</th><th>Documents</th><th>Confirmed</th></tr></thead>
+  <thead><tr><th>Page</th><th>Type</th><th>Status</th><th>Documents</th><th>Confirmed</th><th>Conflicts</th></tr></thead>
   <tbody>
   {% for e in entities %}
     <tr>
@@ -87,6 +109,8 @@ mention has a home. These are candidates only.</p>
       <td>{{ e.status }}</td>
       <td>{{ e.n_documents }}</td>
       <td>{{ e.n_confirmed or 0 }} / {{ e.n_mentions }}</td>
+      <td>{% if e.n_tensions %}<span style="color:#b45309">{{ e.n_tensions }}</span>
+          {%- else %}<span style="color:#bbb">&mdash;</span>{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

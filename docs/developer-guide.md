@@ -45,7 +45,7 @@ deliberate — the engine choice is a setting, not an architecture. See
 python3 -m pytest
 ```
 
-396 tests, no skips with the `dev` extra installed.
+464 tests, no skips with the `dev` extra installed.
 
 ### How the tests are built
 
@@ -183,6 +183,26 @@ Dropping a column that still holds values is refused. Nothing else in this store
 deletes anything — rejected rows are kept because they are evidence — so a
 silent destructive default here would be out of character. `--force` says you
 mean it, and the audit records how much went.
+
+### Auditing the store, and getting the knowledge out
+
+```bash
+orpheus --db data/orpheus.sqlite lint                     # located problems
+orpheus --db data/orpheus.sqlite lint --shallow           # skip the O(n²) checks
+orpheus --db data/orpheus.sqlite tension find             # what disagrees
+orpheus --db data/orpheus.sqlite tension propose --actor-id act_...
+orpheus --db data/orpheus.sqlite export ./bundle          # markdown, portable
+```
+
+`lint` exits **non-zero on a `high` finding**, so it can gate a corpus run in a
+script. It is not a health check: read the headline before treating "nothing
+found" as an all-clear, because over a handful of reviews it means the checks
+had nothing to compare rather than that the store is sound.
+
+`export` writes an OKF/DocIt-shaped markdown bundle — one file per entity, one
+per source document, an index and a log. A page with no mention behind it is
+listed as not exported rather than written, which is the store's own invariant
+enforced at the boundary. See [Conflicts and lint](conflicts-and-lint.md).
 
 ### Searching the corpus
 

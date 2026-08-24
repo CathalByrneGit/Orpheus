@@ -313,6 +313,35 @@ writer on a second database. See
 Tokens (`orpheus token`) stay regardless: they are the script path, and no
 browser-session plugin covers it.
 
+### Knowledge with no source behind it
+
+**Deliberately not resolved. Recorded here rather than smoothed over.**
+
+The invariant that makes an entity page worth reusing is that a claim with no
+mention behind it cannot be written. It is also why there is nowhere to put
+"this clause is unusual because the 2023 framework changed" — domain knowledge
+with no excerpt anywhere in the corpus, which is often the most valuable thing a
+person knows about a document.
+
+[DocIt](prior-art.md#markdown-as-the-agent-maintained-knowledge-format) resolves
+this differently: a `notes/` directory the agent never writes to, and a
+`## Human Context` section on every page it never overwrites. It works because
+DocIt's pages are not answerable to anything the way Orpheus's are.
+
+`entities.description` is the nearest thing here — a person's own words, kept
+visually apart in the UI and marked `> **Context**:` in the export. But it still
+carries a `source`, a `confidence` and a review `status`, because everything in
+this store does. It is a claim in the same shape as a machine's, not a separate
+tier.
+
+**What would settle it:** whether a public servant's own knowledge should be
+reviewable in the same vocabulary as an extraction, or is a different kind of
+thing that the store should hold without grading. That is a question about how
+the work actually happens, and it cannot be answered from here.
+
+The honest position is that this is a tension in Orpheus's own design, and the
+module that exists to record those would have it as `unexplained`.
+
 ### Permission boundaries
 
 **Mechanism settled, rules deliberately not.**

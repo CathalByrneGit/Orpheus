@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Lint{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus') }}">&larr; Orpheus</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/wiki') }}">Wiki</a></p>
+
+<h1>Where this store misleads a reader</h1>
+
+<p style="color:#666">
+  Not a health check. The quality report asks whether the confidence rubric ranks
+  reliability; this asks where the store is asserting something it should not.
+  Every finding names a row you can open &mdash; a report of general observations
+  is one nobody acts on.
+</p>
+
+<p class="{% if report.counts.high %}message-error{% else %}message-info{% endif %}">
+  {{ report.headline }}
+</p>
+
+<form method="get" style="margin-bottom:1.5em">
+  <label><input type="checkbox" name="shallow" value="1"
+    {% if shallow %}checked{% endif %}> skip the checks that compare every mention</label>
+  <button type="submit">Run again</button>
+  <span style="color:#666">&nbsp;ran: {{ report.checks_run|join(', ') }}</span>
+</form>
+
+{% for found in report.findings %}
+<div style="border-left:3px solid
+  {%- if found.severity == 'high' %}#b91c1c
+  {%- elif found.severity == 'medium' %}#b45309
+  {%- else %}#999{% endif %};padding:.75em 1em;margin-bottom:.75em;background:#fafafa">
+  <p style="margin:0">
+    <span style="color:#666">{{ found.severity }}</span>
+    &middot; <code>{{ found.check }}</code>
+  </p>
+  <p style="margin:.35em 0"><strong>{{ found.finding }}</strong></p>
+  <p style="margin:.35em 0">
+    {# The located part. Each of these is a link to the thing itself. #}
+    {% if found.where.entity_id %}
+      <a href="{{ urls.path('/-/orpheus/wiki/' + found.where.entity_id) }}">{{ found.where.name or found.where.entity_id }}</a>
+    {% endif %}
+    {% if found.where.other_entity_id %}
+      &harr; <a href="{{ urls.path('/-/orpheus/wiki/' + found.where.other_entity_id) }}">the other page</a>
+    {% endif %}
+    {% if found.where.document_id %}
+      <a href="{{ urls.path('/-/orpheus/document/' + found.where.document_id) }}">{{ found.where.filename or found.where.document_id }}</a>
+    {% endif %}
+    {% if found.where.property_id %}
+      <span style="color:#666">&middot; {{ found.where.property_id }}</span>
+    {% endif %}
+    {% if found.where.instance_id %}
+      <span style="color:#666">&middot; {{ found.where.instance_id }}</span>
+    {% endif %}
+  </p>
+  <p style="margin:.35em 0 0;color:#666">{{ found.suggestion }}</p>
+</div>
+{% endfor %}
+
+{% if not report.findings %}
+<p style="color:#666">Nothing located. Read the line above before treating that
+as an all-clear &mdash; these checks find contradictions, uncited claims and
+gaps, and none of them can find a claim that is wrong in a way every source
+agrees on.</p>
+{% endif %}
+{% endblock %}

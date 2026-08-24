@@ -33,6 +33,55 @@
   <p><button type="submit">Save notes</button></p>
 </form>
 
+{# Conflicts go above the facts, not below them and not behind a disclosure.
+   A page that lists two contradictory values in the same voice reads as though
+   they agree, and the reader who needed to know they disagree is exactly the
+   reader who will not scroll for it. #}
+{% if page.tensions %}
+<h2>Where the documents disagree</h2>
+{% for t in page.tensions %}
+<div style="border-left:3px solid #b45309;background:#fffbeb;padding:1em;margin-bottom:.75em">
+  <p style="margin-top:0">
+    <strong>{{ t.summary }}</strong><br>
+    <span style="color:#666">{{ t.kind|replace('_', ' ') }}
+      &middot; {% if t.status == 'accepted' %}checked, and it stands{% else %}not yet checked{% endif %}
+      {%- if t.property_id %} &middot; {{ t.property_id }}{% endif %}</span>
+  </p>
+  {% for side in t.sides %}
+  <blockquote style="color:#444;border-left:3px solid #ddd;padding-left:1em;margin:.5em 0">
+    {% if side.position %}<strong>{{ side.position }}</strong> &mdash; {% endif %}
+    <a href="{{ urls.path('/-/orpheus/document/' + side.document_id) }}">{{ side.filename }}</a>
+    {% if side.page_no %}page {{ side.page_no }}{% endif %}
+    {% if side.excerpt %}<br>{{ side.excerpt }}{% endif %}
+  </blockquote>
+  {% endfor %}
+  {% if t.resolution %}<p style="color:#666">{{ t.resolution }}</p>{% endif %}
+  <form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+    <input type="hidden" name="entity_id" value="{{ entity.entity_id }}">
+    <input type="hidden" name="tension_id" value="{{ t.tension_id }}">
+    <input type="text" name="note" placeholder="why (required to settle or dismiss)" style="width:22em">
+    {% if t.status != 'accepted' %}
+    <button type="submit" name="action" value="accept_tension">Real, and it stands</button>
+    {% endif %}
+    <button type="submit" name="action" value="resolve_tension">Settled</button>
+    <button type="submit" name="action" value="withdraw_tension">Not a conflict</button>
+  </form>
+</div>
+{% endfor %}
+<p style="color:#666"><em>Real, and it stands</em> is a finished piece of review,
+not an outstanding task. Most of these are a company that moved or a fee that
+changed, and both documents were right when they were written.</p>
+{% endif %}
+
+<form action="{{ urls.path('/-/orpheus/wiki/act') }}" method="post" style="margin-bottom:1em">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <input type="hidden" name="entity_id" value="{{ entity.entity_id }}">
+  <input type="hidden" name="action" value="find_conflicts">
+  <button type="submit">Check this page for conflicts</button>
+  <span style="color:#666">compares the confirmed sources below, property by property</span>
+</form>
+
 <h2>What the documents say</h2>
 {% if page.properties %}
 <table class="rows-and-columns">
@@ -40,8 +89,11 @@
   <tbody>
   {% for prop, values in page.properties.items() %}
     {% for v in values %}
-    <tr>
-      <th style="text-align:left">{% if loop.first %}{{ prop }}{% endif %}</th>
+    <tr{% if prop in page.contested_properties %} style="background:#fffbeb"{% endif %}>
+      <th style="text-align:left">{% if loop.first %}{{ prop }}
+        {%- if prop in page.contested_properties %}
+        <br><span style="color:#b45309;font-weight:normal">in conflict</span>
+        {%- endif %}{% endif %}</th>
       <td>{{ v.value }}</td>
       <td>{{ v.mentions|length }} mention(s){% if v.n_confirmed %},
           <strong>{{ v.n_confirmed }} confirmed</strong>{% endif %}</td>
@@ -66,6 +118,10 @@ were true when each was written, and the disagreement is the interesting part.</
     {%- if m.evidence and not m.evidence.alignment %}
     &middot; <span style="color:#a00">quotation not found in the document</span>
     {% endif %}
+    {%- for t in m.tensions %}
+    <br><span style="color:#b45309">disagrees with another source
+      {%- if t.property_id %} about {{ t.property_id }}{% endif %}</span>
+    {%- endfor %}
   </p>
   {% if m.evidence and m.evidence.excerpt %}
   <blockquote style="color:#444;border-left:3px solid #ccc;padding-left:1em;margin:.5em 0">
