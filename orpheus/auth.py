@@ -49,11 +49,21 @@ def create_actor(store: Store, display_name: str, email: str | None = None,
 
 def upsert_actor(store: Store, idp: str, external_id: str, display_name: str,
                  email: str | None = None,
-                 departments: list[str] | None = None) -> str:
+                 departments: list[str] | None = None,
+                 is_admin: bool | None = None) -> str:
     """Where an external identity provider lands.
 
     Kept as one function so that adopting a provider — `datasette-accounts`,
-    an SSO, anything — is a change here and nowhere else.
+    an SSO, anything — is a change here and nowhere else. The plugin calls it
+    on every sign-in, so an identity that already exists is updated rather than
+    duplicated: the key is `(idp, external_id)`, not the display name, because
+    people are renamed and the rows they created must not be orphaned by it.
+
+    `is_admin` is left alone when None, so a person promoted inside Orpheus
+    keeps that promotion under a provider that has no opinion about admins.
+    Pass it, and the provider becomes the authority — which is what keeps
+    `can()` and `permission_sql()` agreeing, since the SQL can only read the
+    `actors` row and never sees what the provider said.
     """
     store.assert_writable()
     existing = store.one(
@@ -65,8 +75,12 @@ def upsert_actor(store: Store, idp: str, external_id: str, display_name: str,
             "WHERE actor_id = ?",
             (display_name, email, to_json(departments) if departments else None,
              existing["actor_id"]))
+        if is_admin is not None:
+            store.execute("UPDATE actors SET is_admin = ? WHERE actor_id = ?",
+                          (1 if is_admin else 0, existing["actor_id"]))
         return existing["actor_id"]
-    return create_actor(store, display_name, email, idp, external_id, departments)
+    return create_actor(store, display_name, email, idp, external_id, departments,
+                        is_admin=bool(is_admin))
 
 
 def get_actor(store: Store, actor_id: str) -> dict | None:

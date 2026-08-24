@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover
         pass
 
 from orpheus import api as orpheus_api
+from orpheus import auth
 from orpheus.store import Store
 
 PLUGIN = "orpheus-datasette"
@@ -55,22 +56,121 @@ def _database(datasette):
         return datasette.get_database()
 
 
-def _actor_for(datasette, request) -> dict | None:
-    """Map a Datasette actor onto an Orpheus one.
+# Which identity provider a Datasette actor came from. Recorded on the Orpheus
+# actor so two people with the same username under different providers stay
+# distinct, and so a deployment can see where its accounts came from.
+DEFAULT_IDP = "datasette"
 
-    Datasette answers "who is this"; Orpheus answers "what may they see". The
-    two meet here, on the actor id, which is the seam `datasette-accounts` would
-    slot into.
+
+def _datasette_identity(datasette, request) -> dict | None:
+    """Who Datasette says this is, before Orpheus has an opinion.
+
+    Datasette answers "who is this"; Orpheus answers "what may they see". This
+    is the seam, and it reads whatever `actor_from_request` produced — the
+    `--root` actor, `datasette-accounts`, an SSO plugin — without knowing which.
     """
     actor = request.actor
     if not actor:
         return None
-    mapped = _config(datasette).get("actor_map", {}).get(actor.get("id"))
-    return {"actor_id": mapped or actor.get("id"),
-            "display_name": actor.get("name") or actor.get("id"),
-            "is_admin": bool(actor.get("is_admin")
-                             or actor.get("id") == _config(datasette).get("admin_id")
-                             or actor.get("id") == "root")}
+    config = _config(datasette)
+
+    # Whether the provider has an opinion about administrators *at all*. One
+    # that does not must leave the flag None rather than say False, or signing
+    # in would quietly demote someone promoted inside Orpheus.
+    is_admin = bool(actor["is_admin"]) if "is_admin" in actor else None
+    if actor.get("id") == config.get("admin_id") or actor.get("id") == "root":
+        is_admin = True
+
+    return {
+        "external_id": str(actor.get("id")),
+        "display_name": (actor.get("name") or actor.get("username")
+                         or str(actor.get("id"))),
+        "email": actor.get("email"),
+        "idp": config.get("idp", DEFAULT_IDP),
+        # Pins this Datasette identity to a specific Orpheus actor id. Kept for
+        # deployments that had actors before they had an auth plugin, and so a
+        # person can be bound to the rows they already created.
+        "pinned": config.get("actor_map", {}).get(actor.get("id")),
+        "is_admin": is_admin,
+    }
+
+
+def _provision(store, identity: dict) -> str:
+    """The Orpheus actor this identity belongs to, creating it if it is new.
+
+    `auth.upsert_actor()` exists for exactly this and, until now, nothing called
+    it: the plugin looked the Datasette id up in an `actor_map` written by hand.
+    That works for three people and not for thirty, and it meant every
+    deployment adopting an auth plugin kept a second copy of its user list in
+    YAML — where it went stale, and where a typo silently attributed one
+    person's corrections to another.
+
+    Keyed on `(idp, external_id)`, so the same person signing in again lands on
+    the same row. That is what makes `created_by` and `edited_by` mean a person
+    rather than a session.
+    """
+    if identity["pinned"]:
+        # A pin is a deployment decision, so Orpheus's own row governs it: the
+        # admin flag is not synced from the provider here. The row is created
+        # when it is missing rather than left dangling, because `created_by`
+        # references it.
+        if auth.get_actor(store, identity["pinned"]) is None:
+            auth.create_actor(store, identity["display_name"], identity["email"],
+                              identity["idp"], identity["external_id"],
+                              is_admin=bool(identity["is_admin"]),
+                              actor_id=identity["pinned"])
+        return identity["pinned"]
+    return auth.upsert_actor(store, identity["idp"], identity["external_id"],
+                             identity["display_name"], identity["email"],
+                             is_admin=identity["is_admin"])
+
+
+def _is_stale(row, identity: dict) -> bool:
+    """Whether the provider now says something the `actors` row does not.
+
+    A pinned actor is exempt: the pin is a deployment decision and Orpheus's
+    own row governs it. For everyone else this is what turns the read-only
+    fast path back into a write -- a renamed person, a changed address, an
+    admin promoted or demoted upstream. Comparing costs nothing; not comparing
+    means the surface shows who someone *used to be*.
+    """
+    if identity["pinned"]:
+        return False
+    if identity["is_admin"] is not None and bool(row["is_admin"]) != identity["is_admin"]:
+        return True
+    return (row["display_name"] != identity["display_name"]
+            or row["email"] != identity["email"])
+
+
+async def _resolve_actor(database, identity: dict) -> dict:
+    """Settle this identity onto an Orpheus actor row.
+
+    The row is the authority for `is_admin`, not the identity dict, because
+    `permission_sql()` can only read the row -- so taking the flag from
+    anywhere else is how the API and the browsing surface come to disagree.
+    The provider feeds that column; it does not bypass it.
+
+    Read first and write only when something has to change, so the ordinary
+    request stays on a read connection and never queues behind the writer.
+    """
+    def look_up(conn):
+        store = Store.adopt(conn, path=database.path)
+        if identity["pinned"]:
+            return auth.get_actor(store, identity["pinned"])
+        return store.one(
+            "SELECT * FROM actors WHERE idp = ? AND external_id = ?",
+            (identity["idp"], identity["external_id"]))
+
+    row = await database.execute_fn(look_up)
+    if row is None or _is_stale(row, identity):
+        def write(conn):
+            store = Store.adopt(conn, path=database.path, owns_transaction=False)
+            return auth.get_actor(store, _provision(store, identity))
+        row = await database.execute_write_fn(write)
+
+    return {"actor_id": row["actor_id"],
+            "display_name": row["display_name"],
+            "is_admin": bool(row["is_admin"])}
 
 
 class _Rollback(Exception):
@@ -100,9 +200,16 @@ async def _call(datasette, request, method: str, path: str,
     committed halfway. The status comes back out through an exception instead,
     and is unwrapped on the far side.
     """
-    actor = _actor_for(datasette, request)
+    identity = _datasette_identity(datasette, request)
     database = _database(datasette)
     writing = method != "GET"
+
+    actor = None
+    if identity:
+        # Resolving the actor can *create* one, which the read connection a GET
+        # runs on cannot do -- so it is settled before dispatch rather than
+        # inside it, and every handler downstream can assume the row exists.
+        actor = await _resolve_actor(database, identity)
 
     def run(conn):
         store = Store.adopt(conn, path=database.path, owns_transaction=not writing)

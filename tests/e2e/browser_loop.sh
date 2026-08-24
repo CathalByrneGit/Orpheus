@@ -46,12 +46,10 @@ store.close()
 write_config(f"{work}/datasette.yml", storage_root=f"{work}/storage")
 
 # Datasette answers "who is this"; --root gives an actor id of "root", and the
-# store's actors are its own. actor_map is the seam between them, and the seam
-# is worth exercising rather than working around.
-path = f"{work}/datasette.yml"
-text = open(path).read().replace(
-    "    max_file_size:", "    actor_map:\n      root: act_demo\n    max_file_size:")
-open(path, "w").write(text)
+# store's actors are its own. Nothing is configured to join them: the plugin
+# provisions an Orpheus actor the first time it sees the identity, and that is
+# the seam worth exercising rather than working around. act_demo above exists
+# only to own the org-level setting, and should stay unused by the loop below.
 PY
 
 say "starting datasette on $PORT"
@@ -192,6 +190,20 @@ assert {"extract", "confirm", "amend", "reject"} <= set(actions), actions
 # otherwise be unorderable, and the history is the record of what happened when.
 seqs = [r["seq"] for r in q("SELECT seq FROM edit_history ORDER BY rowid")]
 assert seqs == sorted(seqs) == list(range(1, len(seqs) + 1)), seqs
+
+# Nobody configured a mapping, so the actor Datasette signed in was provisioned
+# on first sight -- and everything the browser did is attributed to it, not to
+# act_demo and not to the string "root".
+provisioned = q("SELECT * FROM actors WHERE idp = 'datasette' AND external_id = 'root'")
+assert len(provisioned) == 1, [dict(r) for r in q("SELECT * FROM actors")]
+actor_id = provisioned[0]["actor_id"]
+assert provisioned[0]["is_admin"] == 1, "--root should arrive as an administrator"
+assert q("SELECT 1 FROM documents WHERE created_by = ?", actor_id), \
+    "the document was not attributed to the provisioned actor"
+by = {r["edited_by"] for r in q("SELECT DISTINCT edited_by FROM edit_history")}
+assert by == {actor_id}, by
+# Signing in repeatedly is a read: one row, not one per request.
+assert len(q("SELECT 1 FROM actors")) == 2, "an actor was provisioned more than once"
 
 # Every write went through Datasette's write thread. A second writer would have
 # left its own advisory lock file next to the database.

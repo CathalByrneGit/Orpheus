@@ -158,7 +158,8 @@ plugins:
     database: "orpheus"        # which attached database holds the store
     storage_root: "storage"    # where ingest puts originals and page images
     max_file_size: 52428800    # per-file ceiling on browser uploads (50MB default)
-    actor_map:                 # Datasette actor id -> Orpheus actor id
+    idp: "datasette"           # what to record as the provider (default: datasette)
+    actor_map:                 # optional: pin a Datasette actor to an Orpheus one
       "github|12345": act_1f2e3d...
 ```
 
@@ -166,10 +167,31 @@ There is no base URL and no token, because the plugin is already inside the
 process that holds the database. What it needs to be told is which database and
 where to put files.
 
-`actor_map` is the seam between the two identity models: Datasette answers *who
-is this*, Orpheus answers *what may they see*. Without a mapping, edits are
-attributed to the Datasette actor id verbatim, which will not match a row in
-`actors`.
+### How a person becomes an actor
+
+Datasette answers *who is this*; Orpheus answers *what may they see*. The join
+is made on first sight and needs no configuration: whatever `actor_from_request`
+produced is passed to `auth.upsert_actor()`, keyed on `(idp, external_id)`, and
+an Orpheus actor is provisioned if that pair is new. Sign in again and you land
+on the same row — which is what makes `created_by` and `edited_by` mean a person
+rather than a session.
+
+`idp` names the provider on those rows, so two people with the same username
+under different providers stay distinct. Set it when you add a second provider;
+until then the default is fine.
+
+The `actors` row is the authority for `is_admin`, because `permission_sql()` can
+only read the row — take the flag from anywhere else and the API and the
+browsing surface come to disagree about who is an administrator. A provider that
+tracks admins (`datasette-accounts` does) feeds that column on every sign-in,
+promoting and demoting to match. One that has no opinion leaves it alone, so a
+promotion made inside Orpheus stands.
+
+`actor_map` is now optional, and means one thing: *pin this Datasette identity
+to this Orpheus actor id*. Use it when actors existed before the auth plugin
+did, so a person keeps the rows they already created. A pinned actor is exempt
+from the sync above — the pin is a deployment decision, and Orpheus's own row
+governs it.
 
 Browser file upload needs **Datasette 1.0a32 or newer** — `Request.form(files=True)`
 does not exist before it. On an older Datasette the rest of the plugin still
@@ -281,11 +303,11 @@ Okta, a government SSO and GitHub OAuth all arrive at the same place: an `idp`
 and an `external_id`.
 
 Which provider to use is [an open decision](open-decisions.md#identity-provider).
-Until it is made, two paths work. In the browser, any Datasette auth plugin —
-`datasette-auth-passwords`, `datasette-auth-github`, an SSO plugin — supplies
-the actor, and `actor_map` connects it to an Orpheus one. For scripts, API
-tokens (`orpheus token <actor_id>`) are hashed with SHA-256 and only ever shown
-once.
+Until it is made, two paths work, and neither needs a user list kept in YAML. In
+the browser, any Datasette auth plugin — `datasette-accounts`,
+`datasette-auth-github`, an SSO plugin — supplies the actor, and the Orpheus
+plugin provisions the matching row on first sight. For scripts, API tokens
+(`orpheus token <actor_id>`) are hashed with SHA-256 and only ever shown once.
 
 For Datasette, the matching plugin depends on the same choice, and per-document
 row filtering needs a plugin implementing `permission_resources_sql`. The SQL

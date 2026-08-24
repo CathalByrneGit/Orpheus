@@ -33,9 +33,13 @@ a running server holds the database open. Against a live server it would be
 refused — which is the lock doing its job, not a problem to work around.
 
 Then bring the service up and sign in. Authentication is Datasette's, not
-Orpheus's: `datasette-auth-passwords`, `datasette-auth-github` or an SSO plugin
-all work, and the plugin maps whichever actor id they produce onto an Orpheus
-actor through `actor_map` in the generated config:
+Orpheus's: `datasette-accounts`, `datasette-auth-github` or an SSO plugin all
+work, and there is nothing to configure — the plugin provisions an Orpheus actor
+the first time it sees an identity, keyed on the provider and the id that
+provider issued, so signing in again lands on the same row.
+
+The one optional entry is a pin, for actors that existed before the auth plugin
+did — it keeps a person attached to the rows they already created:
 
 ```yaml
 plugins:
@@ -44,8 +48,9 @@ plugins:
       github|12345: act_1f2e3d...
 ```
 
-Without that mapping, edits are attributed to the Datasette actor id verbatim,
-which will not match a row in `actors`.
+Whether someone is an Orpheus administrator follows the provider, if the
+provider tracks it. A pinned actor is the exception: there Orpheus's own row
+governs, so promote with `orpheus actor` rather than upstream.
 
 ## Running a corpus through it
 

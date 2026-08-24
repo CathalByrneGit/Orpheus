@@ -45,6 +45,24 @@ def test_an_external_identity_upserts_rather_than_duplicating(store):
     assert get_actor(store, first)["display_name"] == "Nuala Ryan-Smith"
 
 
+def test_a_provider_that_says_nothing_about_admins_does_not_demote(store):
+    # Not every provider has the concept. One that does not must leave an
+    # Orpheus promotion standing rather than reset it on every sign-in.
+    actor_id = upsert_actor(store, "entra", "ext-1", "Nuala Ryan", is_admin=True)
+    upsert_actor(store, "entra", "ext-1", "Nuala Ryan")
+    assert get_actor(store, actor_id)["is_admin"] == 1
+
+
+def test_a_provider_that_does_say_is_the_authority(store):
+    # `permission_sql()` can only read the actors row, so a provider that
+    # tracks admins has to be able to move that column both ways -- otherwise
+    # the API and the browsing surface disagree about who is an administrator.
+    actor_id = upsert_actor(store, "entra", "ext-1", "Nuala Ryan", is_admin=True)
+    assert get_actor(store, actor_id)["is_admin"] == 1
+    upsert_actor(store, "entra", "ext-1", "Nuala Ryan", is_admin=False)
+    assert get_actor(store, actor_id)["is_admin"] == 0
+
+
 def test_only_the_hash_of_a_token_is_stored(store):
     actor_id = create_actor(store, "Ada")
     minted = create_token(store, actor_id, label="cli")

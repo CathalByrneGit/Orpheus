@@ -175,11 +175,19 @@ admin UI, a CLI, and a JSON API. PBKDF2 hashing off the event loop, timing-safe
 login, brute-force lockout, revocable server-side sessions, forced first-password
 change, audit logging. 38 commits, marked experimental, needs Datasette 1.0a23+.
 
-This settles the **identity provider** open decision. Orpheus's `actors` table
-already carries `idp` and `external_id` for exactly this, and `upsert_actor()`
-is the seam. `datasette-accounts` emits stable actor `id` values; the plugin's
-`actor_map` already maps a Datasette actor id onto an Orpheus one, so the
-integration is a config entry rather than code.
+This settles the **identity provider** open decision, and the integration is
+done. Orpheus's `actors` table already carried `idp` and `external_id` for
+exactly this; `upsert_actor()` is the seam, and the plugin now calls it on every
+request rather than reading a hand-written `actor_map`. `datasette-accounts`
+emits stable actor `id` values and an `is_admin` flag, so an account created
+upstream becomes an Orpheus actor on first sight, with the admin bit carried
+across — no user list duplicated in YAML.
+
+Verified against 1.0a38: it starts clean, registers `permission_resources_sql`
+(the hook Orpheus generates SQL for), and a full upload-to-review loop attributes
+correctly to the provisioned actor. Promoting and demoting upstream moves
+`actors.is_admin` in step, which is what keeps `can()` and `permission_sql()`
+from disagreeing.
 
 **What it removes:** token minting, revocation and authentication —
 `create_token()`, `revoke_token()`, `authenticate()`, and the `actor_tokens`

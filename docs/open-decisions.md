@@ -161,9 +161,10 @@ thing, and three problems stand between here and there:
 - **Latency.** A batch pass can take seconds; a companion reacting to scrolling
   cannot. That is what the local tier is for, with the cloud tier reserved for
   on-demand questions.
-- **Identity.** Partly addressed. The plugin now maps a Datasette actor onto an
-  Orpheus one through `actor_map`, so any Datasette auth plugin supplies the
-  person. Which provider a deployment should use is still open.
+- **Identity.** Settled. The plugin provisions an Orpheus actor from whatever
+  Datasette's `actor_from_request` produced, so any Datasette auth plugin
+  supplies the person with no configuration. Which provider a deployment should
+  use is still open.
 
 This overlaps with what agents.md scopes as Phase 3 and with `ontologyMCP`. The
 difference is the surface: agents.md imagines a bespoke split-view reading pane,
@@ -279,25 +280,38 @@ question, and it cannot be answered from documentation.
 
 ### Identity provider
 
-**Deliberately not settled. The bridge was built instead.**
+**Still deliberately not settled — but the bridge is now connected, not just
+built.**
 
-`auth.upsert_actor(store, idp, external_id, ...)` is where any provider lands.
-Tokens work today, and the plugin's `actor_map` connects whatever a Datasette
-auth plugin produces to an Orpheus actor. `auth.permission_sql()` emits the
-row-level rule for whichever plugin is chosen.
+`auth.upsert_actor(store, idp, external_id, ...)` is where any provider lands,
+and the Datasette plugin calls it on every request: an identity Datasette
+authenticates becomes an Orpheus actor the first time it is seen, keyed on
+`(idp, external_id)`. Nothing has to be listed anywhere for that to work, which
+is the point — a `actor_map` written by hand works for three people and not for
+thirty, and a typo in it silently attributes one person's corrections to
+another. It survives as an optional *pin*, for actors that existed before the
+auth plugin did.
+
+`auth.permission_sql()` emits the row-level rule for whichever plugin is chosen,
+and the `actors` row is the authority for `is_admin` for the same reason: that
+SQL can only read the row.
 
 **What would settle it:** confirming what the deployment target actually runs —
-Entra ID, Okta, a government SSO, or nothing yet.
+Entra ID, Okta, a government SSO, or nothing yet. Any of them plugs into the
+same seam, so this is a deployment question rather than a code one.
 
-**A candidate has since appeared.** `datasette-accounts` stores accounts in
+**The leading candidate, now tested.** `datasette-accounts` stores accounts in
 Datasette's internal database with PBKDF2 hashing, brute-force lockout,
-revocable sessions and audit logging, and emits stable actor ids — which is
-exactly what `upsert_actor()` was left open for. It would delete token minting,
-revocation and authentication from `auth.py`. The shared-token problem it was
-also going to solve has since gone away on its own: the plugin no longer holds a
-token at all, because it no longer speaks HTTP. It is marked experimental and it
-puts a second writer on a second database. See
+revocable sessions and audit logging. Run against 1.0a38 it starts clean,
+registers `permission_resources_sql`, and drives the whole upload-to-review loop
+with correct attribution; promoting and demoting an account upstream moves
+`actors.is_admin` in step. It would delete token minting, revocation and
+authentication from `auth.py`. It is marked experimental and it puts a second
+writer on a second database. See
 [Datasette ecosystem](datasette-ecosystem.md#datasette-accounts).
+
+Tokens (`orpheus token`) stay regardless: they are the script path, and no
+browser-session plugin covers it.
 
 ### Permission boundaries
 
