@@ -504,6 +504,59 @@ Not built, and not a reason to introduce LanceDB now. If it happens, DuckDB's
 vector extension is the more consistent path, and it is entangled with the
 storage decision above.
 
+**A second candidate: [LatticeDB](https://github.com/jeffhajewski/latticedb).**
+An embedded single-file property-graph database in Zig with HNSW vectors and
+BM25 full-text in the same engine and query layer. MIT, v0.12.0, one author.
+Installed from the published wheel and exercised against the graph shape this
+corpus actually produced.
+
+It is the strongest thing on this list for the vector question specifically:
+0.83 ms 10-NN at 1M vectors with 100% recall, against `sqlite-vec`'s 17 ms
+brute force. That is the one dimension where Orpheus has nothing rather than
+something adequate. It also handles concurrent readers while another process
+holds the file — checked, because the "single-writer" framing reads as though
+it might not, and Datasette is all readers.
+
+**Two findings that have to be recorded, because the benchmark table does not
+show them and a later reader would otherwise re-evaluate it from the README.**
+
+*Variable-length traversal cannot report what it traversed.* Both forms are
+refused outright:
+
+```
+MATCH p = (a)-[:REL*1..5]->(b) RETURN p
+  → LatticeQueryError: Expected '(' to start node pattern
+MATCH (a)-[r:REL*1..5]->(b) RETURN r
+  → LatticeQueryError: Variable-length relationships do not support edge variables
+```
+
+Endpoints only. Fixed-length chains work and expose edge properties correctly,
+but that is the part anyone would hand-roll. For the question Orpheus most wants
+a graph engine to answer — *how* are these two connected, through which hops,
+resting on which documents, and has anyone checked them — it currently does less
+than the breadth-first walk in `graph.py`. `OPTIONAL MATCH` and `CALL` are also
+not implemented.
+
+*The coupling is the real obstacle regardless.* Datasette is not a viewer bolted
+onto SQLite here: it is the browsing surface, the permission enforcement
+(`auth.permission_sql()` feeding `permission_resources_sql`) and the writer
+(`Store.adopt()` borrows its connection and joins its transaction). Changing
+storage engine is not a storage decision, it is rebuilding all three.
+
+And the scale argument does not bite. This graph is hundreds of entity pages,
+built from one query into Python adjacency dicts. 39 μs against SQLite's 548 μs
+at 100K nodes is not a number that changes anything at this size.
+
+**So: recorded, not adopted.** Revisit if semantic search over excerpts becomes a
+real requirement — and re-check path binding then rather than assuming, since it
+is the kind of gap a later version could close.
+
+One idea worth taking regardless of the engine: LatticeDB puts durable named
+streams and a graph changefeed on the same transaction and WAL path as graph
+writes. That is `edit_history` — an append-only log written inside the same
+transaction as the change it describes — and it is the third project surveyed
+here to arrive at it independently.
+
 ---
 
 ## Corrections this build made to the architecture

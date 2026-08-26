@@ -241,6 +241,35 @@ rarely has.
 
 ---
 
+## LatticeDB — the storage question, asked properly
+
+[LatticeDB][lattice] is an embedded single-file property-graph database in Zig:
+HNSW vectors and BM25 full-text in the same engine and the same query layer as
+graph traversal, one file, WAL, single writer. MIT, v0.12.0, one author. The
+operational shape is Orpheus's exactly, which is what makes it worth taking
+seriously rather than filing under "graph databases".
+
+[lattice]: https://github.com/jeffhajewski/latticedb
+
+Installed from the published wheel and run against the graph this corpus really
+produced, rather than read about. It works, concurrent readers included. The
+detailed findings — including the two limitations the benchmark tables do not
+show — are in
+[Open decisions](open-decisions.md#vector-and-similarity-search), because it is
+a live candidate for the vector slot rather than settled prior art.
+
+The short version: for *how are these two connected, through which hops, on
+whose evidence*, it currently returns endpoints only, and that question is the
+reason Orpheus would want a graph engine at all. And Datasette is the browsing
+surface, the permission enforcement and the writer, so the storage engine is not
+a component that can be swapped.
+
+What it does confirm is that the shape Orpheus chose — one file, single writer,
+WAL, graph and text over the same data — is a shape other people are building
+deliberately rather than an accident of picking SQLite.
+
+---
+
 ## What nothing else does
 
 Searched for specifically, not found:
@@ -259,7 +288,9 @@ The nearest neighbours each cover one piece: `datasette-comments` has discussion
 but not typed amendments; Rowfill has source-traceability but not amendment
 history; LangExtract has grounding but no review state at all; sift-kg has the
 graph and the resolution loop but reviews merges rather than facts, and has no
-`amended`.
+`amended`; LatticeDB has the storage and traversal primitives and no opinion
+about evidence at all — a relation there is a fact, not a claim somebody made in
+a document that a person may or may not have checked.
 
 Two more found nowhere else, added since:
 
