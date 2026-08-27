@@ -557,6 +557,53 @@ MIGRATIONS: list[dict] = [
             """,
         ],
     },
+    {
+        "version": 9,
+        "name": "question_reviews",
+        "statements": [
+            # A question the corpus raises is *computed*, not stored -- derived
+            # from the graph every run. Without this table a reviewer's
+            # judgement has nowhere to live: the same questions come back every
+            # time, and "I looked, it is a specialist supplier everybody in this
+            # market uses" is something a person has to remember rather than
+            # something the store knows.
+            #
+            # `standing` is the load-bearing state. It is how somebody says
+            # *this one is real and it stays on the list* -- the role `accepted`
+            # plays for a tension, and the difference between a feature that
+            # informs a decision and one that only ever redisplays the same
+            # list. `explained` is the ordinary outcome and is not a dismissal:
+            # it records the innocent account so nobody rediscovers it.
+            #
+            # Keyed on a fingerprint of the question -- its kind plus the pages
+            # involved -- because there is no row to key on. The chain is
+            # digested alongside so a judgement does not silently survive the
+            # evidence changing underneath it; that is `stale`, the mechanism
+            # concept evaluations already use.
+            """
+            CREATE TABLE IF NOT EXISTS question_reviews (
+                review_id     TEXT PRIMARY KEY,
+                fingerprint   TEXT NOT NULL,
+                kind          TEXT NOT NULL,
+                summary       TEXT,
+                subjects_json TEXT,
+                chain_digest  TEXT,
+                status        TEXT NOT NULL,
+                rationale     TEXT NOT NULL,
+                reviewed_by   TEXT REFERENCES actors(actor_id),
+                reviewed_at   TEXT NOT NULL,
+                superseded_at TEXT
+            )
+            """,
+            # One live judgement per question. Superseding rather than updating
+            # keeps what somebody decided last time readable after the evidence
+            # moved -- the same reason nothing else here overwrites.
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_question_reviews_live "
+            "ON question_reviews (fingerprint) WHERE superseded_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_question_reviews_status "
+            "ON question_reviews (status)",
+        ],
+    },
 ]
 
 

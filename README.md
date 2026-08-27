@@ -77,6 +77,12 @@ chain, and here is how much of it anybody has checked. Chains somebody has
 confirmed sort first, because one built from unreviewed guesses is a reason to
 check the extraction rather than to act.
 
+And a person's judgement lives in the store. `standing` means *this is real and
+it stays on the list* — a finished piece of review, sorted above the unruled,
+with the reason required and kept. If the evidence behind a question changes
+afterwards, it reopens and says so rather than letting an old decision quietly
+stand.
+
 `orpheus graph topology` reads the corpus as a network — islands, the pages
 holding it together, clusters that never touch. It leads with how much of the
 corpus reached the graph, because a sparse-looking network over 30% coverage
@@ -174,7 +180,7 @@ top of the page. [Why](docs/conflicts-and-lint.md).
 
 ## Status
 
-563 tests:
+574 tests:
 
 ```bash
 pip install -e '.[dev]'

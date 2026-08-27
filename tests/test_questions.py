@@ -246,3 +246,144 @@ def test_finding_nothing_is_not_a_clean_bill_of_health(store):
     store.conn.commit()
     note = raised(store)["note"]
     assert "not a clean bill of health" in note
+
+
+# -- what a person decided ---------------------------------------------------
+#
+# The part that makes this a feature rather than a display. Without somewhere
+# for a judgement to live, the same questions come back every run and "I looked,
+# it is a specialist supplier everybody uses" is something a person has to
+# remember rather than something the store knows.
+
+def test_a_question_starts_with_nobody_having_ruled_on_it(corpus):
+    question = raised(corpus)["questions"][0]
+    assert question["status"] == "open"
+    assert question["review"] is None
+
+
+def test_leaving_one_standing_is_a_decision_the_store_keeps(corpus):
+    from orpheus.questions import review_question
+    question = raised(corpus)["questions"][0]
+    review_question(corpus, question["fingerprint"], "standing",
+                    "Only supplier of this specialism in the state.",
+                    actor_id="act_a", kind=question["kind"],
+                    chain_digest=question["chain_digest"])
+    corpus.conn.commit()
+
+    again = next(q for q in raised(corpus)["questions"]
+                 if q["fingerprint"] == question["fingerprint"])
+    assert again["status"] == "standing"
+    assert again["review"]["rationale"]
+    # Standing sorts above open: somebody looked, and it stayed.
+    assert raised(corpus)["questions"][0]["status"] == "standing"
+
+
+def test_a_reason_is_required_for_every_decision(corpus):
+    from orpheus.questions import review_question
+    from orpheus.utils import OrpheusError
+    question = raised(corpus)["questions"][0]
+    for status in ("standing", "explained", "dismissed"):
+        with pytest.raises(OrpheusError):
+            review_question(corpus, question["fingerprint"], status, "",
+                            actor_id="act_a")
+
+
+def test_open_is_the_absence_of_a_judgement_not_one_to_record(corpus):
+    from orpheus.questions import review_question
+    from orpheus.utils import OrpheusError
+    question = raised(corpus)["questions"][0]
+    with pytest.raises(OrpheusError) as caught:
+        review_question(corpus, question["fingerprint"], "open", "never mind",
+                        actor_id="act_a")
+    assert "absence of a judgement" in str(caught.value)
+
+
+def test_a_new_decision_supersedes_rather_than_overwrites(corpus):
+    from orpheus.questions import review_history, review_question
+    question = raised(corpus)["questions"][0]
+    fingerprint = question["fingerprint"]
+    review_question(corpus, fingerprint, "standing", "Worth watching.",
+                    actor_id="act_a", kind=question["kind"])
+    review_question(corpus, fingerprint, "explained",
+                    "Checked the register: unrelated owners.", actor_id="act_a")
+    corpus.conn.commit()
+
+    history = review_history(corpus, fingerprint)
+    assert [r["status"] for r in history] == ["standing", "explained"]
+    assert history[0]["superseded_at"] and not history[1]["superseded_at"]
+
+
+def test_a_judgement_does_not_survive_the_evidence_changing(corpus):
+    # A review made against a different chain is not a judgement about the
+    # question in front of you. It is kept and shown, but it does not settle it.
+    from orpheus.questions import review_question
+    question = raised(corpus)["questions"][0]
+    review_question(corpus, question["fingerprint"], "explained",
+                    "Small market, nothing in it.", actor_id="act_a",
+                    kind=question["kind"], chain_digest=question["chain_digest"])
+    corpus.conn.commit()
+
+    corpus.execute("UPDATE edges SET status = 'confirmed'")
+    corpus.conn.commit()
+    again = next(q for q in raised(corpus)["questions"]
+                 if q["fingerprint"] == question["fingerprint"])
+    assert again["review_stale"] is True
+    assert again["status"] == "open"
+    # Kept and readable, not dropped.
+    assert again["review"]["rationale"] == "Small market, nothing in it."
+    assert "different evidence" in raised(corpus)["note"]
+
+
+def test_a_fingerprint_survives_the_graph_being_rebuilt(corpus):
+    # It is the kind plus the pages, order-independent -- so a judgement
+    # survives another document arriving or the chain being walked backwards.
+    from orpheus.questions import fingerprint
+    assert fingerprint("shared_counterparty", ["ent_A", "ent_M", "ent_B"]) == \
+        fingerprint("shared_counterparty", ["ent_B", "ent_A", "ent_M"])
+    assert fingerprint("shared_counterparty", ["ent_A"]) != \
+        fingerprint("circular_relation", ["ent_A"])
+
+
+def test_settled_questions_can_be_hidden(corpus):
+    from orpheus.questions import review_question
+    question = raised(corpus)["questions"][0]
+    review_question(corpus, question["fingerprint"], "dismissed",
+                    "Both links were the same clause extracted twice.",
+                    actor_id="act_a", kind=question["kind"],
+                    chain_digest=question["chain_digest"])
+    corpus.conn.commit()
+    open_only = raised(corpus, open_only=True)["questions"]
+    assert question["fingerprint"] not in {q["fingerprint"] for q in open_only}
+
+
+# -- the same details on two pages -------------------------------------------
+
+def test_two_pages_at_one_address_are_a_question(corpus):
+    from orpheus.questions import shared_detail
+    corpus.execute("UPDATE instances_Company SET address = '12 Ushers Quay' "
+                   "WHERE instance_id IN ('i_A_doc_1','i_B_doc_2')")
+    corpus.conn.commit()
+    found = shared_detail(corpus)
+    assert len(found) == 1
+    # Shared addresses are usually dull, and the question leads with that.
+    assert "serviced office" in found[0]["asks"]
+
+
+def test_a_shared_registration_number_asks_a_different_question(corpus):
+    # A company number identifies one legal entity, so this is a missed merge
+    # or an extraction error -- not the same question as a shared address.
+    from orpheus.questions import shared_detail
+    corpus.execute("UPDATE instances_Company SET registration_number = '482991' "
+                   "WHERE instance_id IN ('i_A_doc_1','i_B_doc_2')")
+    corpus.conn.commit()
+    found = shared_detail(corpus)
+    assert len(found) == 1
+    assert "one legal entity" in found[0]["asks"]
+
+
+def test_one_page_at_its_own_address_is_not_a_question(corpus):
+    from orpheus.questions import shared_detail
+    corpus.execute("UPDATE instances_Company SET address = '12 Ushers Quay' "
+                   "WHERE instance_id = 'i_A_doc_1'")
+    corpus.conn.commit()
+    assert shared_detail(corpus) == []

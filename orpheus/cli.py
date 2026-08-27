@@ -590,9 +590,27 @@ def cmd_questions(args) -> int:
     """What the shape of the corpus raises. None of it is a finding."""
     from . import questions as questions_mod
 
+    if args.review:
+        if not args.status or not args.note:
+            raise OrpheusError(
+                "Recording a judgement needs --status and --note. The reason is "
+                "the part worth anything to the next reviewer.")
+        store = open_store(args)
+        try:
+            result = questions_mod.review_question(
+                store, args.review, args.status, args.note,
+                actor_id=args.actor_id)
+        finally:
+            store.close()
+        if args.json:
+            emit(result, True)
+            return 0
+        print(f"Recorded: {result['status']}. {result['rationale']}")
+        return 0
+
     store = open_store(args, mode="read")
     try:
-        report = questions_mod.raised(store)
+        report = questions_mod.raised(store, open_only=args.open_only)
     finally:
         store.close()
 
@@ -608,8 +626,16 @@ def cmd_questions(args) -> int:
     for question in report["questions"]:
         if args.confirmed_only and not question["confirmed_throughout"]:
             continue
-        mark = "checked" if question["confirmed_throughout"] else "unreviewed"
+        mark = ("standing" if question["status"] == "standing"
+                else question["status"] if question["status"] != "open"
+                else "checked" if question["confirmed_throughout"]
+                else "unreviewed")
         print(f"  [{mark:>10}] {question['summary']}")
+        print(f"        {question['fingerprint']}"
+              + ("  (judgement made against different evidence)"
+                 if question["review_stale"] else ""))
+        if question.get("review") and not question["review_stale"]:
+            print(f"        {question['review']['rationale']}")
         for hop in question["chain"]:
             if "from_name" in hop:
                 state = (f"{hop['n_confirmed']} confirmed"
@@ -1161,6 +1187,15 @@ def build_parser() -> argparse.ArgumentParser:
                 "what the shape of the corpus raises -- none of it a finding")
     asker.add_argument("--confirmed-only", action="store_true",
                        help="only chains where every hop has been confirmed")
+    asker.add_argument("--open-only", action="store_true",
+                       help="hide questions somebody has already settled")
+    asker.add_argument("--review", metavar="FINGERPRINT",
+                       help="record a judgement about one question")
+    asker.add_argument("--status",
+                       choices=("standing", "explained", "dismissed"),
+                       help="standing: real, and it stays on the list")
+    asker.add_argument("--note", help="why. Required with --review.")
+    asker.add_argument("--actor-id")
 
     reader = add("read", cmd_read, "read a document a passage at a time")
     reader.add_argument("document_id")

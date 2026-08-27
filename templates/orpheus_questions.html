@@ -7,6 +7,9 @@
 
 <h1>Questions this corpus raises</h1>
 
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+{% if note %}<p class="message-info">{{ note }}</p>{% endif %}
+
 <p class="message-info" style="border-left:3px solid #1d4ed8">
   <strong>None of this is a finding.</strong> A shared subcontractor is usually a
   small market or a specialist everybody uses. What the corpus can honestly say
@@ -20,6 +23,13 @@
    nobody will think to look for. #}
 <p style="color:#666">{{ report.coverage.note }}</p>
 <p style="color:#666">{{ report.note }}</p>
+
+<p style="color:#666">
+  <em>Real &mdash; keep it on the list</em> is a finished piece of review, not an
+  outstanding task: it is how you say this one matters and should stay visible.
+  <em>Explained</em> records the innocent account so nobody has to establish it
+  again. A reason is required either way.
+</p>
 
 {% for question in report.questions %}
 <div style="border-left:3px solid {% if question.confirmed_throughout %}#166534{% else %}#999{% endif %};padding:.8em 1em;margin-bottom:.8em;background:#fafafa">
@@ -50,6 +60,33 @@
   </ul>
 
   <p style="margin:.3em 0 0;color:#666">{{ question.asks }}</p>
+
+  {% if question.review %}
+  <p style="margin:.5em 0 0;padding:.5em .8em;background:#fff;border:1px solid #ddd">
+    <strong>{{ question.review.status }}</strong>
+    {%- if question.review_stale %}
+    <span style="color:#b45309">&mdash; decided against different evidence, so
+    this is open again</span>{% endif %}<br>
+    <span style="color:#444">{{ question.review.rationale }}</span>
+    <span style="color:#888">&middot; {{ question.review.reviewed_at }}</span>
+  </p>
+  {% endif %}
+
+  {# Where the individual decides. The reason is required, because it is the
+     part worth anything to whoever looks at this next. #}
+  <form action="{{ urls.path('/-/orpheus/questions/act') }}" method="post"
+        style="margin-top:.6em">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+    <input type="hidden" name="fingerprint" value="{{ question.fingerprint }}">
+    <input type="hidden" name="kind" value="{{ question.kind }}">
+    <input type="hidden" name="summary" value="{{ question.summary }}">
+    <input type="hidden" name="chain_digest" value="{{ question.chain_digest }}">
+    <input type="text" name="rationale" style="width:26em"
+           placeholder="what you found out (required)">
+    <button type="submit" name="status" value="standing">Real &mdash; keep it on the list</button>
+    <button type="submit" name="status" value="explained">Explained</button>
+    <button type="submit" name="status" value="dismissed">Not a real question</button>
+  </form>
 </div>
 {% endfor %}
 

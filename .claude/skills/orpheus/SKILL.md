@@ -144,6 +144,13 @@ notion of ownership, directorships or donations.
 A question resting on unreviewed links is a reason to check the extraction, not
 to act. Say which.
 
+Questions carry a **status**: `open`, or what a person decided — `standing`
+(real, stays on the list), `explained`, `dismissed`. Report the status and the
+recorded rationale, and if `review_stale` is set say the judgement was made
+against different evidence. Recording a judgement is the user's call, not yours:
+`standing` in particular is a person saying this matters, and a reason is
+required.
+
 **Disconnected cluster pairs** are the highest-value finding. Two clusters with
 no relation between them are two things nobody has connected. Name the specific
 entities on each side and what might join them — the value is not "there may be

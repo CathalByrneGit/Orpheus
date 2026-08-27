@@ -249,6 +249,7 @@ def register_routes():
         (r"^/-/orpheus/lint$", lint_page),
         (r"^/-/orpheus/network$", network_page),
         (r"^/-/orpheus/questions$", questions_page),
+        (r"^/-/orpheus/questions/act$", questions_act),
         (r"^/-/orpheus/wiki$", wiki_index),
         (r"^/-/orpheus/wiki/queue$", wiki_queue),
         (r"^/-/orpheus/wiki/act$", wiki_act),
@@ -485,7 +486,35 @@ async def questions_page(datasette, request):
     return await _render(datasette, request, "orpheus_questions.html", {
         "report": report,
         "error": request.args.get("error"),
+        "note": request.args.get("note"),
     })
+
+
+async def questions_act(datasette, request):
+    """Where the individual decides. One form, one write."""
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    if request.method != "POST":
+        return _redirect(datasette, "/-/orpheus/questions")
+
+    form = await request.post_vars()
+    if not (form.get("rationale") or "").strip():
+        return _redirect(datasette, "/-/orpheus/questions",
+                         error="Give a reason. It is the part worth anything to "
+                               "whoever looks at this next.")
+    status, result = await _call(datasette, request, "POST", "/questions/review", {
+        "fingerprint": form.get("fingerprint"),
+        "status": form.get("status"),
+        "rationale": form.get("rationale"),
+        "kind": form.get("kind"),
+        "summary": form.get("summary"),
+        "chain_digest": form.get("chain_digest"),
+    })
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus/questions",
+                         error=result["error"]["message"])
+    return _redirect(datasette, "/-/orpheus/questions",
+                     note=f"Recorded as {result['status']}.")
 
 
 async def network_page(datasette, request):

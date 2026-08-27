@@ -29,12 +29,18 @@ bundle from another domain gets the same three questions about its own types.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
 from typing import Any
 
 from . import bundle as bundle_mod
 from . import graph as graph_mod
+from .audit import record_edit
+from .rubric import QUESTION_STATUSES
 from .store import Store
+from .utils import (NotFound, OrpheusError, from_json, new_id, now,
+                    require_choice, require_string, to_json)
 
 # Where a bundle names the property that says what part something played in a
 # document. Falls back to `role`, which is what the shipped contract bundle
@@ -46,16 +52,50 @@ DEFAULT_ROLE_PROPERTY = "role"
 # connected to everything at six hops.
 MAX_CHAIN = 3
 
+# Every shape this asks about. Ordered as a reviewer meets them: the ones that
+# need no graph first, then the ones the relation graph makes possible.
+KINDS = ("two_parts_in_one_document", "shared_detail", "person_bridges",
+         "shared_counterparty", "circular_relation")
+
 
 def _role_property(bundle: dict | None) -> str:
     extensions = ((bundle or {}).get("extensions", {}) or {}).get("orpheus", {}) or {}
     return extensions.get(ROLE_PROPERTY_HINT) or DEFAULT_ROLE_PROPERTY
 
 
+def fingerprint(kind: str, entity_ids: list[str]) -> str:
+    """What makes two runs raise the same question.
+
+    Its kind and the pages involved, order-independent -- so a reviewer's
+    judgement survives the graph being rebuilt, another document arriving, or
+    the chain being walked from the other end.
+    """
+    payload = json.dumps({"kind": kind, "entities": sorted(set(entity_ids))},
+                         sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()[:32]
+
+
+def _chain_digest(chain: list[dict]) -> str:
+    """The evidence, digested, so a judgement does not outlive it.
+
+    A question about the same two pages resting on different documents is a
+    different question, and a review made before that evidence arrived should
+    not silently keep applying to it.
+    """
+    payload = json.dumps(sorted(
+        json.dumps({k: v for k, v in hop.items() if k != "documents"},
+                   sort_keys=True, default=str)
+        + json.dumps(sorted(hop.get("documents") or []))
+        for hop in chain))
+    return hashlib.sha256(payload.encode()).hexdigest()[:32]
+
+
 def _question(kind: str, summary: str, entities: list[dict], chain: list[dict],
               asks: str, confirmed: bool, documents: list[str]) -> dict:
     return {
         "kind": kind, "summary": summary, "entities": entities,
+        "fingerprint": fingerprint(kind, [e["entity_id"] for e in entities]),
+        "chain_digest": _chain_digest(chain),
         "chain": chain, "documents": sorted(set(documents)),
         # Not a severity. A question whose every hop a person has checked is
         # worth someone's time; one built from unreviewed guesses is worth
@@ -201,6 +241,157 @@ def shared_counterparty(store: Store, graph: dict | None = None,
 
 
 # ---------------------------------------------------------------------------
+# The same details on two different pages
+# ---------------------------------------------------------------------------
+
+def shared_detail(store: Store, bundle: dict | None = None,
+                  properties: tuple[str, ...] = ("address", "registration_number"),
+                  limit: int = 50) -> list[dict]:
+    """Two pages whose documents give them the same stated detail.
+
+    A shared **address** is the workhorse of this kind of review and it is also
+    extremely common for dull reasons -- serviced offices, company formation
+    agents, accountants who register a hundred clients at their own door. The
+    question says so rather than implying otherwise.
+
+    A shared **registration number** is different in kind, and stronger: a
+    company number identifies one legal entity. Two pages carrying the same one
+    are either one company under two names that resolution has not merged, or an
+    extraction error. Both are worth knowing, and neither is wrongdoing.
+    """
+    bundle = bundle or bundle_mod.active(store)
+    out = []
+    for type_id, table in _named_tables(store, bundle):
+        columns = {row["name"] for row in store.query(f'PRAGMA table_info("{table}")')}
+        for prop in properties:
+            if prop not in columns:
+                continue
+            rows = store.query(
+                f'SELECT x."{prop}" AS detail, m.entity_id, e.canonical_name, '
+                f"       x.instance_id, x.document_id, x.status, d.filename "
+                f'FROM "{table}" x '
+                f"JOIN entity_mentions m ON m.instance_id = x.instance_id "
+                f"  AND m.unlinked_at IS NULL "
+                f"JOIN entities e ON e.entity_id = m.entity_id "
+                f"  AND e.merged_into IS NULL "
+                f"LEFT JOIN documents d ON d.document_id = x.document_id "
+                f'WHERE x."{prop}" IS NOT NULL AND TRIM(x."{prop}") != "" '
+                f"AND x.status != 'rejected'")
+
+            grouped: dict[str, list[dict]] = defaultdict(list)
+            for row in rows:
+                grouped[str(row["detail"]).strip().lower()].append(row)
+            for detail, mentions in grouped.items():
+                pages = {m["entity_id"] for m in mentions}
+                if len(pages) < 2:
+                    continue
+                names = sorted({m["canonical_name"] for m in mentions})
+                stated = mentions[0]["detail"]
+                out.append(_question(
+                    "shared_detail",
+                    (f"{' and '.join(names[:3])}"
+                     + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+                     + f" are all given the same {prop}: {stated}"),
+                    entities=[{"entity_id": e, "type_id": type_id,
+                               "name": next(m["canonical_name"] for m in mentions
+                                            if m["entity_id"] == e)}
+                              for e in sorted(pages)],
+                    chain=[{"instance_id": m["instance_id"],
+                            "part": f"{prop} = {m['detail']}",
+                            "document_id": m["document_id"],
+                            "filename": m["filename"] or m["document_id"],
+                            "status": m["status"],
+                            "documents": [m["document_id"]]} for m in mentions],
+                    asks=(("A registration number identifies one legal entity, so "
+                           "these are either one company under two names that has "
+                           "not been merged, or an extraction error. Compare the "
+                           "documents.")
+                          if prop == "registration_number" else
+                          ("Shared addresses are common and usually dull -- a "
+                           "serviced office, a formation agent, an accountant. Is "
+                           "this that, or are these parties less separate than the "
+                           "documents suggest?")),
+                    confirmed=all(m["status"] in ("confirmed", "amended")
+                                  for m in mentions),
+                    documents=[m["document_id"] for m in mentions]))
+                if len(out) >= limit:
+                    return _rank(out)
+    return _rank(out)
+
+
+# ---------------------------------------------------------------------------
+# One person, two sides
+# ---------------------------------------------------------------------------
+
+def person_bridges(store: Store, graph: dict | None = None,
+                   limit: int = 50) -> list[dict]:
+    """One person connected to two organisations that deal with each other.
+
+    The shape a reviewer is actually looking for, and the one the relation graph
+    was worth building to reach. It is still not a finding -- a person can
+    legitimately sit on both sides, and often the document says why -- but it is
+    the question most worth putting in front of somebody.
+
+    Read from the graph, so it needs both relations to have been extracted and
+    both endpoints to have entity pages. Where the wiki is thin this finds
+    nothing, which is what `coverage` is for.
+    """
+    graph = graph or graph_mod.build(store)
+    nodes, adjacency = graph["nodes"], graph["adjacency"]
+    edges: dict[tuple, list[dict]] = defaultdict(list)
+    for edge in graph["edges"]:
+        edges[(edge["from_entity_id"], edge["to_entity_id"])].append(edge)
+        edges[(edge["to_entity_id"], edge["from_entity_id"])].append(edge)
+
+    people = [e for e, node in nodes.items() if node["type_id"] == "Person"]
+    out = []
+    for person in sorted(people):
+        attached = sorted(n for n in adjacency.get(person, ())
+                          if nodes.get(n, {}).get("type_id") != "Person")
+        for index, left in enumerate(attached):
+            for right in attached[index + 1:]:
+                # The two organisations must themselves be related -- otherwise
+                # this is just somebody with two jobs, which is not a question.
+                between = edges.get((left, right))
+                if not between:
+                    continue
+                chain = []
+                confirmed = True
+                for a, b in ((person, left), (person, right), (left, right)):
+                    edge = max(edges[(a, b)],
+                               key=lambda e: (e["n_confirmed"], e["n_documents"]))
+                    chain.append({
+                        "from_entity_id": a, "from_name": nodes[a]["canonical_name"],
+                        "to_entity_id": b, "to_name": nodes[b]["canonical_name"],
+                        "link_type_id": edge["link_type_id"],
+                        "n_documents": edge["n_documents"],
+                        "n_confirmed": edge["n_confirmed"],
+                        "documents": edge["documents"],
+                    })
+                    confirmed = confirmed and bool(edge["n_confirmed"])
+                out.append(_question(
+                    "person_bridges",
+                    (f"{nodes[person]['canonical_name']} is connected to both "
+                     f"{nodes[left]['canonical_name']} and "
+                     f"{nodes[right]['canonical_name']}, which deal with each "
+                     f"other"),
+                    entities=[{"entity_id": e, "name": nodes[e]["canonical_name"],
+                               "type_id": nodes[e]["type_id"],
+                               "part": "person" if e == person else "organisation"}
+                              for e in (person, left, right)],
+                    chain=chain,
+                    asks=("Does a document explain the dual role -- a declared "
+                          "directorship, a secondment, a signature given on "
+                          "somebody's behalf? If nothing does, that absence is "
+                          "the thing to ask about."),
+                    confirmed=confirmed,
+                    documents=[d for hop in chain for d in hop["documents"]]))
+                if len(out) >= limit:
+                    return _rank(out)
+    return _rank(out)
+
+
+# ---------------------------------------------------------------------------
 # A chain that comes back
 # ---------------------------------------------------------------------------
 
@@ -277,8 +468,12 @@ def _rank(questions: list[dict]) -> list[dict]:
     from unreviewed machine guesses is a reason to check the extraction. Putting
     the loudest first would invert that.
     """
-    return sorted(questions, key=lambda q: (not q["confirmed_throughout"],
-                                            -len(q["documents"]), q["summary"]))
+    order = {"standing": 0, "open": 1, "explained": 2, "dismissed": 3}
+    return sorted(questions, key=lambda q: (
+        # What a person left standing comes first: they looked, and it stayed.
+        order.get(q.get("status") or "open", 1),
+        not q["confirmed_throughout"],
+        -len(q["documents"]), q["summary"]))
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +481,7 @@ def _rank(questions: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def raised(store: Store, bundle: dict | None = None,
-           graph: dict | None = None) -> dict:
+           graph: dict | None = None, open_only: bool = False) -> dict:
     """Every question the corpus raises, with what it rests on.
 
     `coverage` comes first for the same reason it does in the topology: two of
@@ -295,27 +490,158 @@ def raised(store: Store, bundle: dict | None = None,
     graph are the ones nobody will think to look for.
     """
     graph = graph or graph_mod.build(store)
-    found = (two_parts_in_one_document(store, bundle)
-             + shared_counterparty(store, graph)
-             + circular_relation(store, graph))
-    found = _rank(found)
+    found = _attach_reviews(store, _rank(
+        two_parts_in_one_document(store, bundle)
+        + shared_detail(store, bundle)
+        + person_bridges(store, graph)
+        + shared_counterparty(store, graph)
+        + circular_relation(store, graph)))
+
+    if open_only:
+        found = [q for q in found if q["status"] == "open"]
     checked = [q for q in found if q["confirmed_throughout"]]
+    standing = [q for q in found if q["status"] == "standing"]
+    outstanding = [q for q in found if q["status"] == "open"]
+    stale = [q for q in found if q["review_stale"]]
 
     if not found:
         note = ("Nothing in the shape of this corpus raises a question. That is "
                 "a statement about the relations that reached the graph, not a "
                 "clean bill of health -- read the coverage line first.")
     else:
-        note = (f"{len(found)} question(s), {len(checked)} of them resting "
-                f"entirely on links somebody has confirmed. None of this is a "
-                f"finding: each one names a chain and asks what explains it.")
+        note = (f"{len(found)} question(s): {len(standing)} somebody has looked "
+                f"at and left standing, {len(outstanding)} nobody has ruled on. "
+                f"{len(checked)} rest entirely on links somebody confirmed. None "
+                f"of this is a finding -- each one names a chain and asks what "
+                f"explains it.")
+        if stale:
+            note += (f" {len(stale)} carry a judgement made against different "
+                     f"evidence, and are open again.")
     return {
         "coverage": graph_mod.coverage(store),
         "questions": found,
         "n_questions": len(found),
+        "n_open": len(outstanding),
+        "n_standing": len(standing),
+        "n_stale_reviews": len(stale),
         "n_confirmed_throughout": len(checked),
         "by_kind": {kind: sum(1 for q in found if q["kind"] == kind)
-                    for kind in ("two_parts_in_one_document",
-                                 "shared_counterparty", "circular_relation")},
+                    for kind in KINDS},
         "note": note,
     }
+
+
+# ---------------------------------------------------------------------------
+# What a person decided
+# ---------------------------------------------------------------------------
+
+def review_question(store: Store, question_fingerprint: str, status: str,
+                    rationale: str, actor_id: str | None = None,
+                    kind: str | None = None, summary: str | None = None,
+                    subjects: list[dict] | None = None,
+                    chain_digest: str | None = None) -> dict:
+    """Record what somebody decided about a question, and why.
+
+    `rationale` is required for every state including `standing`, because the
+    reason is the part that is worth anything later. "Shared subcontractor,
+    specialist welder, three other suppliers use them too" is a fact somebody
+    established; without it the next reviewer establishes it again, and the one
+    after that.
+
+    A previous judgement is superseded rather than overwritten -- what somebody
+    decided last time stays readable after the evidence moved, for the same
+    reason nothing else in this store overwrites.
+    """
+    store.assert_writable()
+    require_choice(status, QUESTION_STATUSES, "status")
+    if status == "open":
+        raise OrpheusError(
+            "`open` is the absence of a judgement, not one to record. To undo a "
+            "review, record a new one saying what changed.")
+    require_string(rationale, "rationale")
+    require_string(question_fingerprint, "fingerprint")
+
+    review_id = new_id("qrv")
+    with store.transaction():
+        previous = store.one(
+            "SELECT * FROM question_reviews WHERE fingerprint = ? "
+            "AND superseded_at IS NULL", (question_fingerprint,))
+        if previous:
+            store.execute(
+                "UPDATE question_reviews SET superseded_at = ? WHERE review_id = ?",
+                (now(), previous["review_id"]))
+        store.insert("question_reviews", {
+            "review_id": review_id,
+            "fingerprint": question_fingerprint,
+            "kind": kind or (previous or {}).get("kind") or "unknown",
+            "summary": summary or (previous or {}).get("summary"),
+            "subjects_json": to_json(subjects) if subjects
+                             else (previous or {}).get("subjects_json"),
+            "chain_digest": chain_digest or (previous or {}).get("chain_digest"),
+            "status": status,
+            "rationale": rationale,
+            "reviewed_by": actor_id,
+            "reviewed_at": now(),
+            "superseded_at": None,
+        })
+        record_edit(store, "question_reviews", review_id, None, "review_question",
+                    previous={"status": previous["status"]} if previous else None,
+                    new={"status": status, "fingerprint": question_fingerprint},
+                    actor_id=actor_id, note=rationale)
+    return get_review(store, review_id)
+
+
+def get_review(store: Store, review_id: str) -> dict:
+    row = store.one("SELECT * FROM question_reviews WHERE review_id = ?",
+                    (review_id,))
+    if row is None:
+        raise NotFound(f"No review {review_id!r}.")
+    return {**row, "subjects": from_json(row["subjects_json"]) or []}
+
+
+def reviews(store: Store, status: str | None = None) -> list[dict]:
+    """Every live judgement, newest first."""
+    clause = " AND status = ?" if status else ""
+    params = (status,) if status else ()
+    return [{**r, "subjects": from_json(r["subjects_json"]) or []}
+            for r in store.query(
+                f"SELECT * FROM question_reviews WHERE superseded_at IS NULL"
+                f"{clause} ORDER BY reviewed_at DESC", params)]
+
+
+def review_history(store: Store, question_fingerprint: str) -> list[dict]:
+    """Every judgement ever made about this question, oldest first."""
+    return store.query(
+        "SELECT * FROM question_reviews WHERE fingerprint = ? "
+        "ORDER BY reviewed_at", (question_fingerprint,))
+
+
+def _attach_reviews(store: Store, found: list[dict]) -> list[dict]:
+    """Hang the live judgement on each question, and say if it went stale.
+
+    A review made against different evidence is not a judgement about the
+    question in front of you. Rather than silently keeping it or silently
+    dropping it, the question carries both: what was decided, and that the
+    chain has changed since.
+    """
+    if not found:
+        return found
+    marks = ",".join("?" * len(found))
+    rows = {r["fingerprint"]: r for r in store.query(
+        f"SELECT * FROM question_reviews WHERE superseded_at IS NULL "
+        f"AND fingerprint IN ({marks})",
+        tuple(q["fingerprint"] for q in found))}
+    for question in found:
+        review = rows.get(question["fingerprint"])
+        if review is None:
+            question["status"] = "open"
+            question["review"] = None
+            question["review_stale"] = False
+            continue
+        stale = bool(review["chain_digest"]
+                     and review["chain_digest"] != question["chain_digest"])
+        question["review"] = {**review, "stale": stale}
+        question["review_stale"] = stale
+        # A stale judgement does not settle the question in front of you.
+        question["status"] = "open" if stale else review["status"]
+    return found

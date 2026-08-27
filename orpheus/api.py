@@ -720,7 +720,7 @@ def get_centrality(store, actor, body, **_):
 
 
 @route("GET", "/questions")
-def get_questions(store, actor, **_):
+def get_questions(store, actor, body, **_):
     """Questions the shape of the corpus raises. Administrator only.
 
     Spans every document, like the topology it reads. Nothing here is a
@@ -732,7 +732,40 @@ def get_questions(store, actor, **_):
             "These questions are drawn from the whole corpus, including "
             "documents you may not be able to read, so it is an administrator "
             "view.")
-    return questions_mod.raised(store)
+    return questions_mod.raised(
+        store, open_only=body.get("open_only") in ("1", "true", "True", True))
+
+
+@route("POST", "/questions/review")
+def post_review_question(store, actor, body, **_):
+    """Record what somebody decided about a question, and why.
+
+    The verb that makes this a feature rather than a display. `standing` is how
+    a person says *this one is real and stays on the list*; `rationale` is
+    required for every state, because the reason is the part worth anything to
+    the next reviewer.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "These questions are drawn from the whole corpus, so ruling on one "
+            "is an administrator action.")
+    if not body.get("fingerprint") or not body.get("status"):
+        raise ApiError(400, "Give `fingerprint` and `status`.")
+    if not body.get("rationale"):
+        raise ApiError(400, "Give `rationale` -- a judgement with no reason "
+                            "means the next reviewer establishes it again.")
+    return questions_mod.review_question(
+        store, body["fingerprint"], body["status"], body["rationale"],
+        actor_id=_actor_id(actor), kind=body.get("kind"),
+        summary=body.get("summary"), subjects=body.get("subjects"),
+        chain_digest=body.get("chain_digest"))
+
+
+@route("GET", "/questions/reviews")
+def get_question_reviews(store, actor, body, **_):
+    if not actor.get("is_admin"):
+        raise PermissionDenied("Administrator view.")
+    return {"reviews": questions_mod.reviews(store, status=body.get("status"))}
 
 
 @route("GET", "/corroboration")

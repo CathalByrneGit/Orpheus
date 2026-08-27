@@ -62,6 +62,15 @@ TENSION_KINDS = (
 # instance, because it measures how good the suggestions are.
 SUGGESTION_STATUSES = ("offered", "accepted", "dismissed")
 
+# What a person decided about a question the corpus raised. `standing` is the
+# load-bearing one: it is how somebody says *this is real and it stays on the
+# list*, which is what separates a feature that informs a decision from one that
+# only ever shows the same list again. `explained` is the ordinary outcome and
+# is not a dismissal -- it records the innocent explanation so nobody has to
+# rediscover it.
+QUESTION_STATUSES = ("open", "explained", "standing", "dismissed")
+SETTLED_QUESTIONS = ("explained", "dismissed")
+
 ACTIONS = ("view", "edit", "share", "delete")
 SHARE_ROLES = ("viewer", "editor")
 # Matches datasette-paper's three levels, which is not a coincidence: the same
