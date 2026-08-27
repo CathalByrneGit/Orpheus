@@ -586,6 +586,45 @@ def cmd_budget(args) -> int:
     return 1 if status["exceeded"] else 0
 
 
+def cmd_questions(args) -> int:
+    """What the shape of the corpus raises. None of it is a finding."""
+    from . import questions as questions_mod
+
+    store = open_store(args, mode="read")
+    try:
+        report = questions_mod.raised(store)
+    finally:
+        store.close()
+
+    if args.json:
+        emit(report, True)
+        return 0
+
+    # Coverage first: two of the three checks read the relation graph, and a
+    # question never raised because the evidence never got there is the one
+    # nobody will think to look for.
+    print(report["coverage"]["note"])
+    print(f"\n{report['note']}\n")
+    for question in report["questions"]:
+        if args.confirmed_only and not question["confirmed_throughout"]:
+            continue
+        mark = "checked" if question["confirmed_throughout"] else "unreviewed"
+        print(f"  [{mark:>10}] {question['summary']}")
+        for hop in question["chain"]:
+            if "from_name" in hop:
+                state = (f"{hop['n_confirmed']} confirmed"
+                         if hop["n_confirmed"] else "nobody has checked this")
+                print(f"        {hop['from_name'][:22]:24} "
+                      f"{hop['link_type_id'][:16]:18} {hop['to_name'][:22]:24} "
+                      f"{hop['n_documents']} doc(s), {state}")
+            else:
+                print(f"        {hop.get('part', '?'):<16} "
+                      f"{hop.get('filename', hop.get('document_id', ''))[:28]:30} "
+                      f"{hop.get('status', '')}")
+        print(f"        -> {question['asks']}\n")
+    return 0
+
+
 def cmd_read(args) -> int:
     """Read a document a passage at a time, with the machine offering."""
     from . import companion
@@ -1117,6 +1156,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="this deployment's rate per million characters, "
                              "for an estimate that is labelled an estimate")
     budget.add_argument("--actor-id")
+
+    asker = add("questions", cmd_questions,
+                "what the shape of the corpus raises -- none of it a finding")
+    asker.add_argument("--confirmed-only", action="store_true",
+                       help="only chains where every hop has been confirmed")
 
     reader = add("read", cmd_read, "read a document a passage at a time")
     reader.add_argument("document_id")

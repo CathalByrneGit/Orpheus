@@ -68,6 +68,15 @@ framework's boilerplate is one source wearing six hats;
 `orpheus corroboration` says so instead of reporting six agreeing sources, and
 changes no confidence value doing it.
 
+`orpheus questions` asks what the shape is worth looking at — two suppliers
+connected only through one shared subcontractor, a party recorded on two sides
+of one agreement, a chain of subcontracts that comes back round. **None of it is
+a finding.** A shared subcontractor is usually a small market; what the corpus
+can honestly say is that two parties are closer than they look, here is the
+chain, and here is how much of it anybody has checked. Chains somebody has
+confirmed sort first, because one built from unreviewed guesses is a reason to
+check the extraction rather than to act.
+
 `orpheus graph topology` reads the corpus as a network — islands, the pages
 holding it together, clusters that never touch. It leads with how much of the
 corpus reached the graph, because a sparse-looking network over 30% coverage
@@ -120,6 +129,7 @@ Start at **[docs/index.md](docs/index.md)**.
 | [Reading with the machine](docs/reading-companion.md) | A passage at a time, and why a suggestion is not an extraction |
 | [Conflicts and lint](docs/conflicts-and-lint.md) | The fourth review verb, the adversarial pass, and the markdown export |
 | [Network and corroboration](docs/network-and-corroboration.md) | The relation graph, counting agreement honestly, and what a budget is denominated in |
+| [Questions the corpus raises](docs/questions.md) | Where the shape is worth asking about, and why none of it is a finding |
 | [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
 | [Extraction engines](docs/extraction-engines.md) | Four ways to run the model pass, and when each is right |
 | [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
@@ -164,7 +174,7 @@ top of the page. [Why](docs/conflicts-and-lint.md).
 
 ## Status
 
-549 tests:
+563 tests:
 
 ```bash
 pip install -e '.[dev]'

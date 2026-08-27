@@ -128,6 +128,22 @@ that runs through a relation nobody has checked is a lead, not a finding, and
 connected without saying how many hops apart and how much of the chain has been
 reviewed.
 
+### Pattern: Questions, never findings
+
+```bash
+orpheus --db store.sqlite questions --json
+```
+
+Shared counterparties, one party in two roles, relations that come back round.
+**None of it is a finding**, and reporting it as one would do real damage — a
+shared subcontractor is usually a small market or a specialist everybody uses.
+Report the chain, the documents behind each hop, and `confirmed_throughout`.
+Never use the words "conflict of interest" about this output; the store has no
+notion of ownership, directorships or donations.
+
+A question resting on unreviewed links is a reason to check the extraction, not
+to act. Say which.
+
 **Disconnected cluster pairs** are the highest-value finding. Two clusters with
 no relation between them are two things nobody has connected. Name the specific
 entities on each side and what might join them — the value is not "there may be

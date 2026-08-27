@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Questions{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus') }}">&larr; Orpheus</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/network') }}">Network</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/lint') }}">Lint</a></p>
+
+<h1>Questions this corpus raises</h1>
+
+<p class="message-info" style="border-left:3px solid #1d4ed8">
+  <strong>None of this is a finding.</strong> A shared subcontractor is usually a
+  small market or a specialist everybody uses. What the corpus can honestly say
+  is that two parties are closer than they look, here is the chain, and here is
+  how much of it anybody has checked. Saying more than that from a graph join
+  would be an accusation drawn from a join.
+</p>
+
+{# Coverage first: two of the three checks read the relation graph, and a
+   question never raised because the evidence never reached the graph is the one
+   nobody will think to look for. #}
+<p style="color:#666">{{ report.coverage.note }}</p>
+<p style="color:#666">{{ report.note }}</p>
+
+{% for question in report.questions %}
+<div style="border-left:3px solid {% if question.confirmed_throughout %}#166534{% else %}#999{% endif %};padding:.8em 1em;margin-bottom:.8em;background:#fafafa">
+  <p style="margin:0">
+    <strong>{{ question.summary }}</strong><br>
+    <span style="color:#666">{{ question.kind|replace('_', ' ') }} &middot;
+      {% if question.confirmed_throughout %}every hop confirmed
+      {% else %}<span style="color:#b45309">rests on links nobody has
+      checked</span>{% endif %}</span>
+  </p>
+
+  <ul style="margin:.5em 0;color:#444">
+    {% for hop in question.chain %}
+    <li>
+      {% if hop.from_name %}
+        <a href="{{ urls.path('/-/orpheus/wiki/' + hop.from_entity_id) }}">{{ hop.from_name }}</a>
+        <em>{{ hop.link_type_id|replace('_', ' ') }}</em>
+        <a href="{{ urls.path('/-/orpheus/wiki/' + hop.to_entity_id) }}">{{ hop.to_name }}</a>
+        &middot; {{ hop.n_documents }} document(s),
+        {% if hop.n_confirmed %}{{ hop.n_confirmed }} confirmed{% else %}unchecked{% endif %}
+      {% else %}
+        recorded as <strong>{{ hop.part }}</strong> in
+        <a href="{{ urls.path('/-/orpheus/document/' + hop.document_id) }}">{{ hop.filename }}</a>
+        &middot; {{ hop.status }}
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  <p style="margin:.3em 0 0;color:#666">{{ question.asks }}</p>
+</div>
+{% endfor %}
+
+{% if not report.questions %}
+<p style="color:#666">Nothing in the shape of this corpus raises a question.
+Read the coverage line above before treating that as an all-clear &mdash; two of
+these three checks can only see relations that reached the graph.</p>
+{% endif %}
+{% endblock %}

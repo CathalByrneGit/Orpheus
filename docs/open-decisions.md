@@ -610,7 +610,14 @@ failure now leaves the run `partial`, keeps what was found, and says so.
 
 ## Still out of scope for Phase 1
 
-Conflict-of-interest and procurement views.
+Procurement-specific views, and conflict-of-interest *detection*.
+
+[Questions the corpus raises](questions.md) is the honest part of the latter:
+shared counterparties, one party in two roles, relations that come back round.
+What it deliberately is not is detection — it has no notion of ownership,
+directorships or donations, those live in registers Orpheus does not read, and
+treating graph shape as a finding is the failure this whole design guards
+against.
 
 **Three things that were on this list are now in.** Entity resolution and alias
 merging arrived with [the wiki](entities.md); the cross-document relation graph

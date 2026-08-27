@@ -47,6 +47,7 @@ out would have made the wiki misleading rather than merely incomplete:
 | [Reading with the machine](reading-companion.md) | A passage at a time, and why a suggestion is not an extraction |
 | [Conflicts and lint](conflicts-and-lint.md) | The fourth review verb, the adversarial pass, and the markdown export |
 | [Network and corroboration](network-and-corroboration.md) | The relation graph, counting agreement honestly, and what a budget is denominated in |
+| [Questions the corpus raises](questions.md) | Where the shape is worth asking about — and why none of it is a finding |
 | [Provenance and amendment](provenance-and-amendment.md) | The hardest part: how a machine guess becomes a checked fact, and how extraction quality gets measured |
 | [API reference](api-reference.md) | Every route, its permissions, and its response shape |
 | [Deployment](deployment.md) | Running it, and the WAL trap that catches people |

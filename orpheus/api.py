@@ -29,6 +29,7 @@ from . import export_md
 from . import companion as companion_mod
 from . import corroboration as corroboration_mod
 from . import graph as graph_mod
+from . import questions as questions_mod
 from . import lint as lint_mod
 from . import llm, quality, review, rubric, tensions as tensions_mod
 from . import textract
@@ -716,6 +717,22 @@ def get_centrality(store, actor, body, **_):
     sample = body.get("sample")
     return graph_mod.centrality(
         graph_mod.build(store), k=int(sample) if sample else None)
+
+
+@route("GET", "/questions")
+def get_questions(store, actor, **_):
+    """Questions the shape of the corpus raises. Administrator only.
+
+    Spans every document, like the topology it reads. Nothing here is a
+    finding: each question names a chain, cites the documents behind each hop,
+    and says how much of it anybody has confirmed.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "These questions are drawn from the whole corpus, including "
+            "documents you may not be able to read, so it is an administrator "
+            "view.")
+    return questions_mod.raised(store)
 
 
 @route("GET", "/corroboration")
