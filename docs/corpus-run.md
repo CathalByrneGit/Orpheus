@@ -67,7 +67,7 @@ and `huggingface.co` were not. Confirm before assuming.
 ## The run
 
 ```bash
-pip install -e '.[dev]' && pip install llm-anthropic
+pip install -e '.[dev,pdf]' && pip install llm-anthropic
 
 orpheus --db store.sqlite init --admin "Your Name"
 orpheus --db store.sqlite budget --set-limit 2000000 --window total
@@ -117,6 +117,10 @@ Enough documents to overlap. The interesting findings — corroboration,
 conflicts, shared counterparties, the network having any shape at all — all need
 the same entity to appear in more than one document. Twenty contracts from one
 buyer will say far more than two hundred unrelated ones.
+
+`dev` does not carry a PDF text backend, which is why the install line above
+asks for `pdf` too — without it every PDF in the corpus fails at ingest with no
+text extracted.
 
 Scanned PDFs are the harder case and the more realistic one for public bodies.
 `--ocr` needs Tesseract installed; without it a scan ingests with no text and
