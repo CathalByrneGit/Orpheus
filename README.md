@@ -29,6 +29,7 @@ document.pdf
   → review        confirm / amend / reject, nothing overwritten
   → analyse       versioned rule concepts + optional narrative reading
   → escalate      opt-in comparison against the rest of the corpus
+  → read          a passage at a time, offering what seems worth recording
   → graph         relations between pages, with every source behind each one
   → export        the wiki as a portable markdown bundle
 ```
@@ -51,6 +52,15 @@ sides, and **accepted** is a place a reviewer can stop. `orpheus lint` hunts for
 the ones nobody recorded, along with the other ways the store can mislead a
 reader; it reports located rows, never general observations, and it will not
 give a clean bill of health it has not earned.
+
+`orpheus read <id> --page N` — or the reading page in the browser — goes through
+a document a passage at a time, offering what it seems to hold. **Nothing it
+offers is in the store until you say so.** That is not politeness: proposals
+nobody asked for, landed as unconfirmed instances, would pour into the number
+extraction quality is measured by. Accepting writes through the same path a
+batch pass uses, carrying the page, the excerpt and the span; dismissing is kept,
+because it is the only evidence there is about whether the suggestions are worth
+reading.
 
 The mirror case is agreement, and it is counted in **distinct wordings across
 distinct documents** rather than in rows. Six call-off contracts carrying one
@@ -107,6 +117,7 @@ Start at **[docs/index.md](docs/index.md)**.
 | [Data model](docs/data-model.md) | Tables, the ontology bundle, the confidence rubric |
 | [Pipeline walkthrough](docs/pipeline-walkthrough.md) | The nine steps, with the function that runs each |
 | [Entities: the wiki](docs/entities.md) | Mentions vs entities, and why a page is a projection |
+| [Reading with the machine](docs/reading-companion.md) | A passage at a time, and why a suggestion is not an extraction |
 | [Conflicts and lint](docs/conflicts-and-lint.md) | The fourth review verb, the adversarial pass, and the markdown export |
 | [Network and corroboration](docs/network-and-corroboration.md) | The relation graph, counting agreement honestly, and what a budget is denominated in |
 | [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
@@ -153,7 +164,7 @@ top of the page. [Why](docs/conflicts-and-lint.md).
 
 ## Status
 
-527 tests:
+549 tests:
 
 ```bash
 pip install -e '.[dev]'
@@ -163,8 +174,8 @@ python3 -m pytest
 They call the core directly, which cannot catch what only goes wrong with a real
 server in the middle. `tests/e2e/browser_loop.sh` drives the whole loop over
 HTTP against a live Datasette — multipart limits, CSRF, upload, extraction,
-grounding, confirm/amend/reject, rollback, the lint page, the network page and
-the markdown export — and checks the store agrees with what the browser was told.
+grounding, confirm/amend/reject, rollback, reading a passage and recording from
+it, the lint page, the network page and the markdown export — and checks the store agrees with what the browser was told.
 
 The core has no third-party dependencies. Every extraction engine, the PDF
 backends and OCR are optional installs, and the code says which one is missing

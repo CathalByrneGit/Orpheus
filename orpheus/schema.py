@@ -483,6 +483,80 @@ MIGRATIONS: list[dict] = [
             "ON tension_sides (instance_id)",
         ],
     },
+    {
+        "version": 8,
+        "name": "reading_companion",
+        "statements": [
+            # A batch extraction is a deliberate act over a whole document, and
+            # its output is a review queue somebody asked for. A companion
+            # firing as a person reads produces proposals nobody asked for,
+            # most of which will be ignored.
+            #
+            # Landing those as `unconfirmed` instances would do three things,
+            # each quietly: flood the review queue with work nobody requested,
+            # let `propose_entities()` build wiki pages out of guesses nobody
+            # looked at, and -- worst -- pollute `extraction_quality` with
+            # proposals that were never reviewed. That last one is the number
+            # Phase 1 turns on, so a suggestion must not be an extraction until
+            # a person says it is.
+            #
+            # Accepting writes the instance through the same `insert_instance`
+            # and `write_provenance` path a batch pass uses, so there is still
+            # exactly one way an instance comes into being.
+            """
+            CREATE TABLE IF NOT EXISTS suggestions (
+                suggestion_id   TEXT PRIMARY KEY,
+                document_id     TEXT NOT NULL REFERENCES documents(document_id),
+                page_no         INTEGER,
+                type_id         TEXT NOT NULL,
+                properties_json TEXT,
+                excerpt         TEXT,
+                char_start      INTEGER,
+                char_end        INTEGER,
+                alignment       TEXT,
+                engine          TEXT NOT NULL,
+                source          TEXT NOT NULL,
+                confidence      REAL NOT NULL,
+                -- What makes re-reading a page bearable. Without it, scrolling
+                -- back re-offers everything already dismissed, and the
+                -- companion becomes something to be closed.
+                fingerprint     TEXT NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'offered',
+                instance_id     TEXT,
+                suggested_at    TEXT NOT NULL,
+                decided_by      TEXT REFERENCES actors(actor_id),
+                decided_at      TEXT,
+                note            TEXT
+            )
+            """,
+            # One live offer per distinct finding per document. Partial, so a
+            # dismissed suggestion does not block the same finding being
+            # offered again after the text is re-extracted differently.
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_live "
+            "ON suggestions (document_id, fingerprint) WHERE status = 'offered'",
+            "CREATE INDEX IF NOT EXISTS idx_suggestions_page "
+            "ON suggestions (document_id, page_no, status)",
+
+            # Which passages a person has actually been through, and with what.
+            # A different fact from "findings exist on this page": a page read
+            # and found to contain nothing is not the same as a page nobody has
+            # opened, and only this table can tell them apart. It is what makes
+            # "we went through this together" checkable rather than a feeling.
+            """
+            CREATE TABLE IF NOT EXISTS reading_passages (
+                document_id TEXT NOT NULL REFERENCES documents(document_id),
+                page_no     INTEGER NOT NULL,
+                actor_id    TEXT REFERENCES actors(actor_id),
+                engine      TEXT NOT NULL,
+                n_suggested INTEGER NOT NULL DEFAULT 0,
+                first_read  TEXT NOT NULL,
+                last_read   TEXT NOT NULL,
+                n_reads     INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (document_id, page_no, actor_id, engine)
+            )
+            """,
+        ],
+    },
 ]
 
 

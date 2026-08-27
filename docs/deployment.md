@@ -256,6 +256,29 @@ is a later phase.
 
 ---
 
+## Upgrading: migrate before you restart
+
+**Migrations run only on a write connection, and Datasette holds a shared one.**
+So installing a newer Orpheus and restarting the server leaves the plugin
+serving a schema it does not match — and the first symptom would otherwise be
+`no such table` from a route that worked the day before.
+
+The order is: stop the server, migrate, start it.
+
+```bash
+docker compose stop orpheus
+docker compose run --rm --no-deps orpheus \
+  orpheus --db /data/orpheus.sqlite migrate
+docker compose start orpheus
+```
+
+`orpheus migrate --check` reports what is pending and exits non-zero without
+applying anything, so a deployment script can gate the restart on it.
+
+`init` migrates on the way in, so a fresh store never needs this. It is the
+upgrade path that does — and the plugin refuses to serve a stale schema with a
+sentence naming the command rather than a database error.
+
 ## Backups
 
 Copy **the database and its `-wal` sidecar together**, or checkpoint first.

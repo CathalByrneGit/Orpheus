@@ -282,6 +282,43 @@ observations is one nobody acts on. When nothing is found the headline says how
 much has been reviewed rather than reporting an all-clear — over a handful of
 reviews, "nothing found" says more about how little was checked.
 
+### Reading with the machine
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| `POST` | `/documents/<id>/passages/<n>/read` | view | `engine`, `tier`, `cloud_opt_in` |
+| `GET` | `/documents/<id>/passages/<n>` | view | `?status=offered\|accepted\|dismissed\|all` |
+| `GET` | `/documents/<id>/reading` | view | Progress, per actor |
+| `POST` | `/suggestions/<id>/accept` | edit on its document | `properties` corrects on the way in |
+| `POST` | `/suggestions/<id>/dismiss` | edit on its document | `note` |
+| `GET` | `/suggestions/quality` | **administrator**, or `?document_id=` | Acceptance rate per engine |
+
+The read route is a `POST` guarded by `view`, which looks odd and is right: it
+writes, but what it writes is the reader's own progress and a set of proposals,
+not a change to the document. Requiring `edit` would stop a viewer using the
+companion at all.
+
+**A suggestion is not an extraction.** Reading a passage writes no instance and
+no provenance:
+
+```json
+{ "page_no": 1, "engine": "deterministic", "n_offered": 4,
+  "suggestions": [ { "suggestion_id": "sug_…", "type_id": "KeyDate",
+                     "status": "offered", "confidence": 1.0,
+                     "properties": { "value": "2024-03-03", "date_role": "start" },
+                     "excerpt": "This Agreement is made on 3 March 2024…" } ] }
+```
+
+Accepting writes the instance through the same path a batch pass uses —
+`source: "human"`, `status: "confirmed"`, with provenance carrying the page, the
+excerpt and the span under `source_label: "companion:<engine>"`. Dismissals are
+kept: they are the only evidence there is about whether the suggestions are
+worth reading, which is what `/suggestions/quality` reports. That measure is
+deliberately separate from `/quality` — one measures extraction against review,
+the other measures offers against a person's attention.
+
+See [Reading with the machine](reading-companion.md).
+
 ### The corpus as a network
 
 | Method | Path | Permission | Notes |

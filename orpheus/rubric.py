@@ -55,6 +55,13 @@ TENSION_KINDS = (
     "unexplained",
 )
 
+# What has happened to a proposal the companion made while somebody was
+# reading. Deliberately not the instance vocabulary: `unconfirmed` means a
+# machine wrote a row and nobody has checked it, and an offered suggestion is
+# not a row yet. `dismissed` is kept rather than deleted, like a rejected
+# instance, because it measures how good the suggestions are.
+SUGGESTION_STATUSES = ("offered", "accepted", "dismissed")
+
 ACTIONS = ("view", "edit", "share", "delete")
 SHARE_ROLES = ("viewer", "editor")
 # Matches datasette-paper's three levels, which is not a coincidence: the same

@@ -586,6 +586,114 @@ def cmd_budget(args) -> int:
     return 1 if status["exceeded"] else 0
 
 
+def cmd_read(args) -> int:
+    """Read a document a passage at a time, with the machine offering."""
+    from . import companion
+
+    if args.accept or args.dismiss:
+        store = open_store(args)
+        try:
+            if args.accept:
+                properties = dict(pair.split("=", 1) for pair in args.set or [])
+                result = companion.accept_suggestion(
+                    store, args.accept, args.actor_id,
+                    properties=properties or None, note=args.note)
+            else:
+                result = companion.dismiss_suggestion(
+                    store, args.dismiss, args.actor_id, note=args.note)
+        finally:
+            store.close()
+        if args.json:
+            emit(result, True)
+            return 0
+        print(f"{result['suggestion_id']} is now {result['status']}."
+              + (f" Recorded as {result['instance_id']}."
+                 if result.get("instance_id") else ""))
+        return 0
+
+    if args.page is None:
+        store = open_store(args, mode="read")
+        try:
+            progress = companion.reading_progress(store, args.document_id,
+                                                  actor_id=args.actor_id)
+        finally:
+            store.close()
+        if args.json:
+            emit(progress, True)
+            return 0
+        print(progress["note"])
+        if progress["unread"]:
+            print(f"  unread: {', '.join(str(n) for n in progress['unread'])}")
+        return 0
+
+    store = open_store(args)
+    try:
+        result = companion.read_passage(
+            store, args.document_id, args.page, actor_id=args.actor_id,
+            engine=args.engine, tier=args.tier, opt_in=args.cloud_opt_in)
+    finally:
+        store.close()
+
+    if args.json:
+        emit(result, True)
+        return 0
+    if not result["suggestions"]:
+        print(f"Page {args.page} read, and nothing stood out. That is recorded "
+              "too -- a page nobody opened and a page holding nothing are "
+              "different things.")
+        return 0
+    print(f"Page {args.page}: {result['n_offered']} thing(s) worth a look. "
+          "None of this is in the store until you record it.\n")
+    for offer in result["suggestions"]:
+        values = ", ".join(f"{k}={v}" for k, v in offer["properties"].items()
+                           if k != "page_no")
+        print(f"  {offer['suggestion_id']}  {offer['type_id']:<16} {values}")
+        print(f"      {' '.join((offer['excerpt'] or '').split())[:76]!r}")
+    return 0
+
+
+def cmd_migrate(args) -> int:
+    """Bring a store's schema up to what this build expects.
+
+    Its own command because Datasette holds a shared connection and cannot
+    migrate under itself: an upgrade is stop the server, migrate, start it.
+    """
+    store = open_store(args, mode="read")
+    try:
+        pending = store.pending_migrations()
+    finally:
+        store.close()
+
+    if not pending:
+        if args.json:
+            emit({"applied": [], "pending": []}, True)
+            return 0
+        print("Already current. Nothing to apply.")
+        return 0
+    if args.check:
+        if args.json:
+            emit({"applied": [], "pending": pending}, True)
+            return 1
+        print(f"Behind: migration(s) {pending} have not been applied.")
+        # Non-zero so a deployment script can gate a restart on it.
+        return 1
+
+    # Opening for write migrates on the way in, so `store.migrate()` here would
+    # report nothing applied and read as a no-op. What was pending a moment ago
+    # is the honest answer.
+    store = open_store(args)
+    try:
+        store.migrate()
+        remaining = store.pending_migrations()
+    finally:
+        store.close()
+    if args.json:
+        emit({"applied": pending, "pending": remaining}, True)
+        return 0
+    print(f"Applied migration(s) {pending}.")
+    return 0
+
+
 def cmd_lint(args) -> int:
     """Look for where the store is misleading a reader, and say where."""
     from . import lint as lint_mod
@@ -1009,6 +1117,25 @@ def build_parser() -> argparse.ArgumentParser:
                         help="this deployment's rate per million characters, "
                              "for an estimate that is labelled an estimate")
     budget.add_argument("--actor-id")
+
+    reader = add("read", cmd_read, "read a document a passage at a time")
+    reader.add_argument("document_id")
+    reader.add_argument("--page", type=int,
+                        help="the passage to read; omit for progress")
+    reader.add_argument("--actor-id")
+    reader.add_argument("--engine", default="deterministic")
+    reader.add_argument("--tier", default="local", choices=("local", "cloud"))
+    reader.add_argument("--cloud-opt-in", action="store_true")
+    reader.add_argument("--accept", metavar="SUGGESTION_ID")
+    reader.add_argument("--dismiss", metavar="SUGGESTION_ID")
+    reader.add_argument("--set", action="append", metavar="KEY=VALUE",
+                        help="correct a field while accepting (repeatable)")
+    reader.add_argument("--note")
+
+    migrator = add("migrate", cmd_migrate, "bring the schema up to this build")
+    migrator.add_argument("--check", action="store_true",
+                          help="report what is pending and exit non-zero, "
+                               "without applying anything")
 
     linter = add("lint", cmd_lint, "look for where the store misleads a reader")
     linter.add_argument("--document-id")

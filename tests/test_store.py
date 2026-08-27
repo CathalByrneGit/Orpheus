@@ -249,3 +249,42 @@ def test_recomputing_marks_corpus_comparisons_stale(tmp_path):
 def test_a_fresh_store_needs_no_recompute(store):
     # Nothing to repair, and no spurious audit row claiming otherwise.
     assert store.one("SELECT 1 FROM edit_history WHERE action = 'migrate'") is None
+
+
+# -- serving a store this build does not match --------------------------------
+#
+# Migrations run only on a write open, and Datasette holds a shared connection,
+# so an upgraded deployment serves a stale schema until somebody runs the CLI.
+# Found by upgrading a store and watching every new route return `no such
+# table` -- invisible to the suite, because tests build fresh stores.
+
+def test_a_fresh_store_is_current(store):
+    assert store.pending_migrations() == []
+    store.assert_current()
+
+
+def test_a_store_behind_this_build_names_the_fix(store):
+    from orpheus.utils import OrpheusError
+    store.execute("DELETE FROM schema_migrations WHERE version = "
+                  "(SELECT MAX(version) FROM schema_migrations)")
+    pending = store.pending_migrations()
+    assert len(pending) == 1
+
+    with pytest.raises(OrpheusError) as caught:
+        store.assert_current()
+    message = str(caught.value)
+    # A sentence naming the command, not `no such table` from a route that
+    # worked yesterday.
+    assert "orpheus" in message and "migrate" in message
+    assert str(pending) in message
+
+
+def test_a_store_with_no_migration_history_is_entirely_behind(db_path):
+    import sqlite3
+    from orpheus.schema import MIGRATIONS
+    sqlite3.connect(db_path).close()
+    empty = Store(db_path, mode="read")
+    try:
+        assert empty.pending_migrations() == [m["version"] for m in MIGRATIONS]
+    finally:
+        empty.close()

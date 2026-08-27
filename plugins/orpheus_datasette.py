@@ -213,6 +213,12 @@ async def _call(datasette, request, method: str, path: str,
 
     def run(conn):
         store = Store.adopt(conn, path=database.path, owns_transaction=not writing)
+        # Migrations only run on a write open, and Datasette holds a shared
+        # connection -- so an upgraded deployment serves a stale schema until
+        # somebody runs the CLI. Checked here, once, so the symptom is a
+        # sentence naming the fix rather than `no such table` from a route that
+        # worked yesterday.
+        store.assert_current()
         status, payload = orpheus_api.handle(store, method, path, body or {},
                                              actor=actor)
         if writing and status >= 400:
@@ -238,6 +244,8 @@ def register_routes():
         (r"^/-/orpheus/upload$", upload),
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)$", document_page),
         (r"^/-/orpheus/review$", review),
+        (r"^/-/orpheus/read/act$", read_act),
+        (r"^/-/orpheus/read/(?P<document_id>[^/]+)$", read_page),
         (r"^/-/orpheus/lint$", lint_page),
         (r"^/-/orpheus/network$", network_page),
         (r"^/-/orpheus/wiki$", wiki_index),
@@ -273,6 +281,102 @@ def table_actions(datasette, actor, database, table):
 # ---------------------------------------------------------------------------
 # The wiki
 # ---------------------------------------------------------------------------
+
+async def read_page(datasette, request):
+    """Reading one passage with the machine: the page, and what it offers.
+
+    The surface this project was started for. Everything it shows on the right
+    is a proposal, not a row -- the store learns nothing until a person says so.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    document_id = request.url_vars["document_id"]
+
+    status, document = await _call(datasette, request, "GET",
+                                   f"/documents/{document_id}")
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus", error=document["error"]["message"])
+
+    try:
+        page_no = max(1, int(request.args.get("page") or 1))
+    except ValueError:
+        page_no = 1
+
+    _, progress = await _call(datasette, request, "GET",
+                              f"/documents/{document_id}/reading")
+    status, page = await _call(
+        datasette, request, "GET",
+        f"/documents/{document_id}/passages/{page_no}", {"status": "all"})
+    if status != 200:
+        return _redirect(datasette, f"/-/orpheus/document/{document_id}",
+                         error=page["error"]["message"])
+
+    # Split here rather than in the template: what is still being offered and
+    # what has been settled are different questions, and the page should not
+    # have to work that out in a loop.
+    offered = [s for s in page["suggestions"] if s["status"] == "offered"]
+    decided = [s for s in page["suggestions"] if s["status"] != "offered"]
+
+    _, capabilities = await _call(datasette, request, "GET", "/capabilities")
+    available = (capabilities or {}).get("extraction_engines") or {}
+    return await _render(datasette, request, "orpheus_read.html", {
+        "document": document.get("document", document),
+        "page": {**page, "suggestions": offered},
+        "decided": decided,
+        "progress": progress or {},
+        "engines": [name for name, ready in available.items()
+                    if ready and name != "deterministic"],
+        "error": request.args.get("error"),
+        "note": request.args.get("note"),
+    })
+
+
+async def read_act(datasette, request):
+    """Every write the reading page makes, through one form handler."""
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    if request.method != "POST":
+        return _redirect(datasette, "/-/orpheus")
+
+    form = await request.post_vars()
+    action = form.get("action")
+    document_id = form.get("document_id") or ""
+    page_no = form.get("page_no") or "1"
+    suggestion_id = form.get("suggestion_id") or ""
+    back = f"/-/orpheus/read/{document_id}?page={page_no}"
+
+    if action == "read":
+        engine = form.get("engine") or "deterministic"
+        status, result = await _call(
+            datasette, request, "POST",
+            f"/documents/{document_id}/passages/{page_no}/read",
+            {"engine": engine, "tier": "cloud" if engine != "deterministic" else "local",
+             "cloud_opt_in": "1" if engine != "deterministic" else "0"})
+        if status != 200:
+            return _redirect(datasette, back, error=result["error"]["message"])
+        found = result.get("n_offered", 0)
+        return _redirect(datasette, back, note=(
+            f"{found} thing(s) worth a look." if found else
+            "Read, and nothing stood out. That is recorded too."))
+
+    if action in ("accept", "dismiss"):
+        body = {"note": form.get("note") or None}
+        if action == "accept":
+            # Whatever the person left in the fields wins. `properties` is the
+            # correction, applied on the way in rather than as a second step.
+            body["properties"] = {key[len("prop_"):]: value
+                                  for key, value in form.items()
+                                  if key.startswith("prop_") and value != ""}
+        status, result = await _call(
+            datasette, request, "POST",
+            f"/suggestions/{suggestion_id}/{action}", body)
+        if status != 200:
+            return _redirect(datasette, back, error=result["error"]["message"])
+        return _redirect(datasette, back, note=(
+            "Recorded." if action == "accept" else "Dismissed, and kept."))
+
+    return _redirect(datasette, back, error=f"Unknown action {action!r}.")
+
 
 async def wiki_index(datasette, request):
     """The wiki's front page: what needs doing, and a way in.
@@ -552,8 +656,17 @@ async def _render(datasette, request, template, context, status=200):
 
 
 def _redirect(datasette, path: str, **params) -> Response:
+    """Redirect, merging into whatever query string the path already carries.
+
+    `?` unconditionally produced `?page=1?note=...` on any path that already had
+    one, so the message never arrived -- silently, because a malformed query
+    string is not an error, just a parameter nobody reads.
+    """
     query = urllib.parse.urlencode({k: v for k, v in params.items() if v})
-    return Response.redirect(datasette.urls.path(path) + (f"?{query}" if query else ""))
+    if not query:
+        return Response.redirect(datasette.urls.path(path))
+    separator = "&" if "?" in path else "?"
+    return Response.redirect(datasette.urls.path(path) + separator + query)
 
 
 async def index_page(datasette, request):

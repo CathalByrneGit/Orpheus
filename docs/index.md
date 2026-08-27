@@ -29,6 +29,11 @@ out would have made the wiki misleading rather than merely incomplete:
 - **The corpus has a shape, and the shape says how much of itself it describes.**
   Entity resolution and the cross-document relation graph are in; both were
   previously deferred. See [Network and corroboration](network-and-corroboration.md).
+- **A person and the machine can go through a document together.** The reading
+  companion offers what a passage seems to hold, and nothing it offers is in the
+  store until somebody says so — because proposals nobody asked for would
+  otherwise pour into the number extraction quality is measured by. See
+  [Reading with the machine](reading-companion.md).
 
 ---
 
@@ -39,6 +44,7 @@ out would have made the wiki misleading rather than merely incomplete:
 | [Data model](data-model.md) | Every table in the store, the ontology bundle, and the confidence rubric |
 | [Pipeline walkthrough](pipeline-walkthrough.md) | Steps 1–9, in execution order, with the function that runs each |
 | [Entities: the wiki](entities.md) | Mentions vs entities, and why a page is a projection rather than a document |
+| [Reading with the machine](reading-companion.md) | A passage at a time, and why a suggestion is not an extraction |
 | [Conflicts and lint](conflicts-and-lint.md) | The fourth review verb, the adversarial pass, and the markdown export |
 | [Network and corroboration](network-and-corroboration.md) | The relation graph, counting agreement honestly, and what a budget is denominated in |
 | [Provenance and amendment](provenance-and-amendment.md) | The hardest part: how a machine guess becomes a checked fact, and how extraction quality gets measured |

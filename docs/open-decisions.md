@@ -151,25 +151,36 @@ connection" is stricter and easier to check — *nothing writes except through
 core functions* — and the constraints, plus what running it for real exposed,
 are in [Deployment](deployment.md#the-datasette-ui-plugin).
 
-**Not built: the reading companion.** The plugin reviews a document after
-extraction has run over the whole of it. Annotation *as you read* is a different
-thing, and three problems stand between here and there:
+**Built: the reading companion.** All three problems are answered, and the last
+of them turned out to be the design rather than an obstacle.
 
-- **Incremental classification.** `classify()` is one-shot over the whole
-  document. Per-page or per-passage proposals are a different call shape and a
-  different unit of provenance.
-- **Latency.** A batch pass can take seconds; a companion reacting to scrolling
-  cannot. That is what the local tier is for, with the cloud tier reserved for
-  on-demand questions.
-- **Identity.** Settled. The plugin provisions an Orpheus actor from whatever
-  Datasette's `actor_from_request` produced, so any Datasette auth plugin
-  supplies the person with no configuration. Which provider a deployment should
-  use is still open.
+- **The unit of provenance.** Settled, and it is the whole thing. A batch
+  extraction is something somebody asked for; a companion firing as a person
+  reads produces proposals nobody asked for. Landing those as `unconfirmed`
+  instances would have poured them into `extraction_quality()` — the number
+  Phase 1 turns on — along with flooding the review queue and letting the wiki
+  build pages from them. So **a suggestion is not an extraction**: it lives in
+  its own table until a person accepts it, and accepting writes through the same
+  `insert_instance()` and `write_provenance()` path a batch pass uses.
+- **Latency.** Settled. The passage is the page, which is already how text is
+  stored, and the default engine is the deterministic pass: microseconds, no
+  model, no network, and unable to offer something the page does not contain,
+  which is why it needs no opt-in. A model per passage goes through the same
+  gate, budget and audit as any other call.
+- **Identity.** Settled earlier. The plugin provisions an Orpheus actor from
+  whatever Datasette's `actor_from_request` produced. Which provider a
+  deployment should use is still open.
 
-This overlaps with what agents.md scopes as Phase 3 and with `ontologyMCP`. The
-difference is the surface: agents.md imagines a bespoke split-view reading pane,
-and this puts the same interaction inside Datasette. That choice is now made;
-what remains is the three problems above.
+This is what agents.md scopes as Phase 3. The surface question is settled the
+same way it was for review: agents.md imagines a bespoke split-view reading
+pane, and this puts the same interaction inside Datasette. See
+[Reading with the machine](reading-companion.md).
+
+**What is still missing** is context. Offers come from one page in isolation, so
+a clause that only makes sense in the light of an earlier definition is read
+without it — and nothing streams, a passage is read when asked for rather than
+as somebody scrolls. Both were deliberately left until the write path and the
+provenance were right.
 
 **`datasette-agent` is the most likely vehicle for it** — a chat surface with a
 `register_agent_tools` hook, which is the right seam for handing a model typed
@@ -599,11 +610,14 @@ failure now leaves the run `partial`, keeps what was found, and says so.
 
 ## Still out of scope for Phase 1
 
-Conflict-of-interest and procurement views, and the live reading-pane companion.
+Conflict-of-interest and procurement views.
 
-**Two things that were on this list are now in.** Entity resolution and alias
+**Three things that were on this list are now in.** Entity resolution and alias
 merging arrived with [the wiki](entities.md); the cross-document relation graph
-arrived with [the network](network-and-corroboration.md). Neither was pulled
+arrived with [the network](network-and-corroboration.md); the reading companion
+arrived with [reading a passage at a time](reading-companion.md), though what it
+still lacks is context across passages rather than the interaction itself.
+Neither of the first two was pulled
 forward for its own sake. The wiki needed resolution to have pages at all, and
 the graph turned out to be the only way to say something the store could not
 otherwise express — that four contracts asserting one relation are one claim

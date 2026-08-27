@@ -291,6 +291,38 @@ class Store:
             raise OrpheusError(f"Unknown checkpoint mode {mode!r}.")
         self.conn.execute(f"PRAGMA wal_checkpoint({mode})")
 
+    def pending_migrations(self) -> list[int]:
+        """Migrations this build declares that the store has not run.
+
+        Readable from a read-only connection, and from Datasette's adopted one,
+        because that is where it matters: migrations only run on a write open,
+        so an upgraded deployment serves a stale schema until somebody runs the
+        CLI. Without this the first symptom is a raw `no such table` from a
+        route that worked yesterday.
+        """
+        try:
+            applied = {r["version"] for r in
+                       self.query("SELECT version FROM schema_migrations")}
+        except sqlite3.OperationalError:
+            # No migrations table at all: nothing has ever been applied.
+            applied = set()
+        return sorted(m["version"] for m in MIGRATIONS
+                      if m["version"] not in applied)
+
+    def assert_current(self) -> None:
+        """Refuse to serve a schema this build does not match.
+
+        Named rather than raw: `no such table: reading_passages` sends somebody
+        looking for a bug in the feature, and the answer is one command.
+        """
+        pending = self.pending_migrations()
+        if pending:
+            raise OrpheusError(
+                f"This store is behind: migration(s) {pending} have not been "
+                f"applied. Stop the server and run `orpheus --db {self.path} "
+                "migrate`. Migrations only run on a write connection, and "
+                "Datasette holds a shared one.")
+
     def migrate(self) -> list[int]:
         self.assert_writable()
         self.conn.execute(

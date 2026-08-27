@@ -26,6 +26,7 @@ from . import analysis, auth, bundle as bundle_mod, classify, concepts
 from . import entities as entities_mod
 from . import engines, extract as extract_mod, ingest as ingest_mod
 from . import export_md
+from . import companion as companion_mod
 from . import corroboration as corroboration_mod
 from . import graph as graph_mod
 from . import lint as lint_mod
@@ -565,6 +566,85 @@ def post_tension_withdraw(store, tension_id, actor, body, **_):
 def get_document_tensions(store, document_id, **_):
     """Every tension this document is a side of, however it is scoped."""
     return {"tensions": tensions_mod.tensions_for_document(store, document_id)}
+
+
+# ---------------------------------------------------------------------------
+# Reading with the machine, a passage at a time
+# ---------------------------------------------------------------------------
+
+@route("POST", r"/documents/(?P<document_id>[^/]+)/passages/(?P<page_no>\d+)/read",
+       permission="view")
+def post_read_passage(store, document_id, page_no, actor, body, **_):
+    """Offer what this page seems to hold, and record that it was read.
+
+    A POST guarded by `view` rather than `edit`, which looks odd and is right:
+    it writes, but what it writes is a fact about the reader's own progress and
+    a set of proposals, not a change to the document. Requiring `edit` would
+    stop a viewer from reading with the companion at all.
+    """
+    return companion_mod.read_passage(
+        store, document_id, int(page_no), actor_id=_actor_id(actor),
+        engine=body.get("engine", companion_mod.DEFAULT_ENGINE),
+        tier=body.get("tier", "local"),
+        opt_in=body.get("cloud_opt_in") in ("1", "true", "True", True))
+
+
+@route("GET", r"/documents/(?P<document_id>[^/]+)/passages/(?P<page_no>\d+)",
+       permission="view")
+def get_passage(store, document_id, page_no, body, **_):
+    return companion_mod.passage(store, document_id, int(page_no),
+                                 status=body.get("status", "offered"))
+
+
+@route("GET", r"/documents/(?P<document_id>[^/]+)/reading", permission="view")
+def get_reading_progress(store, document_id, actor, **_):
+    return companion_mod.reading_progress(store, document_id,
+                                          actor_id=_actor_id(actor))
+
+
+def _suggestion_permission(store, actor, suggestion_id) -> str:
+    """A suggestion is decided on the document it came from."""
+    row = store.one("SELECT document_id FROM suggestions WHERE suggestion_id = ?",
+                    (suggestion_id,))
+    if row is None:
+        raise NotFound(f"No suggestion {suggestion_id!r}.")
+    if not auth.can(store, actor, row["document_id"], "edit"):
+        raise PermissionDenied("Not permitted to edit that document.")
+    return row["document_id"]
+
+
+@route("POST", r"/suggestions/(?P<suggestion_id>sug_[^/]+)/accept")
+def post_accept_suggestion(store, suggestion_id, actor, body, **_):
+    """Record it. Properties given here correct it on the way in."""
+    _suggestion_permission(store, actor, suggestion_id)
+    return companion_mod.accept_suggestion(
+        store, suggestion_id, _actor_id(actor),
+        properties=body.get("properties") or None, note=body.get("note"))
+
+
+@route("POST", r"/suggestions/(?P<suggestion_id>sug_[^/]+)/dismiss")
+def post_dismiss_suggestion(store, suggestion_id, actor, body, **_):
+    _suggestion_permission(store, actor, suggestion_id)
+    return companion_mod.dismiss_suggestion(
+        store, suggestion_id, _actor_id(actor), note=body.get("note"))
+
+
+@route("GET", "/suggestions/quality")
+def get_suggestion_quality(store, actor, body, **_):
+    """How often the companion was right. Separate from extraction quality.
+
+    That measures extraction against review; this measures offers against a
+    person's attention. Mixing them would answer neither.
+    """
+    document_id = body.get("document_id")
+    if document_id:
+        if not auth.can(store, actor, document_id, "view"):
+            raise PermissionDenied(f"Not permitted to view {document_id}.")
+    elif not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Corpus-wide suggestion quality spans documents you may not be "
+            "able to read. Pass `document_id` for one you can.")
+    return companion_mod.suggestion_quality(store, document_id)
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,12 @@
   &middot; {{ document.n_pages }} page(s) &middot; {{ document.review_status }}
 </p>
 
+<p>
+  <a href="{{ urls.path('/-/orpheus/read/' + document.document_id) }}">Read it with the machine &rarr;</a>
+  <span style="color:#666">&mdash; a page at a time, offering what seems worth
+  recording. Nothing is stored until you say so.</span>
+</p>
+
 {% for run in document.runs or [] %}
   {% if run.status == "partial" %}
   <p class="message-warning" style="border-left:3px solid #d90;padding-left:1em">

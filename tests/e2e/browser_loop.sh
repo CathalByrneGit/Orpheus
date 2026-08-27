@@ -213,6 +213,68 @@ assert not os.path.exists(f"{work}/orpheus.sqlite.orpheus-writer"), \
 print("   store checks passed")
 PY
 
+say "reading with the machine: offers are not extractions until somebody says so"
+"${CURL[@]}" "$BASE/-/orpheus/read/$DOC?page=1" > "$WORK/read.html"
+grep -q "Worth recording?" "$WORK/read.html" || fail "the reading page did not render"
+READ_CSRF="$(grep -o 'name="csrftoken" value="[^"]*"' "$WORK/read.html" | head -1 |
+             sed 's/.*value="//;s/"//' || true)"
+[ -n "$READ_CSRF" ] || fail "no CSRF token on the reading page"
+
+BEFORE="$(python3 -c "
+import sqlite3, sys
+print(sqlite3.connect(sys.argv[1]).execute(
+    'SELECT COUNT(*) FROM instance_index').fetchone()[0])
+" "$WORK/orpheus.sqlite")"
+
+"${CURL[@]}" -o /dev/null -X POST --data-urlencode "csrftoken=$READ_CSRF" \
+  --data-urlencode "action=read" --data-urlencode "document_id=$DOC" \
+  --data-urlencode "page_no=1" --data-urlencode "engine=deterministic" \
+  "$BASE/-/orpheus/read/act"
+
+"${CURL[@]}" "$BASE/-/orpheus/read/$DOC?page=1" > "$WORK/read2.html"
+SUGGESTION="$(grep -o 'name="suggestion_id" value="sug_[a-f0-9]*"' "$WORK/read2.html" |
+              head -1 | sed 's/.*value="//;s/"//' || true)"
+[ -n "$SUGGESTION" ] || fail "reading the page offered nothing"
+
+# The property the whole design turns on: somebody was shown something, and the
+# store learned nothing. An offer is not an extraction until a person says so.
+python3 - "$WORK/orpheus.sqlite" "$BEFORE" <<'CHECK'
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1])
+after = conn.execute("SELECT COUNT(*) FROM instance_index").fetchone()[0]
+assert after == int(sys.argv[2]), f"reading wrote {after - int(sys.argv[2])} instance(s)"
+offered = conn.execute(
+    "SELECT COUNT(*) FROM suggestions WHERE status = 'offered'").fetchone()[0]
+assert offered, "nothing was offered"
+read = conn.execute("SELECT COUNT(*) FROM reading_passages").fetchone()[0]
+assert read == 1, f"{read} reading record(s), expected 1"
+print(f"   {offered} offered, 0 written")
+CHECK
+
+say "recording one, corrected on the way in"
+"${CURL[@]}" -o /dev/null -X POST --data-urlencode "csrftoken=$READ_CSRF" \
+  --data-urlencode "action=accept" --data-urlencode "document_id=$DOC" \
+  --data-urlencode "page_no=1" --data-urlencode "suggestion_id=$SUGGESTION" \
+  --data-urlencode "prop_date_role=signature" \
+  --data-urlencode "note=checked against the page" \
+  "$BASE/-/orpheus/read/act"
+
+python3 - "$WORK/orpheus.sqlite" "$SUGGESTION" <<'CHECK'
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1])
+conn.row_factory = sqlite3.Row
+row = conn.execute("SELECT * FROM suggestions WHERE suggestion_id = ?",
+                   (sys.argv[2],)).fetchone()
+assert row["status"] == "accepted", dict(row)
+assert row["instance_id"], "accepted without recording an instance"
+evidence = conn.execute("SELECT * FROM provenance WHERE instance_id = ?",
+                        (row["instance_id"],)).fetchone()
+# Written through the same path a batch pass uses: excerpt, page and span.
+assert evidence and evidence["excerpt"] and evidence["page_no"]
+assert evidence["source_label"].startswith("companion:"), evidence["source_label"]
+print("   recorded with its page, its excerpt and its span")
+CHECK
+
 say "the wiki: propose, then read a page"
 # Templates are only exercised by rendering them; a missing variable or a bad
 # filter is invisible to the unit tests, which call the projection directly.

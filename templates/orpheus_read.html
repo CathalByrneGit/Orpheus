@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Reading {{ document.filename }}{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus/document/' + document.document_id) }}">&larr; {{ document.filename }}</a>
+   &middot; <a href="{{ urls.path('/-/orpheus') }}">Documents</a></p>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+{% if note %}<p class="message-info">{{ note }}</p>{% endif %}
+
+<h1>Page {{ page.page_no }} of {{ document.n_pages }}</h1>
+
+<p style="color:#666">{{ progress.note }}</p>
+
+<p>
+  {% for n in range(1, (document.n_pages or 1) + 1) %}
+    {%- if n == page.page_no %}
+    <strong style="padding:.15em .45em;background:#1d4ed8;color:#fff">{{ n }}</strong>
+    {%- else %}
+    <a href="{{ urls.path('/-/orpheus/read/' + document.document_id) }}?page={{ n }}"
+       style="padding:.15em .45em;{% if n in progress.unread %}color:#999{% else %}font-weight:bold{% endif %}">{{ n }}</a>
+    {%- endif %}
+  {% endfor %}
+  <span style="color:#888">&nbsp;bold = read</span>
+</p>
+
+<div style="display:flex;gap:1.5em;align-items:flex-start;flex-wrap:wrap">
+
+  {# The page itself. Everything offered on the right points into this. #}
+  <div style="flex:1 1 24em;min-width:20em">
+    <h2>The page</h2>
+    <div style="border:1px solid #ddd;padding:1em;white-space:pre-wrap;
+                line-height:1.5;max-height:34em;overflow:auto">{{ page.text }}</div>
+  </div>
+
+  <div style="flex:1 1 22em;min-width:18em">
+    <h2>Worth recording?</h2>
+
+    {% if not page.has_been_read %}
+    <p style="color:#666">Nobody has read this page with the machine yet.</p>
+    {% endif %}
+
+    <form action="{{ urls.path('/-/orpheus/read/act') }}" method="post" style="margin-bottom:1em">
+      <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+      <input type="hidden" name="action" value="read">
+      <input type="hidden" name="document_id" value="{{ document.document_id }}">
+      <input type="hidden" name="page_no" value="{{ page.page_no }}">
+      <button type="submit">{% if page.has_been_read %}Look again{% else %}Read this page{% endif %}</button>
+      <label style="margin-left:.5em">
+        <select name="engine">
+          <option value="deterministic">patterns only &mdash; instant, local</option>
+          {% for name in engines %}
+          <option value="{{ name }}">{{ name }} &mdash; a model</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p style="color:#666;margin:.4em 0 0">The pattern pass cannot offer
+      something the page does not contain, so it needs no opt-in and sends
+      nothing anywhere. A model does, and goes through the same gate as any
+      other model call.</p>
+    </form>
+
+    {% if page.suggestions %}
+    {% for s in page.suggestions %}
+    <div style="border-left:3px solid #1d4ed8;background:#fafafa;padding:.7em 1em;margin-bottom:.6em">
+      <p style="margin:0"><strong>{{ s.type_id }}</strong>
+        <span style="color:#666">&middot; {{ s.confidence }} &middot; {{ s.engine }}</span></p>
+      {% if s.excerpt %}
+      <blockquote style="color:#444;border-left:3px solid #ccc;padding-left:1em;margin:.4em 0">
+        {{ s.excerpt }}
+      </blockquote>
+      {% endif %}
+      <form action="{{ urls.path('/-/orpheus/read/act') }}" method="post">
+        <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+        <input type="hidden" name="document_id" value="{{ document.document_id }}">
+        <input type="hidden" name="page_no" value="{{ page.page_no }}">
+        <input type="hidden" name="suggestion_id" value="{{ s.suggestion_id }}">
+        <table style="margin:.3em 0">
+          {% for key, value in s.properties.items() %}
+          {% if key != 'page_no' %}
+          <tr>
+            <td style="color:#666;padding-right:.6em">{{ key }}</td>
+            {# Editable on the way in: the common case is the machine spotting
+               the right thing and getting one field wrong, and accept-then-amend
+               would be two steps for one act. #}
+            <td><input type="text" name="prop_{{ key }}" value="{{ value }}"
+                       style="width:14em"></td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </table>
+        <input type="text" name="note" placeholder="why (optional)" style="width:14em">
+        <button type="submit" name="action" value="accept">Record this</button>
+        <button type="submit" name="action" value="dismiss">Not worth it</button>
+      </form>
+    </div>
+    {% endfor %}
+    {% elif page.has_been_read %}
+    <p style="color:#666">Nothing outstanding on this page. That is a finding
+    too &mdash; the page was read and held nothing worth recording, which is not
+    the same as nobody having opened it.</p>
+    {% endif %}
+
+    {% if decided %}
+    <details style="margin-top:1em">
+      <summary style="cursor:pointer">{{ decided|length }} already decided on this page</summary>
+      <div style="margin-top:.6em">
+        {% for s in decided %}
+        <p style="margin:.2em 0;color:#666">
+          <strong>{{ s.status }}</strong> &middot; {{ s.type_id }}
+          {%- if s.note %} &mdash; {{ s.note }}{% endif %}
+        </p>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+</div>
+
+<p style="color:#666;margin-top:1.5em">
+  Nothing on the right is in the store until you record it. What you record
+  arrives as a confirmed fact with this page and this excerpt behind it; what
+  you dismiss is kept, because it is the only evidence there is about whether
+  these suggestions are worth reading.
+</p>
+{% endblock %}

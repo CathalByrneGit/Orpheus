@@ -148,6 +148,31 @@ values disagree and nothing records it.
 A lint that finds nothing is not a clean bill of health, and its own headline
 says so when little has been reviewed. Quote that caveat rather than dropping it.
 
+## Reading a document with someone
+
+```bash
+orpheus --db store.sqlite read doc_... --json                    # progress
+orpheus --db store.sqlite read doc_... --page 3 --json           # what page 3 offers
+orpheus --db store.sqlite read doc_... --accept sug_... --set date_role=signature
+orpheus --db store.sqlite read doc_... --dismiss sug_... --note "a clause number"
+```
+
+**Nothing you are offered is in the store.** A suggestion is not an extraction
+until a person accepts it, and that distinction is load-bearing: proposals
+landed as instances would pour into the number extraction quality is measured
+by. So when you report what a passage holds, say it is *offered*, not that the
+document contains it.
+
+Accepting is a person's judgement. Do not accept or dismiss on the user's behalf
+unless they ask for that specific decision — the acceptance rate is the only
+measure of whether the companion is worth having, and deciding for them destroys
+it as surely as confirming things to clear a queue.
+
+`reading_progress` counts **pages read**, not pages with findings. A page read
+and found to hold nothing is not the same as a page nobody opened, and only the
+reading record can tell them apart — so report the first, never the second
+dressed up as it.
+
 ## Adding documents
 
 ```bash
