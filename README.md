@@ -141,6 +141,7 @@ Start at **[docs/index.md](docs/index.md)**.
 | [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
 | [Deployment](docs/deployment.md) | Running it, and the WAL trap that catches people |
 | [Developer guide](docs/developer-guide.md) | Setup, tests, troubleshooting |
+| [The corpus run](docs/corpus-run.md) | The one thing Phase 1 is still waiting on, and how to do it |
 | [Open decisions](docs/open-decisions.md) | What is still undecided, and what the build corrected |
 
 An agent working with a store should read `.claude/skills/orpheus/SKILL.md`

@@ -52,6 +52,7 @@ out would have made the wiki misleading rather than merely incomplete:
 | [API reference](api-reference.md) | Every route, its permissions, and its response shape |
 | [Deployment](deployment.md) | Running it, and the WAL trap that catches people |
 | [Developer guide](developer-guide.md) | Setup, tests, troubleshooting, project structure |
+| [The corpus run](corpus-run.md) | The one thing Phase 1 is still waiting on, and how to do it |
 | [Open decisions](open-decisions.md) | What Phase 1 deliberately did not decide, and what the build corrected |
 | [Prior art](prior-art.md) | Open-source tools that already do parts of this, and what that means |
 | [Extraction engines](extraction-engines.md) | Choosing between a local encoder, LangExtract and a general LLM — and why the choice does not change what the data means |
