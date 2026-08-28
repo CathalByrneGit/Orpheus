@@ -22,3 +22,9 @@ dist/
 
 # ...except the committed test fixtures
 !tests/fixtures/*.sqlite
+
+# The map's frontend. `plugins/static/` is a build artefact -- `npm run build`
+# in frontend/ produces it, and the map falls back to a template that needs no
+# toolchain when it is absent.
+node_modules/
+plugins/static/

@@ -23,10 +23,12 @@ not do.
 | `rapidfuzz` | Fuzzy name candidates for entity resolution | `[match]` |
 | `tesseract` + `pytesseract` | OCR | For scanned documents |
 | One of `langextract` / `gliner2` / `llm` | The model pass | Unless you register your own populator |
+| Node ≥ 20 and npm | Building the map's Svelte front end | Optional; without it the map falls back |
 
 ```bash
 pip install -e '.[dev]'          # everything the test suite needs
 pip install -e '.[server,pdf]'   # a working deployment, no model
+cd frontend && npm install && npm run build   # optional: the built map
 ```
 
 Datasette 1.0 or newer specifically: browser file upload needs
@@ -310,6 +312,8 @@ orpheus/
 │   ├── bundles/             # contract-core-0.2.0.json
 │   └── schemas/             # the two JSON Schemas a bundle is checked against
 ├── plugins/orpheus_datasette.py   # the UI, and the API mounted in-process
+├── frontend/                # the map's front end: Svelte + Vite + d3-force
+│   └── src/lib/             # Map.svelte, and the pure rules its tests pin
 ├── templates/               # the two pages
 │   ├── entities.py          # mentions -> entities; the wiki page projection
 │   ├── search.py            # full-text search, and unlinked mentions

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}The corpus as a map{% endblock %}
+{% block extra_head %}
+{% for href in bundle.css %}
+<link rel="stylesheet" href="{{ urls.path('/-/orpheus/static/') }}{{ href }}">
+{% endfor %}
+{% endblock %}
+{% block content %}
+{# The built map: frontend/ compiled by Vite, drawn with Svelte and d3-force.
+   Everything above the canvas is server-rendered and identical to the no-build
+   template, because the caveat and the controls are not part of the drawing --
+   they have to arrive whether or not anybody ran the build. #}
+<p><a href="{{ urls.path('/-/orpheus/network') }}">&larr; Network</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/wiki') }}">Wiki</a></p>
+
+<h1>{% if centre_name %}Around {{ centre_name }}{% else %}The corpus as a map{% endif %}</h1>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+
+{# The banner leads, as it does on every other structural view. A picture is
+   more persuasive than a table and says the same thing, so the caveat has to
+   arrive before the shape does. #}
+<p class="message-error" style="background:#fdf0f0">{{ coverage.note }}</p>
+
+<form method="get" style="margin:1em 0;display:flex;gap:.6em;flex-wrap:wrap;align-items:center">
+  {% if centre %}<input type="hidden" name="entity" value="{{ centre }}">
+  <label>depth
+    <select name="depth" onchange="this.form.submit()">
+      {% for d in [1,2,3,4] %}
+      <option value="{{ d }}" {% if d == depth %}selected{% endif %}>{{ d }}</option>
+      {% endfor %}
+    </select>
+  </label>{% endif %}
+  <label><input type="checkbox" name="reviewed_only" value="1"
+    {% if reviewed_only %}checked{% endif %} onchange="this.form.submit()">
+    only relations somebody confirmed</label>
+  {% if centre %}<a href="{{ urls.path('/-/orpheus/map') }}">whole corpus</a>{% endif %}
+</form>
+
+{# The payload is rendered here rather than fetched: the server has already
+   called /graph/map to decide what this actor may see, so a second round trip
+   would add a flash of an empty frame and a second chance for the two answers
+   to differ. `tojson` escapes it for embedding in a <script>. #}
+<script type="application/json" id="orpheus-map-data">{{ payload | tojson }}</script>
+<div id="orpheus-map"
+     data-centre="{{ centre or '' }}"
+     data-wiki-path="{{ urls.path('/-/orpheus/wiki/') }}"
+     data-map-path="{{ urls.path('/-/orpheus/map') }}">
+  <noscript><p>The map is drawn in the browser. Without JavaScript, the same
+  relations are listed on the <a href="{{ urls.path('/-/orpheus/network') }}">network
+  page</a>.</p></noscript>
+</div>
+
+<script type="module" src="{{ urls.path('/-/orpheus/static/') }}{{ bundle.js }}"></script>
+{% endblock %}

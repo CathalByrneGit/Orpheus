@@ -200,3 +200,104 @@ def test_a_pin_naming_a_missing_actor_creates_it_rather_than_dangling(store):
                                               actor_map={"u1": "act_pinned"}))
     assert resolved["actor_id"] == "act_pinned"
     assert get_actor(store, "act_pinned")["display_name"] == "nuala"
+
+
+# ---------------------------------------------------------------------------
+# The built map
+# ---------------------------------------------------------------------------
+#
+# `frontend/` compiles to `plugins/static/`, which the plugin serves itself
+# because a --plugins-dir plugin has no /-/static-plugins/ mount. Serving files
+# from a directory by a path out of the URL is the part worth defending.
+
+import json
+
+import pytest
+
+
+@pytest.fixture
+def bundle(tmp_path, monkeypatch):
+    """A built bundle in a temporary directory, as `vite build` leaves one."""
+    root = tmp_path / "static"
+    (root / "gen").mkdir(parents=True)
+    (root / "gen" / "map-abc123.js").write_text("console.log('map');\n")
+    (root / "gen" / "map-abc123.css").write_text(".frame { border: 0 }\n")
+    (root / "manifest.json").write_text(json.dumps({
+        "src/main.ts": {"file": "gen/map-abc123.js", "isEntry": True,
+                        "css": ["gen/map-abc123.css"]}}))
+    monkeypatch.setattr(plugin, "BUNDLE", root)
+    monkeypatch.setattr(plugin, "MANIFEST", root / "manifest.json")
+    (tmp_path / "secret.txt").write_text("not part of the bundle")
+    return root
+
+
+class AssetRequest:
+    """Only what a route handler reads. Datasette hands a named regex group to
+    a route through `request.url_vars`, never as an argument -- calling the
+    handler with the path directly is what let a signature that Datasette
+    cannot call pass its test and 500 in the browser."""
+
+    def __init__(self, **url_vars):
+        self.url_vars = url_vars
+
+
+def _asset(path):
+    return asyncio.run(plugin.static_asset(None, AssetRequest(path=path)))
+
+
+def test_a_built_asset_is_served_with_its_type(bundle):
+    response = _asset("gen/map-abc123.js")
+    assert response.status == 200
+    assert "javascript" in response.content_type
+    assert b"console.log" in response.body
+
+    assert "css" in _asset("gen/map-abc123.css").content_type
+
+
+def test_a_binary_asset_survives_being_served(bundle):
+    # A font or an inlined image is not UTF-8, and decoding it on the way out
+    # replaces the bytes that make it a font.
+    raw = bytes(range(256))
+    (bundle / "gen" / "face.woff2").write_bytes(raw)
+    assert _asset("gen/face.woff2").body == raw
+
+
+def test_an_asset_url_cannot_climb_out_of_the_bundle(bundle):
+    # The path arrives from the URL. A prefix test on the raw string passes
+    # this, which is why the check resolves both sides and compares the result.
+    for path in ("../secret.txt", "gen/../../secret.txt",
+                 "gen/../../../../../../etc/passwd", "/etc/passwd"):
+        assert _asset(path).status == 404, path
+
+
+def test_a_symlink_out_of_the_bundle_is_refused(bundle):
+    # Resolving the target is what catches this; a string check would not.
+    (bundle / "escape.txt").symlink_to(bundle.parent / "secret.txt")
+    assert _asset("escape.txt").status == 404
+
+
+def test_a_missing_asset_is_a_404_rather_than_a_traceback(bundle):
+    assert _asset("gen/never-built.js").status == 404
+
+
+def test_the_entry_point_is_read_from_the_manifest(bundle):
+    assert plugin._bundle() == {"js": "gen/map-abc123.js",
+                                "css": ["gen/map-abc123.css"]}
+
+
+def test_no_build_means_no_bundle_rather_than_an_error(tmp_path, monkeypatch):
+    # The bundle is a build artefact and is not committed, so this is the
+    # normal state of a fresh checkout -- the map falls back to the template
+    # that needs no toolchain, and nothing raises on the way.
+    monkeypatch.setattr(plugin, "BUNDLE", tmp_path / "static")
+    monkeypatch.setattr(plugin, "MANIFEST", tmp_path / "static" / "manifest.json")
+    assert plugin._bundle() is None
+
+
+def test_a_manifest_without_the_entry_point_is_not_a_bundle(bundle, monkeypatch):
+    # A build that produced something else, or a half-written manifest. Serving
+    # a page that loads nothing is worse than serving the fallback.
+    (bundle / "manifest.json").write_text(json.dumps({"src/other.ts": {"file": "x.js"}}))
+    assert plugin._bundle() is None
+    (bundle / "manifest.json").write_text("{ not json")
+    assert plugin._bundle() is None

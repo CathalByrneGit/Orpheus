@@ -21,7 +21,9 @@ picks on the form is passed to the core, which decides.
 from __future__ import annotations
 
 import json
+import mimetypes
 import urllib.parse
+from pathlib import Path
 
 from datasette import hookimpl
 from datasette.utils.asgi import Response
@@ -249,6 +251,7 @@ def register_routes():
         (r"^/-/orpheus/lint$", lint_page),
         (r"^/-/orpheus/network$", network_page),
         (r"^/-/orpheus/map$", map_page),
+        (r"^/-/orpheus/static/(?P<path>.*)$", static_asset),
         (r"^/-/orpheus/questions$", questions_page),
         (r"^/-/orpheus/questions/act$", questions_act),
         (r"^/-/orpheus/wiki$", wiki_index),
@@ -552,6 +555,70 @@ async def questions_act(datasette, request):
                      note=f"Recorded as {result['status']}.")
 
 
+# ---------------------------------------------------------------------------
+# The built map
+# ---------------------------------------------------------------------------
+#
+# `frontend/` is a Svelte + Vite + d3-force application, built into
+# `plugins/static/`. It is not committed -- `npm run build` produces it -- so
+# everything below has to work with it absent, and the map falls back to the
+# template that needs no toolchain.
+#
+# Datasette's own /-/static-plugins/ mount is not available: a plugin loaded
+# with --plugins-dir gets `static_path = None`, because Datasette resolves the
+# directory by importing the plugin as a package and a --plugins-dir module was
+# never registered as one. So the bundle is served from a route here.
+
+BUNDLE = Path(__file__).parent / "static"
+MANIFEST = BUNDLE / "manifest.json"
+ENTRY = "src/main.ts"
+
+
+def _bundle() -> dict | None:
+    """The built entry point, or None if nobody has built one.
+
+    Read on each request rather than cached: a rebuild during `vite build`
+    changes the hashed filenames, and a cached manifest would serve URLs for
+    files that no longer exist until the server was restarted.
+    """
+    try:
+        manifest = json.loads(MANIFEST.read_text())
+    except (OSError, ValueError):
+        return None
+    chunk = manifest.get(ENTRY)
+    if not chunk or not chunk.get("file"):
+        return None
+    return {"js": chunk["file"], "css": list(chunk.get("css") or ())}
+
+
+async def static_asset(datasette, request):
+    """Serve one built asset.
+
+    The path comes from the URL, so it is resolved and then checked to be
+    inside the bundle directory. A prefix test on the raw string would pass
+    `gen/../../../etc/passwd` and a symlink out of the tree; resolving both
+    sides and comparing the result is the check that holds.
+    """
+    target = (BUNDLE / request.url_vars["path"]).resolve()
+    try:
+        target.relative_to(BUNDLE.resolve())
+    except ValueError:
+        return Response.text("Not found.", status=404)
+    if not target.is_file():
+        return Response.text("Not found.", status=404)
+
+    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return Response(
+        # Bytes, not text: `Response.asgi_send` passes them through unchanged,
+        # and decoding first would quietly corrupt any asset that is not UTF-8
+        # -- a font or an image the build inlined.
+        target.read_bytes(),
+        content_type=content_type,
+        # Vite puts a content hash in every filename, so a given URL never
+        # changes what it holds.
+        headers={"cache-control": "public, max-age=31536000, immutable"})
+
+
 async def map_page(datasette, request):
     """The same relations the network page lists, drawn.
 
@@ -560,6 +627,13 @@ async def map_page(datasette, request):
     views would not. The coverage banner leads for the same reason it does
     there, and more so -- a diagram is more persuasive than a table and says
     exactly as much.
+
+    Two renderings, one payload. When `frontend/` has been built the Svelte and
+    d3-force application draws it; when it has not, a template with a
+    hand-written relaxation does. Both read the same server-rendered JSON, so
+    which one a deployment gets changes how the map behaves and never what it
+    claims. The fallback is not a courtesy: the bundle is a build artefact and
+    is not committed, so a fresh checkout has only the template.
     """
     if not request.actor:
         return Response.text("Sign in to use Orpheus.", status=403)
@@ -577,7 +651,10 @@ async def map_page(datasette, request):
 
     centre_name = next((n["canonical_name"] for n in payload["nodes"]
                         if n["entity_id"] == entity_id), None)
-    return await _render(datasette, request, "orpheus_map.html", {
+    bundle = _bundle()
+    template = "orpheus_map_app.html" if bundle else "orpheus_map.html"
+    return await _render(datasette, request, template, {
+        "bundle": bundle,
         # The structure, not a pre-serialised string: `tojson` in the template
         # escapes it for embedding in a <script>, which a plain dump does not.
         "payload": {"nodes": payload["nodes"], "edges": payload["edges"]},

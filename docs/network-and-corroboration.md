@@ -195,8 +195,43 @@ administrator view. An entity page links to its own neighbourhood instead —
 scoped to that page out to an adjustable depth, which is the view an ordinary
 actor may ask for.
 
-There is no build step. The layout is a few dozen lines of relaxation in the
-template, so the page works offline and nothing has to be compiled to change it.
+### Two renderings, one payload
+
+The map has two front ends, and which one a deployment gets changes how the
+picture behaves and never what it claims — both read the same server-rendered
+JSON from the same route.
+
+**Built** (`frontend/`): Svelte 5, Vite and `d3-force`, the toolchain
+`datasette-paper` uses for its link graph. d3's simulation is a better layout
+than a hand-written relaxation, and the component gets what that buys: a
+selected page lights itself and its neighbours and dims the rest, a dragged
+node stays where it is put, and the zoom keeps the point under the cursor
+under the cursor.
+
+```
+cd frontend && npm install && npm run build
+```
+
+That writes `plugins/static/`, which the plugin serves itself — Datasette's
+`/-/static-plugins/` mount is not available to a plugin loaded with
+`--plugins-dir`, because it resolves the directory by importing the plugin as
+a package. `npm test` runs the unit tests over the pure rules (what counts as
+unchecked, when a node is dimmed, how the view is fitted); `npm run check`
+type-checks.
+
+**Not built**: a template with a few dozen lines of relaxation, no toolchain,
+works offline. `plugins/static/` is a build artefact and is not committed, so
+this is what a fresh checkout draws, and the page chooses between them by
+whether a Vite manifest is there to read.
+
+Neither is a second source of truth. Both take `nodes`, `edges` and `coverage`
+from `/graph/map`, rendered into the page by the server — which has already
+decided what this actor may see, so there is no second round trip and no
+second answer to disagree with the first.
+
+A deployment that wants the built map as the only one should make the plugin an
+installed package with an entry point rather than a `--plugins-dir` module;
+`datasette-vite` then serves the bundle and this route can go.
 
 ### A defect the run found: proposing twice split every page
 
