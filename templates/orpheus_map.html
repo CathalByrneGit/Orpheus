@@ -58,6 +58,9 @@
   const types = [...new Set(data.nodes.map(n => n.type_id))].sort();
   const colourOf = t => COLOURS[types.indexOf(t) % COLOURS.length];
   const hidden = new Set();
+  let hideIsolates = false;
+  const isOff = n => hidden.has(n.type_id) ||
+                     (hideIsolates && !(n.degree || 0));
 
   const nodes = data.nodes.map(n => ({...n,
     x: Math.random() * 800, y: Math.random() * 500, vx: 0, vy: 0}));
@@ -70,7 +73,7 @@
   // build step and a bundle is a large thing to add to a project whose pages
   // are server-rendered HTML with no toolchain, and this has to run offline.
   function step() {
-    const live = nodes.filter(n => !hidden.has(n.type_id));
+    const live = nodes.filter(n => !isOff(n));
     for (const a of live) {
       for (const b of live) {
         if (a === b) continue;
@@ -82,7 +85,7 @@
       }
     }
     for (const l of links) {
-      if (hidden.has(l.source.type_id) || hidden.has(l.target.type_id)) continue;
+      if (isOff(l.source) || isOff(l.target)) continue;
       const dx = l.target.x - l.source.x, dy = l.target.y - l.source.y;
       const d = Math.hypot(dx, dy) || 0.01;
       const f = (d - 90) * 0.012;
@@ -111,29 +114,38 @@
   for (const l of links) {
     const line = document.createElementNS(NS, "line");
     line.setAttribute("stroke", "#999");
-    line.setAttribute("stroke-width", Math.min(1 + (l.n_documents || 1) * 0.4, 4));
+    l.width = Math.min(1 + (l.n_documents || 1) * 0.4, 4);
     // Confirmed and unconfirmed must not draw the same. A solid line between
     // two names is the strongest claim this page makes.
-    if (!l.n_confirmed) line.setAttribute("stroke-dasharray", "4 3");
+    l.dashed = !l.n_confirmed;
     edgeLayer.appendChild(line);
     l.el = line;
   }
   for (const n of nodes) {
     const g = document.createElementNS(NS, "g");
     const c = document.createElementNS(NS, "circle");
-    c.setAttribute("r", Math.min(5 + (n.degree || 0) * 1.6, 18));
+    // A page with no relation is the commonest thing in a young corpus, and at
+    // the bottom of the scale it has to stay a dot somebody can hit.
+    n.radius = Math.min(5 + (n.degree || 0) * 1.6, 18);
+    n.edge = n.entity_id === CENTRE ? 3 : 1.5;
     c.setAttribute("fill", colourOf(n.type_id));
-    c.setAttribute("fill-opacity", n.status === "confirmed" ? 1 : 0.45);
+    // Unconfirmed is most of a young corpus. Faded says so; too faded says
+    // nothing is there.
+    c.setAttribute("fill-opacity", n.status === "confirmed" ? 1 : 0.62);
     c.setAttribute("stroke", n.entity_id === CENTRE ? "#111" : "#fff");
-    c.setAttribute("stroke-width", n.entity_id === CENTRE ? 3 : 1.5);
     c.style.cursor = "pointer";
     c.addEventListener("mousedown", e => { drag = n; n.fixed = true; e.stopPropagation(); });
     c.addEventListener("click", e => { e.stopPropagation(); select(n); });
     g.appendChild(c);
     if ((n.degree || 0) >= 2 || n.entity_id === CENTRE) {
       const t = document.createElementNS(NS, "text");
-      t.setAttribute("font-size", "11"); t.setAttribute("fill", "#333");
+      t.setAttribute("fill", "#333");
       t.setAttribute("pointer-events", "none");
+      // Two labels in a crowded component overlap, and overlapping text is
+      // unreadable rather than merely untidy. A halo in the background colour
+      // keeps whichever is on top legible.
+      t.setAttribute("stroke", "#fcfcfc");
+      t.setAttribute("paint-order", "stroke");
       t.textContent = n.canonical_name.slice(0, 28);
       g.appendChild(t); n.label = t;
     }
@@ -141,28 +153,50 @@
     n.el = c; n.group = g;
   }
 
+  // Sizes are divided by the zoom on the way out, so a node, a label and a line
+  // are the same on screen however far the view is scaled. Without it the fit
+  // for a wide corpus shrinks 148 pages to dust, and zooming in turns the few
+  // that are left into blobs -- the picture is legible at exactly one zoom.
   function draw() {
     root.setAttribute("transform", `translate(${tx},${ty}) scale(${scale})`);
     for (const l of links) {
-      const off = hidden.has(l.source.type_id) || hidden.has(l.target.type_id);
+      const off = isOff(l.source) || isOff(l.target);
       l.el.style.display = off ? "none" : "";
       if (off) continue;
       l.el.setAttribute("x1", l.source.x); l.el.setAttribute("y1", l.source.y);
       l.el.setAttribute("x2", l.target.x); l.el.setAttribute("y2", l.target.y);
+      l.el.setAttribute("stroke-width", l.width / scale);
+      if (l.dashed) l.el.setAttribute("stroke-dasharray", `${4 / scale} ${3 / scale}`);
     }
     for (const n of nodes) {
-      const off = hidden.has(n.type_id);
+      const off = isOff(n);
       n.group.style.display = off ? "none" : "";
       if (off) continue;
       n.el.setAttribute("cx", n.x); n.el.setAttribute("cy", n.y);
+      n.el.setAttribute("r", n.radius / scale);
+      n.el.setAttribute("stroke-width", n.edge / scale);
       if (n.label) {
-        n.label.setAttribute("x", n.x + 12);
-        n.label.setAttribute("y", n.y + 4);
+        n.label.setAttribute("x", n.x + (n.radius + 4) / scale);
+        n.label.setAttribute("y", n.y + 4 / scale);
+        n.label.setAttribute("font-size", 11 / scale);
+        n.label.setAttribute("stroke-width", 3 / scale);
       }
     }
   }
 
   function select(n) {
+    // Every node the reader has actually asked about gets a name, however few
+    // relations it has -- most of a young corpus is below the label threshold.
+    if (!n.label) {
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("fill", "#333");
+      t.setAttribute("pointer-events", "none");
+      t.setAttribute("stroke", "#fcfcfc");
+      t.setAttribute("paint-order", "stroke");
+      t.textContent = n.canonical_name.slice(0, 28);
+      n.group.appendChild(t); n.label = t;
+      draw();
+    }
     const panel = document.getElementById("panel");
     const related = links.filter(l => l.source === n || l.target === n);
     const rows = related.map(l => {
@@ -197,12 +231,29 @@
     `background:${colourOf(t)}"></span> ${escapeHtml(t)}</label>`).join("") +
     `<span style="color:#666;margin-left:.5em">faded = nobody has confirmed the page;` +
     ` dashed = nobody has confirmed the relation</span>`;
-  legend.querySelectorAll("input").forEach(box =>
+  legend.querySelectorAll("input[data-type]").forEach(box =>
     box.addEventListener("change", () => {
       const t = box.getAttribute("data-type");
       box.checked ? hidden.delete(t) : hidden.add(t);
       nudge(120);
     }));
+
+  // In a young corpus most pages are joined to nothing, and they crowd out the
+  // shape the map exists to show. Dropping them is a change to the drawing and
+  // not to the corpus, so the control says how many it is hiding and the
+  // coverage banner above still counts them.
+  const alone = nodes.filter(n => !(n.degree || 0)).length;
+  if (alone) {
+    const box = document.createElement("label");
+    box.style.cssText = "margin-right:1em;cursor:pointer";
+    box.innerHTML = `<input type="checkbox" id="hide-alone"> hide the ` +
+      `${alone} page(s) joined to nothing`;
+    legend.prepend(box, document.createTextNode(" "));
+    box.querySelector("input").addEventListener("change", e => {
+      hideIsolates = e.target.checked;
+      nudge(160);
+    });
+  }
 
   let drag = null, pan = null;
   svg.addEventListener("mousedown", e => { pan = {x: e.clientX - tx, y: e.clientY - ty}; });
@@ -236,7 +287,7 @@
   // width the repulsion wants and half of it sits outside the frame -- which
   // reads as "there is nothing over there" rather than "you cannot see it".
   function fit() {
-    const live = nodes.filter(n => !hidden.has(n.type_id));
+    const live = nodes.filter(n => !isOff(n));
     if (!live.length) return;
     const xs = live.map(n => n.x), ys = live.map(n => n.y);
     const x0 = Math.min(...xs), x1 = Math.max(...xs);
