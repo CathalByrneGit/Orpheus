@@ -84,8 +84,9 @@ orpheus --db store.sqlite ingest ./corpus \
 
 **Use `--engine anthropic`.** `chat` posts OpenAI-shaped requests and defaults
 its base URL to OpenRouter, which is wrong for Anthropic. `llm` would work for
-an ordinary key but not an **identity-linked** one: those require an
-`anthropic-workspace-id` header on every request, and neither `chat` nor
+a workspace-scoped key but not for one that isn't: a key that spans
+workspaces must name the one it acts in, in an `anthropic-workspace-id`
+header on every request, and neither `chat` nor
 `llm-anthropic` can carry a custom header. The `anthropic` engine uses the
 official SDK, which takes `default_headers`.
 
@@ -96,8 +97,20 @@ If the key is identity-linked, the API says so plainly on the first call:
     identity-linked API key
 ```
 
-The workspace id is configuration, not something to discover — the endpoint
-that lists workspaces needs an admin key. Set it before the run:
+There are two ways past it, and either is enough.
+
+**Scope a key to one workspace.** Every key created now is backed by an
+identity — a person or a service account — so there is no longer a key type
+that avoids this. What decides it is the *workspace* field, set once when the
+key is made: Console → Settings → API keys → Create key, then set the
+workspace instead of leaving it across all of them. A key created for a
+specific workspace only works in that workspace, and requests using it omit
+the id entirely. Nothing needs configuring here afterwards.
+
+**Or supply the workspace id.** The id is configuration, not something to
+discover from here — the endpoint that lists workspaces needs an admin key,
+and the Console's Settings → Workspaces list does not show the *Default*
+workspace's id at all. Set it before the run:
 
 ```bash
 orpheus --db store.sqlite config --set anthropic_workspace_id=wrkspc_...
