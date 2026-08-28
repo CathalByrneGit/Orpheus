@@ -468,4 +468,117 @@ runner are all clients, and every write goes through core functions.
 
 ---
 
+## Fourth pass: bringing in a register
+
+Prompted by the gap this project has already named: conflict-of-interest work
+needs ownership and directorships, and [those live in registers Orpheus does not
+read](open-decisions.md#still-out-of-scope-for-phase-1). Four candidates, each
+installed and requested.
+
+### First, the part that is not about a plugin
+
+**A register is not a document.** Everything in the store is a fact read out of
+one, carrying a page and an excerpt that `align.py` located. A row in a
+companies register has no excerpt to locate and no page to point at, and giving
+it one would be an invention.
+
+There are two honest ways to hold one, and they lead to different systems:
+
+| | A register is a document | A register is reference data |
+|---|---|---|
+| Rows become | Instances, with provenance "row 42" | Nothing. It stays its own table |
+| Extraction quality | Now averages reading a PDF with reading a CSV | Still measures reading documents |
+| Feeds | The wiki, the graph, the queue | `resolution_evidence()`, as corroboration |
+| A wrong row | Is a fact in the corpus | Is evidence a person weighed and can discount |
+
+**The second.** The first dissolves the thing the quality number measures: a
+register import is trivially "correct", so mixing it in inflates accuracy with
+work no model did. The second is also what the question actually needs — a
+register is useful here because it *settles a merge*, and
+[the resolution loop](entities.md#the-loop-an-agent-gathers-evidence-a-person-decides)
+already takes evidence and weighs it by how rare a value is. A registered number
+shared by two pages is exactly the decisive, rare value the corpus does not
+currently have: only 2 of 74 companies state one.
+
+### `datasette-upload-csvs` and `datasette-upload-dbs`
+
+**Neither does the reviewed upload.** `upload-csvs` writes the table straight
+from the file; there is no staging step and no chance to correct anything first.
+`upload-dbs` validates that the upload *is* a SQLite database and moves it into
+place atomically — file validity, not data review.
+
+So the "user and agent fix it before it becomes a table" step is Orpheus's to
+build. What is worth taking is the pattern rather than the code: upload to a
+staging table, let a person and a model work over it, and promote it only when
+somebody says so — which is the shape the reading companion already has, where
+[a suggestion is not an extraction](reading-companion.md).
+
+### `datasette-enrichments`
+
+**The right shape, and the strongest candidate here.** `register_enrichments()`
+returns `Enrichment` subclasses with `get_config_form` (a form the user fills
+in — the "user decides" part), `initialize`, `enrich_batch(rows, pks, config,
+job_id, actor_id)` and `finalize`. It runs over a table or a filtered selection,
+in batches, with a job table, per-row progress, an error table, cancel and
+pause, and cost accounting.
+
+That is the batch half of nearly everything Orpheus does by CLI: re-run
+alignment over these rows, propose entities for these mentions, compare these
+candidate pairs. Built, with the progress UI and the failure handling that
+Orpheus would otherwise write badly.
+
+**Adopt the hook, never the write.** `enrich_batch` writes with raw
+`db.execute_write`, which is `execute_write_sql` again by another name and fails
+for [all the same reasons](#why-execute_write_sql-must-never-touch-the-store).
+The difference is that Orpheus writes the enrichment class, so what goes inside
+`enrich_batch` is `api.handle()`. The plugin supplies the loop, not the write.
+
+One tension worth naming: it accounts for cost in `cost_100ths_cent`, and
+Orpheus denominates its budget in
+[characters](network-and-corroboration.md#what-a-budget-is-denominated-in)
+precisely so the number does not go stale with a price list. An Orpheus
+enrichment should keep counting characters and leave that column alone.
+
+**And a correction to the third pass.** That table reads `datasette-enrichments
+| clean | >=1.0a21`, checked against `main`. The *released* version is not:
+
+```
+0.5.1 (PyPI)   GET /-/enrich/store/entities   500
+               views.py: await datasette.permission_allowed(...)
+0.6a0 (main)   GET /-/enrich/store/entities   200  "Enrich data in entities"
+               views.py: await datasette.allowed(...)
+```
+
+Both declare `datasette>=1.0a21`; the store runs 1.0a38. So the earlier note
+that a declared floor is not evidence of compatibility has a mirror image — a
+clean `main` is not evidence that what `pip install` gives you works. Adopt from
+git, or wait for a release.
+
+### `datasette-comments`
+
+The [third-pass verdict](prior-art.md#datasette-comments) stands: the discussion
+*around* a correction, which Orpheus has no answer for. One thing to add now
+that it has been read — **comments are stored in Datasette's internal database**,
+not in the store. So they sit outside `edit_history`, outside the export, and
+outside every guarantee this project makes about writes. That is the right place
+for them and it is also the reason a comment can never become an amendment: an
+amendment is a typed change with the previous value preserved, and it lives
+where the audit can see it.
+
+### `dogsheep-beta`
+
+**No.** It builds a `search_index` table by running configured SQL across other
+tables, and refreshing it means running `dogsheep-beta index` again. Orpheus's
+[search](developer-guide.md#searching-the-corpus) is `sqlite-utils` FTS kept
+current by triggers.
+
+Trading a live index for a copy that is correct until the next write is a
+regression on the one property this project is most careful about — a derived
+view that has gone stale without saying so. The staleness machinery exists
+because that failure is worth machinery. It is also dormant: 65 commits, and
+the unified-search job it does is one Orpheus does not yet have across
+documents, pages and suggestions.
+
+---
+
 [← Back to index](index.md)

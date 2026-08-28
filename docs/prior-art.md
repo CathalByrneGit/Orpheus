@@ -54,6 +54,10 @@ typed change with a preserved previous value — but a good fit for the discussi
 
 ### `datasette-enrichments` and `datasette-enrichments-llm`
 
+> Read later, and installed: the shape is right and the released version is
+> broken against Datasette 1.0. See
+> [the fourth pass](datasette-ecosystem.md#datasette-enrichments).
+
 Bulk-apply an operation, including an LLM prompt, across a filtered set of rows.
 That is the batch-extract and re-evaluate paths, already generalised, with
 multi-modal support via `media_url`.
