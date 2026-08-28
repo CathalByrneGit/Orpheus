@@ -183,6 +183,11 @@ def test_the_reading_page_only_offers_a_chat_that_can_answer(served, monkeypatch
     assert not plugin._agent_available(served), \
         "no default_model is configured in the base test config"
 
+    if agent.AgentTool is None:
+        # The other half of the rule -- installed -- cannot be exercised on a
+        # bare install, and its absence is not this test's subject.
+        pytest.skip("datasette-agent is not installed")
+
     class WithModel:
         def __init__(self, inner):
             self._inner = inner
