@@ -203,6 +203,65 @@ document *and* a neighbouring page, and they are different companies — because
 that is what a contract does, it names two different parties in one filing.
 Co-occurrence is evidence of being different as often as of being the same.
 
+### The loop: an agent gathers evidence, a person decides
+
+Better rules narrow the candidate list; they cannot settle it. What settles a
+pair is usually in the documents rather than in the columns, and reading four
+contracts to decide whether two pages are one company is the part that does not
+scale.
+
+`resolution_evidence()` assembles everything the store holds bearing on a pair:
+shared identifiers, shared property values, the name analysis, the weak signals
+labelled weak, and the passages naming each. It has no verdict field. Two agent
+tools sit on top — `orpheus_compare_pages` reads it, `orpheus_record_comparison`
+writes down what was decided — and neither merges anything. `merge_entities()`
+is still the only thing that does, and a person still calls it.
+
+**A shared value is worth what its rarity says it is worth.** Both Felder pages
+carry `acting_for = "Marv Enterprises, LLC"`, which 3 of 74 Person pages share.
+"EFTC OPERATING CORP." and "K*TEC OPERATING CORP." both carry `entity_kind =
+"private_company"`, which 64 of 74 Company pages share, and they are different
+companies. Those look identical without the count, so every shared value comes
+back with `n_pages_sharing` and its denominator, and the function draws no
+conclusion from either.
+
+Run against the corpus with a model reading the dossier:
+
+| pair | recommended | on what |
+|---|---|---|
+| Mitchell Felder / Mitchell S. Felder | **same** | the rare `acting_for`, and a middle initial |
+| EFTC OPERATING CORP. / K\*TEC OPERATING CORP. | **different** | distinct words either side; the only shared values are ones 13 and 64 pages carry |
+| HealthPlan Services / Sykes HealthPlan Services | **different** | the passages: `HealthPlan Services, Inc. ("HPS")` and `Sykes HealthPlan Services, Inc. ("SHPS")` are two defined terms in one agreement |
+
+The third is the one worth noting. Every rule in this document calls it
+arguable — 89% similar, one name containing the other. What settles it is the
+source text, and only reading the passages gets there.
+
+**And a failure worth recording.** Asked to compare the second pair, a model
+called them "both Delaware corporations". Nothing in the evidence says Delaware;
+it was a plausible embellishment that would have read as a fact from the file.
+The tool's steer now says so, with that example in it, and the recommendation is
+checkable against the quoted passages precisely so a reviewer can catch the next
+one.
+
+### A judgement, once made, rests
+
+A pair examined and rejected was offered again on every pass — which is how a
+candidate list teaches people to ignore it, and it left the next reviewer
+establishing from scratch what the last one had already worked out.
+
+`review_resolution()` records `same`, `different` or `unsure` against a pair,
+with a reason required in every case, including `unsure`. Its own vocabulary
+rather than a reuse of the question one, because "dismissed" would have to mean
+"these are two different companies" here and "not worth pursuing" there.
+
+It is recorded against a **digest of the evidence it rested on**, the rule
+[`question_reviews`](questions.md) already keeps: a judgement does not outlive
+its evidence. A new document carrying a matching address makes this a different
+question, so the digest changes, the pair comes back, and what was decided last
+time stays on file marked `stale` rather than being quietly applied to evidence
+it never saw.
+
 **One more thing the run produced**: pages called `Franchisee`, `Franchisor` and
 `[•]`. The extractor read the word a contract uses for a party as the party, and
 the wiki gave each a page. They are now a lint finding, `unnamed_page` — flagged

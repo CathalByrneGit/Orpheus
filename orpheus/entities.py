@@ -30,12 +30,15 @@ it trustworthy rather than merely convenient:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any
 
 from . import bundle as bundle_mod
 from .audit import record_edit
-from .rubric import CONFIDENCE, EXCLUDED_STATUSES, STATUSES
+from .rubric import (CONFIDENCE, EXCLUDED_STATUSES,
+                     RESOLUTION_STATUSES, STATUSES)
 from .store import Store
 from .utils import (HONORIFICS, LEGAL_FORMS, NotFound, OrpheusError,
                     naive_key, new_id, now,
@@ -502,6 +505,10 @@ _GENERIC_TOKENS = frozenset(LEGAL_FORMS) | frozenset(HONORIFICS) | {
 
 _TOKEN = re.compile(r"\w+", re.UNICODE)
 
+#: Properties that state which thing this is, rather than describe it. Sharing
+#: one is the strongest evidence short of a person saying so.
+_IDENTIFIER_PROPS = frozenset({"registration_number", "reference"})
+
 
 def _distinctive(token: str) -> bool:
     """Does this word say *which* thing is meant?
@@ -720,6 +727,14 @@ def duplicate_pages(store: Store, type_id: str | None = None,
         "SELECT COUNT(*) FROM entity_mentions WHERE entity_id = ? "
         "AND unlinked_at IS NULL", (row["entity_id"],)) or 0 for row in rows}
 
+    # A pair somebody has already settled, and whose evidence has not moved
+    # since. Offering it again is how a candidate list teaches people to ignore
+    # it -- and it would have the next reviewer establish from scratch what the
+    # last one wrote down.
+    settled = {row["pair"] for row in store.query(
+        "SELECT pair FROM resolution_reviews WHERE superseded_at IS NULL "
+        "AND status IN ('same', 'different')")}
+
     def offer(a, b, basis, score, evidence):
         # The page with more evidence behind it is the better survivor, so it
         # is named first -- but this is a suggestion, and merge() takes
@@ -747,6 +762,8 @@ def duplicate_pages(store: Store, type_id: str | None = None,
         for index, left in enumerate(group):
             for right in group[index + 1:]:
                 seen.add(frozenset((left["entity_id"], right["entity_id"])))
+                if _is_settled(store, left, right, settled):
+                    continue
                 pairs.append(offer(
                     left, right, "naive_key", 100.0,
                     f"both filed under the name key {left['naive_key']!r}"))
@@ -771,6 +788,8 @@ def duplicate_pages(store: Store, type_id: str | None = None,
             if not could_be_one_thing(left["canonical_name"],
                                       right["canonical_name"]):
                 continue
+            if _is_settled(store, left, right, settled):
+                continue
             initials = same_but_for_an_initial(left["canonical_name"],
                                                right["canonical_name"])
             pairs.append(offer(
@@ -784,6 +803,280 @@ def duplicate_pages(store: Store, type_id: str | None = None,
     # reviewer's list.
     pairs.sort(key=lambda p: (BASES.index(p["basis"]), -p["score"]))
     return pairs[:limit]
+
+
+# ---------------------------------------------------------------------------
+# The evidence for merging two pages
+# ---------------------------------------------------------------------------
+
+#: Properties that describe a row rather than identify the thing it is about.
+#: Sharing one of these is not evidence of anything.
+_BOOKKEEPING = frozenset({
+    "instance_id", "document_id", "naive_key", "source", "confidence",
+    "status", "amended_by", "amended_at", "created_at", "name", "page_no",
+})
+
+
+def _values_by_page(store: Store, type_id: str, table: str,
+                    prop: str) -> dict[str, set[str]]:
+    """Every page of this type, and the values it carries for one property."""
+    out: dict[str, set[str]] = {}
+    for row in store.query(
+            f'SELECT m.entity_id, i."{prop}" AS value FROM "{table}" i '
+            "JOIN entity_mentions m ON m.instance_id = i.instance_id "
+            "  AND m.unlinked_at IS NULL "
+            "JOIN entities e ON e.entity_id = m.entity_id "
+            f'WHERE e.type_id = ? AND e.merged_into IS NULL AND i."{prop}" '
+            "IS NOT NULL AND i.\"" + prop + "\" != ''", (type_id,)):
+        out.setdefault(row["entity_id"], set()).add(str(row["value"]))
+    return out
+
+
+def shared_attributes(store: Store, a_id: str, b_id: str) -> list[dict]:
+    """Property values two pages both carry, and how rare each one is.
+
+    Rarity is the whole of it, and the corpus makes the point sharply. Both
+    Felder pages carry `acting_for = "Marv Enterprises, LLC"`, which two pages
+    in the corpus share -- that is evidence. "EFTC OPERATING CORP." and "K*TEC
+    OPERATING CORP." both carry `entity_kind = "private_company"`, which 64
+    pages share, and they are different companies -- that is not.
+
+    So the count comes back with the value rather than a verdict. A reviewer
+    reading "an address only these two pages carry" and "a kind 64 pages carry"
+    does not need to be told which one matters.
+    """
+    a = get_entity(store, a_id, follow_merge=False)
+    b = get_entity(store, b_id, follow_merge=False)
+    if a["type_id"] != b["type_id"]:
+        return []
+
+    table = store.scalar(
+        "SELECT table_name FROM instance_index i "
+        "JOIN entity_mentions m ON m.instance_id = i.instance_id "
+        "WHERE m.entity_id = ? LIMIT 1", (a_id,))
+    if not table or not store.table_exists(table):
+        return []
+
+    columns = [c for c in store.columns(table) if c not in _BOOKKEEPING]
+    out = []
+    for prop in columns:
+        by_page = _values_by_page(store, a["type_id"], table, prop)
+        both = by_page.get(a_id, set()) & by_page.get(b_id, set())
+        of_type = store.scalar(
+            "SELECT COUNT(*) FROM entities WHERE type_id = ? AND merged_into IS NULL",
+            (a["type_id"],)) or 0
+        for value in sorted(both):
+            carrying = sum(1 for page, values in by_page.items()
+                           if value in values)
+            # The count needs its denominator. Three pages sharing a value is
+            # distinctive among 76 and meaningless among 4, and a bare number
+            # reads as a score either way.
+            share = carrying / of_type if of_type else 0
+            out.append({
+                "property": prop, "value": value,
+                "n_pages_sharing": carrying,
+                "n_pages_of_type": of_type,
+                "note": (f"{carrying} of {of_type} {a['type_id']} pages carry "
+                         f"it" + (", so it says little about these two"
+                                  if share > 0.25 else "")),
+            })
+    # Rarest first: the thing worth reading is at the top.
+    out.sort(key=lambda r: (r["n_pages_sharing"], r["property"]))
+    return out
+
+
+def _passages_for(store: Store, entity_id: str, limit: int = 6) -> list[dict]:
+    """Where the documents say this name, so a person can read it themselves."""
+    return [dict(r) for r in store.query(
+        "SELECT p.document_id, d.filename, p.page_no, p.excerpt "
+        "FROM entity_mentions m "
+        "JOIN provenance p ON p.instance_id = m.instance_id "
+        "LEFT JOIN documents d ON d.document_id = p.document_id "
+        "WHERE m.entity_id = ? AND m.unlinked_at IS NULL "
+        "AND p.excerpt IS NOT NULL AND p.excerpt != '' LIMIT ?",
+        (entity_id, limit))]
+
+
+def resolution_evidence(store: Store, a_id: str, b_id: str) -> dict:
+    """Everything the store holds bearing on whether two pages are one thing.
+
+    Assembled, never judged. This returns what there is and how much each part
+    is worth; deciding is a person's, and `merge_entities()` is still the only
+    way it happens.
+
+    The point of gathering it in one place is that the alternative is a person
+    running six queries per pair, or a model inventing the answer. What a model
+    is good for here is reading the passages at the end and saying what they
+    show -- and the passages are quoted from the documents, so what it says can
+    be checked against them.
+    """
+    a = get_entity(store, a_id, follow_merge=False)
+    b = get_entity(store, b_id, follow_merge=False)
+
+    attributes = shared_attributes(store, a_id, b_id)
+    identifiers = [r for r in attributes if r["property"] in _IDENTIFIER_PROPS]
+    documents_a = {r["document_id"] for r in store.query(
+        "SELECT DISTINCT document_id FROM entity_mentions "
+        "WHERE entity_id = ? AND unlinked_at IS NULL", (a_id,))}
+    documents_b = {r["document_id"] for r in store.query(
+        "SELECT DISTINCT document_id FROM entity_mentions "
+        "WHERE entity_id = ? AND unlinked_at IS NULL", (b_id,))}
+
+    left, right = distinguishing_tokens(a["canonical_name"], b["canonical_name"])
+    return {
+        "pages": [
+            {"entity_id": a_id, "canonical_name": a["canonical_name"],
+             "type_id": a["type_id"], "status": a["status"],
+             "n_documents": len(documents_a)},
+            {"entity_id": b_id, "canonical_name": b["canonical_name"],
+             "type_id": b["type_id"], "status": b["status"],
+             "n_documents": len(documents_b)},
+        ],
+        "same_type": a["type_id"] == b["type_id"],
+        "identifiers": identifiers,
+        "names": {
+            "same_key": a["naive_key"] == b["naive_key"] and bool(a["naive_key"]),
+            "differ_by_an_initial": same_but_for_an_initial(
+                a["canonical_name"], b["canonical_name"]),
+            "words_only_the_first_has": sorted(left),
+            "words_only_the_second_has": sorted(right),
+            "could_be_one_thing": could_be_one_thing(a["canonical_name"],
+                                                    b["canonical_name"]),
+        },
+        "shared_attributes": [r for r in attributes
+                              if r["property"] not in _IDENTIFIER_PROPS],
+        # Reported because a reviewer will ask, and labelled because the
+        # obvious reading of it is wrong.
+        "weak_signals": {
+            "shared_documents": sorted(documents_a & documents_b),
+            "note": ("Appearing in the same document is not evidence of being "
+                     "the same thing. Measured on this corpus: EFTC OPERATING "
+                     "CORP. and K*TEC OPERATING CORP. share a document and a "
+                     "neighbouring page and are different companies, because "
+                     "naming two different parties is what a contract does."),
+        },
+        "passages": {
+            a_id: _passages_for(store, a_id),
+            b_id: _passages_for(store, b_id),
+        },
+        "caveat": ("Assembled, not judged. Nothing here merges anything, and a "
+                   "shared value is worth what its rarity says it is worth -- "
+                   "read `n_pages_sharing` before reading the match."),
+    }
+
+
+def _is_settled(store: Store, left: dict, right: dict,
+                settled: set[str]) -> bool:
+    """Has somebody decided this pair on evidence that still holds?
+
+    The digest is only recomputed for a pair somebody actually reviewed, which
+    is a handful -- doing it for every pair would make a corpus-wide pass
+    quadratic in queries rather than in comparisons.
+    """
+    key = ":".join(sorted((left["entity_id"], right["entity_id"])))
+    if key not in settled:
+        return False
+    verdict = resolution_verdict(store, left["entity_id"], right["entity_id"])
+    return bool(verdict) and not verdict["stale"]
+
+
+def _pair(a_id: str, b_id: str) -> tuple[str, str]:
+    """The pair, ordered. Which way round somebody looked at two pages is not
+    a different question."""
+    return tuple(sorted((a_id, b_id)))  # type: ignore[return-value]
+
+
+def evidence_digest(evidence: dict) -> str:
+    """A digest of what was known, so a judgement does not outlive it.
+
+    Covers the parts that would change the answer: the identifiers, the shared
+    values, the name analysis, and which documents each page rests on. A new
+    document carrying a matching address makes this a different question, and
+    the pair comes back rather than staying settled on evidence that has moved.
+
+    Deliberately not the passages: more of the same excerpts is more of what
+    was already read, and re-asking on every re-extraction would make the
+    judgement worthless.
+    """
+    payload = {
+        "identifiers": sorted(
+            (r["property"], r["value"]) for r in evidence["identifiers"]),
+        "attributes": sorted(
+            (r["property"], r["value"]) for r in evidence["shared_attributes"]),
+        "names": {k: v for k, v in sorted(evidence["names"].items())},
+        "documents": sorted(
+            (p["entity_id"], p["n_documents"]) for p in evidence["pages"]),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode()
+    ).hexdigest()[:32]
+
+
+def review_resolution(store: Store, a_id: str, b_id: str, status: str,
+                      rationale: str, actor_id: str | None = None) -> dict:
+    """Record what somebody decided about two pages, and why.
+
+    `rationale` is required for every state, including `unsure`, because the
+    reason is the part worth anything later. "Different registered addresses,
+    and the 2019 filing names both in the same schedule" is a fact somebody
+    established; without it the next reviewer establishes it again.
+
+    This decides nothing by itself. `same` does not merge -- `merge_entities()`
+    is still the only thing that does, and a person still calls it.
+    """
+    store.assert_writable()
+    require_choice(status, RESOLUTION_STATUSES, "status")
+    require_string(rationale, "rationale")
+    if a_id == b_id:
+        raise OrpheusError("A page is not a pair with itself.")
+
+    left, right = _pair(a_id, b_id)
+    digest = evidence_digest(resolution_evidence(store, left, right))
+    review_id = new_id("rrv")
+    with store.transaction():
+        previous = store.one(
+            "SELECT * FROM resolution_reviews WHERE pair = ? "
+            "AND superseded_at IS NULL", (f"{left}:{right}",))
+        if previous:
+            store.execute(
+                "UPDATE resolution_reviews SET superseded_at = ? "
+                "WHERE review_id = ?", (now(), previous["review_id"]))
+        store.insert("resolution_reviews", {
+            "review_id": review_id,
+            "pair": f"{left}:{right}",
+            "entity_a": left, "entity_b": right,
+            "evidence_digest": digest,
+            "status": status,
+            "rationale": rationale,
+            "reviewed_by": actor_id,
+            "reviewed_at": now(),
+            "superseded_at": None,
+        })
+        record_edit(store, "resolution_reviews", review_id, None,
+                    "review_resolution",
+                    previous={"status": previous["status"]} if previous else None,
+                    new={"status": status, "pair": f"{left}:{right}"},
+                    actor_id=actor_id, note=rationale)
+    return store.one("SELECT * FROM resolution_reviews WHERE review_id = ?",
+                     (review_id,))
+
+
+def resolution_verdict(store: Store, a_id: str, b_id: str) -> dict | None:
+    """The live judgement about two pages, if it still rests on what is known.
+
+    Returns None where nobody has looked, and also where somebody looked and
+    the evidence has since moved -- in which case the old judgement is still on
+    file, and reported as `stale` rather than quietly applied.
+    """
+    left, right = _pair(a_id, b_id)
+    row = store.one("SELECT * FROM resolution_reviews WHERE pair = ? "
+                    "AND superseded_at IS NULL", (f"{left}:{right}",))
+    if row is None:
+        return None
+    fresh = evidence_digest(resolution_evidence(store, left, right))
+    settled = dict(row)
+    settled["stale"] = fresh != row["evidence_digest"]
+    return settled
 
 
 def candidates_for_mention(store: Store, instance_id: str,

@@ -69,6 +69,14 @@ SUGGESTION_STATUSES = ("offered", "accepted", "dismissed")
 # is not a dismissal -- it records the innocent explanation so nobody has to
 # rediscover it.
 QUESTION_STATUSES = ("open", "explained", "standing", "dismissed")
+
+#: What somebody can decide about two pages that might be one thing.
+#:
+#: Its own vocabulary rather than a reuse of the one above, because "dismissed"
+#: would have to mean "these are two different companies" here and "this
+#: question is not worth pursuing" there. `unsure` is a real answer and is
+#: recorded: it says somebody looked, which the next reviewer needs to know.
+RESOLUTION_STATUSES = ("same", "different", "unsure")
 SETTLED_QUESTIONS = ("explained", "dismissed")
 
 ACTIONS = ("view", "edit", "share", "delete")

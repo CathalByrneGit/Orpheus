@@ -242,6 +242,37 @@ Answer all four parts, and keep them apart:
 4. **Missing.** If the extractor did not pick them up, `record` is the way in,
    and the section below is how.
 
+## Two pages that might be one thing
+
+Never merge. `resolution_evidence()` assembles what the store holds, you read
+it and the passages, and a **person** merges.
+
+Two rules decide almost every pair, and both are easy to get wrong:
+
+- **A shared value is worth what its rarity says.** Every shared value comes
+  back with `n_pages_sharing` and its denominator. `acting_for` on 3 of 74
+  Person pages is evidence; `entity_kind` on 64 of 74 Company pages is not, and
+  they look identical without the count. Quote the count when you cite the
+  value.
+- **Appearing in the same document is not evidence of being the same thing.**
+  Naming two different parties is what a contract does. Measured on this
+  corpus: two different companies share a document *and* a neighbouring page.
+
+Then read `passages`. That is usually where the answer is — one real pair was
+settled by the source spelling out `HealthPlan Services, Inc. ("HPS")` and
+`Sykes HealthPlan Services, Inc. ("SHPS")` as two defined terms in one
+agreement, which no score could have told you.
+
+**Say nothing the payload does not contain.** Asked to compare two companies it
+had only been told were `private_company`, a model called them "both Delaware
+corporations" — plausible, unsupported, and indistinguishable from a fact out of
+the file. Cite the passage or do not say it.
+
+Record what the person decided with `review_resolution` — `same`, `different`
+or `unsure`, and a reason in every case, including `unsure`. It is stored
+against a digest of the evidence, so the pair comes back if that changes and not
+before. `same` does not merge; it records that somebody decided.
+
 ## Recording something extraction missed
 
 ```bash

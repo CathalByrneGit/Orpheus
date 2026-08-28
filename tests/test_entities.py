@@ -946,3 +946,255 @@ def test_the_strongest_reason_is_offered_first(corpus):
     bases = [p["basis"] for p in duplicate_pages(corpus, type_id="Company")]
     assert bases[0] == "naive_key"
     assert bases == sorted(bases, key=lambda b: BASES.index(b))
+
+
+# ---------------------------------------------------------------------------
+# The evidence for merging two pages
+# ---------------------------------------------------------------------------
+#
+# Assembled, never judged. The point is that a reviewer looking at two pages
+# should not have to run six queries, and a model asked to help should not have
+# to invent the answer.
+
+@pytest.fixture
+def two_people(corpus):
+    """Two Person pages, one acting for a company both are tied to."""
+    for instance_id, name, acting_for, job in (
+            ("p_1", "Mitchell Felder", "Marv Enterprises, LLC", None),
+            ("p_2", "Mitchell S. Felder", "Marv Enterprises, LLC", "sole member"),
+            ("p_3", "Someone Else", "Marv Enterprises, LLC", None),
+            ("p_4", "Ada Nolan", "Ardmore Digital Ltd", None)):
+        corpus.execute(
+            "INSERT INTO instances_Person (instance_id, document_id, name,"
+            " naive_key, acting_for, job_title, source, confidence, status,"
+            " created_at) VALUES (?,?,?,?,?,?,'ai_cloud',0.9,'unconfirmed',"
+            " datetime('now'))",
+            (instance_id, "doc_1", name,
+             bundle_mod.key_for(bundle_mod.load(), "Person", name),
+             acting_for, job))
+        corpus.execute(
+            "INSERT INTO instance_index (instance_id, type_id, table_name,"
+            " document_id, created_at) VALUES (?,'Person','instances_Person',"
+            " 'doc_1', datetime('now'))", (instance_id,))
+    corpus.conn.commit()
+    pages = {}
+    for instance_id, name in (("p_1", "Mitchell Felder"),
+                              ("p_2", "Mitchell S. Felder"),
+                              ("p_3", "Someone Else"), ("p_4", "Ada Nolan")):
+        pages[name] = create_entity(corpus, "Person", name, actor_id="act_a",
+                                    source="ai_local")
+        link_mention(corpus, pages[name], instance_id, actor_id="act_a")
+    return corpus, pages
+
+
+def test_a_shared_value_comes_back_with_how_rare_it_is(two_people):
+    from orpheus.entities import shared_attributes
+
+    store, pages = two_people
+    shared = shared_attributes(store, pages["Mitchell Felder"],
+                               pages["Mitchell S. Felder"])
+    acting = next(r for r in shared if r["property"] == "acting_for")
+    assert acting["value"] == "Marv Enterprises, LLC"
+    # Three of the four Person pages carry it, and the number says so rather
+    # than the function deciding what it is worth.
+    assert acting["n_pages_sharing"] == 3
+    assert acting["n_pages_of_type"] == 4
+
+
+def test_a_value_almost_every_page_carries_says_so(two_people):
+    # "EFTC OPERATING CORP." and "K*TEC OPERATING CORP." are different
+    # companies that both carry entity_kind = private_company, which 64 of 74
+    # pages carry. The note is what stops that reading as a match.
+    from orpheus.entities import shared_attributes
+
+    store, pages = two_people
+    shared = shared_attributes(store, pages["Mitchell Felder"],
+                               pages["Someone Else"])
+    acting = next(r for r in shared if r["property"] == "acting_for")
+    assert "says little" in acting["note"]
+
+
+def test_rarest_evidence_is_offered_first(two_people):
+    from orpheus.entities import shared_attributes
+
+    store, pages = two_people
+    store.execute("UPDATE instances_Person SET job_title = 'sole member' "
+                  "WHERE instance_id = 'p_1'")
+    store.conn.commit()
+    shared = shared_attributes(store, pages["Mitchell Felder"],
+                               pages["Mitchell S. Felder"])
+    counts = [r["n_pages_sharing"] for r in shared]
+    assert counts == sorted(counts)
+    assert shared[0]["property"] == "job_title"   # 2 pages, against 3
+
+
+def test_bookkeeping_columns_are_never_evidence(two_people):
+    # Two rows sharing a status, a source or a document id says nothing about
+    # whether they are the same thing.
+    from orpheus.entities import shared_attributes
+
+    store, pages = two_people
+    props = {r["property"] for r in shared_attributes(
+        store, pages["Mitchell Felder"], pages["Mitchell S. Felder"])}
+    assert not props & {"status", "source", "confidence", "document_id",
+                        "naive_key", "created_at", "name"}
+
+
+def test_two_pages_of_different_types_share_nothing(two_people):
+    from orpheus.entities import shared_attributes
+
+    store, pages = two_people
+    company = create_entity(store, "Company", "Marv Enterprises, LLC",
+                            actor_id="act_a", source="ai_local")
+    assert shared_attributes(store, pages["Mitchell Felder"], company) == []
+
+
+def test_the_dossier_carries_the_name_analysis_and_the_passages(two_people):
+    from orpheus.entities import resolution_evidence
+
+    store, pages = two_people
+    ev = resolution_evidence(store, pages["Mitchell Felder"],
+                             pages["Mitchell S. Felder"])
+    assert ev["names"]["differ_by_an_initial"] is True
+    assert ev["names"]["could_be_one_thing"] is True
+    assert ev["same_type"] is True
+    assert set(ev["passages"]) == {pages["Mitchell Felder"],
+                                   pages["Mitchell S. Felder"]}
+
+
+def test_appearing_in_one_document_is_reported_and_labelled(two_people):
+    # A reviewer will ask, and the obvious reading of it is wrong -- so it is
+    # shown with the measurement that says why.
+    from orpheus.entities import resolution_evidence
+
+    store, pages = two_people
+    ev = resolution_evidence(store, pages["Mitchell Felder"],
+                             pages["Someone Else"])
+    assert ev["weak_signals"]["shared_documents"] == ["doc_1"]
+    assert "different companies" in ev["weak_signals"]["note"]
+
+
+def test_the_dossier_never_decides(two_people):
+    # It has no verdict field, and gathering it changes nothing.
+    from orpheus.entities import resolution_evidence
+
+    store, pages = two_people
+    before = store.scalar("SELECT COUNT(*) FROM entities WHERE merged_into IS NOT NULL")
+    ev = resolution_evidence(store, pages["Mitchell Felder"],
+                             pages["Mitchell S. Felder"])
+    assert "verdict" not in ev and "merge" not in ev
+    assert "not judged" in ev["caveat"]
+    assert store.scalar(
+        "SELECT COUNT(*) FROM entities WHERE merged_into IS NOT NULL") == before
+
+
+# ---------------------------------------------------------------------------
+# A pair somebody has settled
+# ---------------------------------------------------------------------------
+
+def test_a_pair_ruled_different_stops_being_offered(two_people):
+    from orpheus.entities import review_resolution
+
+    pytest.importorskip("rapidfuzz")
+    store, pages = two_people
+    a, b = pages["Mitchell Felder"], pages["Mitchell S. Felder"]
+    assert any({p["keep"]["entity_id"], p["merge"]["entity_id"]} == {a, b}
+               for p in duplicate_pages(store, type_id="Person"))
+
+    review_resolution(store, a, b, "different",
+                      rationale="Two brothers, both named in the 2019 filing.",
+                      actor_id="act_a")
+    assert not any({p["keep"]["entity_id"], p["merge"]["entity_id"]} == {a, b}
+                   for p in duplicate_pages(store, type_id="Person"))
+
+
+def test_which_way_round_somebody_looked_is_not_a_new_question(two_people):
+    from orpheus.entities import resolution_verdict, review_resolution
+
+    store, pages = two_people
+    a, b = pages["Mitchell Felder"], pages["Mitchell S. Felder"]
+    review_resolution(store, a, b, "different", rationale="Brothers.",
+                      actor_id="act_a")
+    assert resolution_verdict(store, b, a)["status"] == "different"
+
+
+def test_a_judgement_does_not_outlive_the_evidence_it_rested_on(two_people):
+    # The rule `question_reviews` already keeps. A new document carrying a
+    # matching address makes this a different question.
+    from orpheus.entities import resolution_verdict, review_resolution
+
+    store, pages = two_people
+    a, b = pages["Mitchell Felder"], pages["Mitchell S. Felder"]
+    review_resolution(store, a, b, "different", rationale="Brothers.",
+                      actor_id="act_a")
+    assert resolution_verdict(store, a, b)["stale"] is False
+
+    store.execute("UPDATE instances_Person SET job_title = 'sole member' "
+                  "WHERE instance_id = 'p_1'")
+    store.conn.commit()
+
+    verdict = resolution_verdict(store, a, b)
+    assert verdict["stale"] is True, "new shared evidence, so ask again"
+    assert verdict["status"] == "different", "and what was decided stays on file"
+
+
+def test_a_stale_judgement_puts_the_pair_back_in_front_of_somebody(two_people):
+    from orpheus.entities import review_resolution
+
+    pytest.importorskip("rapidfuzz")
+    store, pages = two_people
+    a, b = pages["Mitchell Felder"], pages["Mitchell S. Felder"]
+    review_resolution(store, a, b, "different", rationale="Brothers.",
+                      actor_id="act_a")
+    store.execute("UPDATE instances_Person SET job_title = 'sole member' "
+                  "WHERE instance_id = 'p_1'")
+    store.conn.commit()
+
+    assert any({p["keep"]["entity_id"], p["merge"]["entity_id"]} == {a, b}
+               for p in duplicate_pages(store, type_id="Person"))
+
+
+def test_a_previous_judgement_is_superseded_rather_than_overwritten(two_people):
+    from orpheus.entities import resolution_verdict, review_resolution
+
+    store, pages = two_people
+    a, b = pages["Mitchell Felder"], pages["Mitchell S. Felder"]
+    review_resolution(store, a, b, "unsure", rationale="Cannot tell from this.",
+                      actor_id="act_a")
+    review_resolution(store, a, b, "different", rationale="Found the filing.",
+                      actor_id="act_a")
+
+    assert resolution_verdict(store, a, b)["status"] == "different"
+    assert store.scalar(
+        "SELECT COUNT(*) FROM resolution_reviews WHERE superseded_at IS NOT NULL") == 1
+
+
+def test_deciding_two_pages_are_one_thing_does_not_merge_them(two_people):
+    # Recording a judgement is not acting on it. merge_entities is still the
+    # only thing that merges, and a person still calls it.
+    from orpheus.entities import review_resolution
+
+    store, pages = two_people
+    a, b = pages["Mitchell Felder"], pages["Mitchell S. Felder"]
+    review_resolution(store, a, b, "same", rationale="Same man, same company.",
+                      actor_id="act_a")
+    assert get_entity(store, b, follow_merge=False)["merged_into"] is None
+
+
+def test_a_reason_is_required_even_for_unsure(two_people):
+    from orpheus.entities import review_resolution
+
+    store, pages = two_people
+    with pytest.raises(OrpheusError):
+        review_resolution(store, pages["Mitchell Felder"],
+                          pages["Mitchell S. Felder"], "unsure", rationale="",
+                          actor_id="act_a")
+
+
+def test_a_page_is_not_a_pair_with_itself(two_people):
+    from orpheus.entities import review_resolution
+
+    store, pages = two_people
+    with pytest.raises(OrpheusError):
+        review_resolution(store, pages["Ada Nolan"], pages["Ada Nolan"],
+                          "same", rationale="obviously", actor_id="act_a")

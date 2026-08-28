@@ -620,6 +620,44 @@ MIGRATIONS: list[dict] = [
         # had no need to do because `entities` did not exist yet.
         "run": lambda store: _recompute_keys_per_style(store),
     },
+    {
+        "version": 11,
+        "name": "resolution_reviews",
+        # What somebody decided about two pages, and the evidence they decided
+        # it on. Without this a pair examined and rejected is offered again on
+        # every pass -- which is how a candidate list teaches people to ignore
+        # it, and the reason the evidence gets established from scratch each
+        # time by whoever looks next.
+        "statements": [
+            """
+            CREATE TABLE IF NOT EXISTS resolution_reviews (
+                review_id       TEXT PRIMARY KEY,
+                -- The pair, ordered, so which way round somebody looked at
+                -- them is not a different question.
+                pair            TEXT NOT NULL,
+                entity_a        TEXT NOT NULL REFERENCES entities(entity_id),
+                entity_b        TEXT NOT NULL REFERENCES entities(entity_id),
+                -- A digest of what was known when the judgement was made. A
+                -- judgement does not outlive its evidence: a new document
+                -- carrying a matching address makes this a different question,
+                -- and the pair comes back.
+                evidence_digest TEXT NOT NULL,
+                status          TEXT NOT NULL,
+                rationale       TEXT NOT NULL,
+                reviewed_by     TEXT REFERENCES actors(actor_id),
+                reviewed_at     TEXT NOT NULL,
+                superseded_at   TEXT
+            )
+            """,
+            # One live judgement per pair. Superseding rather than updating
+            # keeps what somebody decided last time readable after the evidence
+            # moved -- the same reason nothing else here overwrites.
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_resolution_reviews_live "
+            "ON resolution_reviews (pair) WHERE superseded_at IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_resolution_reviews_status "
+            "ON resolution_reviews (status)",
+        ],
+    },
 ]
 
 

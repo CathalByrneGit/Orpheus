@@ -134,7 +134,8 @@ def test_every_tool_tells_the_model_not_to_use_raw_sql(served):
     # Tools that answer a question about the corpus carry the steer. The ones
     # that act on it -- record, settle -- are not alternatives to a query, and
     # needs_review is a report with no SQL equivalent worth writing.
-    acts = ("orpheus_record", "orpheus_settle_suggestion", "orpheus_needs_review")
+    acts = ("orpheus_record", "orpheus_settle_suggestion", "orpheus_needs_review",
+            "orpheus_record_comparison")
     lookups = [t for t in tools
                if t.name.startswith("orpheus_") and t.name not in acts]
     assert lookups
@@ -227,3 +228,90 @@ def test_a_decision_is_attributed_to_an_orpheus_actor(served):
 def test_no_signed_in_identity_yields_no_actor(served):
     assert asyncio.run(agent._actor_id(served, None)) is None
     assert asyncio.run(agent._actor_id(served, {})) is None
+
+
+# -- comparing two pages -----------------------------------------------------
+
+@pytest.fixture
+def two_pages(served):
+    """Two Company pages carrying one distinctive address between them."""
+    db = list(served.databases.values())[-1]
+    store = connect(db.path, force_lock=True, migrate=False)
+    try:
+        store.execute(
+            "INSERT INTO instance_index (instance_id, type_id, table_name,"
+            " document_id, created_at) VALUES ('inst_2','Company',"
+            "'instances_Company','doc_1','2026-01-01T00:00:00Z')")
+        store.execute(
+            "INSERT INTO instances_Company (instance_id, document_id, name,"
+            " naive_key, address, source, confidence, status, created_at) VALUES"
+            " ('inst_2','doc_1','Ardmore Digital Limited','ardmore digital',"
+            "'12 Ushers Quay','ai_cloud',1.0,'unconfirmed','2026-01-01T00:00:00Z')")
+        for entity_id, name, instance_id in (
+                ("ent_a", "Ardmore Digital Ltd", "inst_1"),
+                ("ent_b", "Ardmore Digital Limited", "inst_2")):
+            store.execute(
+                "INSERT INTO entities (entity_id, type_id, canonical_name,"
+                " naive_key, source, confidence, status, created_at) VALUES"
+                " (?,'Company',?,'ardmore digital','ai_local',0.7,"
+                "'unconfirmed',datetime('now'))", (entity_id, name))
+            store.execute(
+                "INSERT INTO entity_mentions (entity_id, instance_id,"
+                " document_id, basis, confidence, status, linked_at) VALUES"
+                " (?,?, 'doc_1','naive_key',0.7,'unconfirmed',datetime('now'))",
+                (entity_id, instance_id))
+        store.conn.commit()
+    finally:
+        store.close()
+    return served
+
+
+def test_the_comparison_tool_hands_over_evidence_and_no_verdict(two_pages):
+    result = call(agent.compare_pages, two_pages,
+                  entity_id="ent_a", other_entity_id="ent_b")
+    assert "verdict" not in result["evidence"]
+    address = next(r for r in result["evidence"]["shared_attributes"]
+                   if r["property"] == "address")
+    assert address["value"] == "12 Ushers Quay"
+    assert address["n_pages_sharing"] == 2
+    # The two things a model reading this gets wrong on its own.
+    assert "n_pages_sharing" in result["reading"]
+    assert "same document is not evidence" in result["reading"]
+    assert "a person does that" in result["reading"]
+
+
+def test_it_says_when_somebody_has_already_looked(two_pages):
+    call(agent.record_comparison, two_pages, entity_id="ent_a",
+         other_entity_id="ent_b", status="different",
+         rationale="Different registered numbers in the 2019 filing.")
+
+    result = call(agent.compare_pages, two_pages,
+                  entity_id="ent_a", other_entity_id="ent_b")
+    assert result["already_reviewed"]["status"] == "different"
+    assert result["already_reviewed"]["stale"] is False
+
+
+def test_recording_a_comparison_never_merges(two_pages):
+    result = call(agent.record_comparison, two_pages, entity_id="ent_a",
+                  other_entity_id="ent_b", status="same",
+                  rationale="Same company, same address.")
+    assert result["recorded"]["status"] == "same"
+    assert "does not merge" in result["reading"]
+
+    db = list(two_pages.databases.values())[-1]
+    store = connect(db.path, force_lock=True, migrate=False)
+    try:
+        assert store.scalar("SELECT merged_into FROM entities "
+                            "WHERE entity_id = 'ent_b'") is None
+    finally:
+        store.close()
+
+
+def test_a_status_the_vocabulary_does_not_have_is_refused(two_pages):
+    result = call(agent.record_comparison, two_pages, entity_id="ent_a",
+                  other_entity_id="ent_b", status="probably",
+                  rationale="a hunch")
+    # Said back rather than raised, so the model can correct it instead of the
+    # conversation ending.
+    assert result["recorded"] is False
+    assert "same, different, unsure" in result["refused"]

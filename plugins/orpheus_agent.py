@@ -41,6 +41,7 @@ from orpheus import companion as companion_mod
 from orpheus import corroboration as corroboration_mod
 from orpheus import entities as entities_mod
 from orpheus import graph as graph_mod
+from orpheus.rubric import RESOLUTION_STATUSES
 from orpheus import lint as lint_mod
 from orpheus import record as record_mod
 from orpheus import search as search_mod
@@ -233,6 +234,69 @@ async def connections(datasette, actor, entity_id: str, depth: int = 2):
                 "counterparty is not an allegation about either."),
         }
     return json.dumps(await _read(datasette, run), default=str)
+
+
+async def compare_pages(datasette, actor, entity_id: str, other_entity_id: str):
+    """Everything bearing on whether two pages are one thing."""
+    def run(store):
+        evidence = entities_mod.resolution_evidence(store, entity_id,
+                                                    other_entity_id)
+        verdict = entities_mod.resolution_verdict(store, entity_id,
+                                                  other_entity_id)
+        return {
+            "evidence": evidence,
+            # Somebody may already have looked. Saying so stops a second
+            # opinion being offered as if it were the first, and `stale` says
+            # whether what they decided still rests on what is known.
+            "already_reviewed": verdict,
+            "reading": (
+                "Assembled, never judged, and you must not judge it either — "
+                "recommend, with the evidence you are recommending on. "
+                "`n_pages_sharing` is the whole of what a shared value is "
+                "worth: a value three pages of this type carry is evidence, "
+                "one that 64 of 74 carry is not, and both look identical "
+                "without that number. Appearing in the same document is not "
+                "evidence of being the same thing -- measured on this corpus, "
+                "two different companies share a document and a neighbouring "
+                "page, because naming two different parties is what a contract "
+                "does. Read `passages` and say what the documents actually "
+                "show. State nothing that is not in this payload: asked to "
+                "compare two companies it had only been told were "
+                "`private_company`, a model called them 'both Delaware "
+                "corporations', which was plausible, unsupported, and would "
+                "have been read as a fact from the file. Nothing here merges "
+                "anything: a person does that."),
+        }
+    return json.dumps(await _read(datasette, run), default=str)
+
+
+async def record_comparison(datasette, actor, entity_id: str,
+                            other_entity_id: str, status: str, rationale: str):
+    """Write down what was decided about two pages, and why."""
+    actor_id = await _actor_id(datasette, actor)
+
+    def run(store):
+        return entities_mod.review_resolution(
+            store, entity_id, other_entity_id, status, rationale,
+            actor_id=actor_id)
+
+    try:
+        result = await _write(datasette, run)
+    except OrpheusError as refused:
+        # A vocabulary the store does not have, a missing reason, or a page
+        # paired with itself. Said back rather than raised, so the model can
+        # correct it instead of the conversation ending.
+        return json.dumps({"recorded": False, "refused": str(refused)})
+    if isinstance(result, dict) and result.get("error"):
+        return json.dumps(result)
+    return json.dumps({
+        "recorded": dict(result),
+        "reading": (
+            "Recorded against a digest of the evidence it rested on, so it "
+            "comes back if that changes and not before. `same` does not merge "
+            "the pages -- it records that somebody decided they are one thing, "
+            "and a person still performs the merge."),
+    }, default=str)
 
 
 async def corroboration_for(datasette, actor, entity_id: str):
@@ -502,6 +566,41 @@ def _tools():
                           "description": "Hops to follow, default 2"}},
                 "required": ["entity_id"]},
             fn=connections,
+        ),
+        AgentTool(
+            name="orpheus_compare_pages",
+            description=_PREFER + "Everything the store holds bearing on "
+                        "whether two entity pages are the same thing: shared "
+                        "identifiers, shared property values with how many "
+                        "pages carry each one, the name analysis, and the "
+                        "passages naming each. Use it before suggesting a "
+                        "merge, and read the passages rather than the scores.",
+            input_schema={"type": "object", "properties": {
+                "entity_id": {"type": "string"},
+                "other_entity_id": {"type": "string"}},
+                "required": ["entity_id", "other_entity_id"]},
+            fn=compare_pages,
+        ),
+        AgentTool(
+            name="orpheus_record_comparison",
+            description="Write down what was decided about two pages that "
+                        "might be one thing, and why. `same`, `different` or "
+                        "`unsure`, with a reason in every case. This does not "
+                        "merge anything -- it records a judgement, so the pair "
+                        "stops being offered until the evidence changes. Only "
+                        "record what a person has decided, never your own "
+                        "opinion.",
+            input_schema={"type": "object", "properties": {
+                "entity_id": {"type": "string"},
+                "other_entity_id": {"type": "string"},
+                "status": {"type": "string",
+                           "enum": list(RESOLUTION_STATUSES)},
+                "rationale": {"type": "string",
+                              "description": "Why. Required for every status, "
+                                             "including unsure."}},
+                "required": ["entity_id", "other_entity_id", "status",
+                             "rationale"]},
+            fn=record_comparison,
         ),
         AgentTool(
             name="orpheus_corroboration",
