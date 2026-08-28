@@ -9,7 +9,9 @@ import {
   movedBeyondThreshold,
   neighboursOf,
   radiusFor,
+  screenRadius,
   screenToGraph,
+  labelThreshold,
   shouldAnimate,
   type MapEdge,
   type MapNode,
@@ -82,6 +84,28 @@ describe("what is drawn", () => {
   });
 });
 
+describe("node size against zoom", () => {
+  it("is full size at or above 1:1", () => {
+    expect(screenRadius(0, 1)).toBe(5);
+    expect(screenRadius(0, 3)).toBe(5);
+  });
+
+  it("shrinks when the view is zoomed out to hold a whole corpus", () => {
+    expect(screenRadius(0, 0.6)).toBeLessThan(screenRadius(0, 1));
+  });
+
+  it("never shrinks past the floor, however far out the fit goes", () => {
+    expect(screenRadius(0, 0.01)).toBe(screenRadius(0, 0.45));
+    expect(screenRadius(0, 0.01)).toBeGreaterThan(2);
+  });
+
+  it("keeps a hub bigger than a page joined to nothing at every zoom", () => {
+    for (const k of [0.2, 0.5, 1, 2]) {
+      expect(screenRadius(9, k)).toBeGreaterThan(screenRadius(0, k));
+    }
+  });
+});
+
 describe("the view", () => {
   it("clamps zoom to the allowed range", () => {
     expect(clampScale(99)).toBe(4);
@@ -129,6 +153,31 @@ describe("the view", () => {
     expect(shouldAnimate(true, false)).toBe(true);
     expect(shouldAnimate(true, true)).toBe(false);
     expect(shouldAnimate(false, false)).toBe(false);
+  });
+});
+
+describe("labels", () => {
+  it("labels everything worth labelling in a small graph", () => {
+    expect(labelThreshold([5, 4, 3, 2, 1, 0])).toBe(2);
+  });
+
+  it("raises the bar rather than overlapping in a crowded one", () => {
+    const many = Array.from({ length: 200 }, (_, i) => (i % 9) + 2);
+    const cut = labelThreshold(many, 24);
+    expect(cut).toBeGreaterThan(2);
+    expect(many.filter((d) => d >= cut).length).toBeGreaterThanOrEqual(24);
+  });
+
+  it("keeps a whole tie rather than cutting through it", () => {
+    // 30 nodes all at degree 4: either all are labelled or the cut is
+    // arbitrary. Keeping them is the honest option -- it never hides one node
+    // while showing its equal.
+    const tied = Array(30).fill(4);
+    expect(tied.filter((d) => d >= labelThreshold(tied, 24)).length).toBe(30);
+  });
+
+  it("never labels a node joined to nothing", () => {
+    expect(labelThreshold([0, 0, 0, 0])).toBe(2);
   });
 });
 

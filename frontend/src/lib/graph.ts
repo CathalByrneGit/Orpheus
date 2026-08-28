@@ -103,6 +103,24 @@ export function radiusFor(degree: number): number {
   return Math.min(5 + degree * 1.6, 18);
 }
 
+/**
+ * Node radius on screen, given how far the view is zoomed out.
+ *
+ * Two failures sit either side of this. Sizing in graph coordinates renders
+ * 159 pages as dust the moment the fit zooms out, and blows them into blobs
+ * when it zooms in. Holding a constant screen size fixes both and then cannot
+ * be improved on: the fit normalises away any change to the layout, so no
+ * amount of repulsion separates nodes that are 10 pixels wide in a frame that
+ * has to hold all of them -- measured on the calibration corpus, three very
+ * different force settings all landed within 30 of the same overlap count.
+ *
+ * So the size follows the zoom, but only part of the way and never below a
+ * floor. Zoomed out the corpus reads as a shape; zoomed in it reads as pages.
+ */
+export function screenRadius(degree: number, scale: number, floor = 0.45): number {
+  return radiusFor(degree) * Math.min(1, Math.max(floor, scale));
+}
+
 const K_MIN = 0.2;
 const K_MAX = 4;
 
@@ -170,4 +188,28 @@ export function fitTransform(
  */
 export function shouldAnimate(hasRaf: boolean, reduceMotion: boolean): boolean {
   return hasRaf && !reduceMotion;
+}
+
+
+/**
+ * The degree at which a node earns a permanent label.
+ *
+ * A fixed threshold does not survive a change in what the corpus contains.
+ * Giving contracts pages turned 57 relations into 175 and took the map from 8
+ * labels to 121 -- past the point where any of them could be read, because
+ * they overlapped each other. This keeps roughly `most` of them: the highest
+ * degrees, whatever those are in this graph. Everything else names itself when
+ * the pointer is on it or when it is selected, so nothing becomes unreachable
+ * -- only quiet.
+ */
+export function labelThreshold(
+  degrees: number[],
+  most = 24,
+  floor = 2,
+): number {
+  const ranked = degrees.filter((d) => d >= floor).sort((a, b) => b - a);
+  if (ranked.length <= most) return floor;
+  // The degree of the `most`-th node, so ties above it are all kept rather
+  // than cut arbitrarily mid-tie.
+  return ranked[most - 1];
 }

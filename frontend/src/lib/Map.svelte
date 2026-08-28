@@ -16,9 +16,10 @@
     isDimmed,
     isUnchecked,
     isVisible,
+    labelThreshold,
     movedBeyondThreshold,
     neighboursOf,
-    radiusFor,
+    screenRadius,
     screenToGraph,
     shouldAnimate,
     type MapEdge,
@@ -54,12 +55,15 @@
   const colours = coloursForTypes(initial.nodes.map((n) => n.type_id));
   const types = [...colours.keys()];
   const alone = initial.nodes.filter((n) => !n.degree).length;
+  // How busy this particular graph is decides how many names it can carry.
+  const labelAt = labelThreshold(initial.nodes.map((n) => n.degree));
 
   let frame: HTMLDivElement;
   let width = $state(900);
   let hiddenTypes = $state(new Set<string>());
   let hideIsolates = $state(false);
   let selected = $state<MapNode | null>(null);
+  let hovered = $state<string | null>(null);
   let transform = $state({ k: 1, x: 0, y: 0 });
   // Positions live outside Svelte's reactive graph: d3 mutates them every tick
   // and a proxy per node makes the simulation crawl. The tick handler bumps
@@ -123,14 +127,17 @@
     animated = shouldAnimate(typeof requestAnimationFrame === "function", reduce);
 
     sim = forceSimulation<SimNode>(simNodes)
-      .force("charge", forceManyBody().strength(-220))
+      // Tuned against the calibration corpus, which after contracts got pages
+      // is 30-odd stars rather than a handful of pairs: the earlier settings
+      // packed them into one disc with 258 overlapping nodes.
+      .force("charge", forceManyBody().strength(-260))
       .force(
         "link",
         forceLink<SimNode, SimEdge>(simEdges)
           .id((n) => n.entity_id)
-          .distance(90),
+          .distance(70),
       )
-      .force("collide", forceCollide(24))
+      .force("collide", forceCollide(26))
       .force("centre", forceCenter(width / 2, HEIGHT / 2));
 
     if (animated) {
@@ -303,7 +310,7 @@
           {/each}
           {#each shown as node (node.entity_id)}
             {@const dim = isDimmed(node.entity_id, selected?.entity_id ?? null, near)}
-            {@const r = radiusFor(node.degree) / transform.k}
+            {@const r = screenRadius(node.degree, transform.k) / transform.k}
             <g opacity={dim ? 0.2 : 1}>
               <circle
                 cx={node.x}
@@ -319,8 +326,12 @@
                 onpointerdown={(e) => startNode(e, node)}
                 onclick={(e) => clickNode(e, node)}
                 onkeydown={(e) => keyNode(e, node)}
+                onpointerenter={() => (hovered = node.entity_id)}
+                onpointerleave={() => { if (hovered === node.entity_id) hovered = null; }}
+                onfocus={() => (hovered = node.entity_id)}
+                onblur={() => { if (hovered === node.entity_id) hovered = null; }}
               />
-              {#if node.degree >= 2 || node.entity_id === centre || node.entity_id === selected?.entity_id}
+              {#if node.degree >= labelAt || node.entity_id === centre || node.entity_id === selected?.entity_id || node.entity_id === hovered}
                 <text
                   x={(node.x ?? 0) + r + 4 / transform.k}
                   y={(node.y ?? 0) + 4 / transform.k}
