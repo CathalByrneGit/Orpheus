@@ -219,7 +219,46 @@ def test_a_half_linked_wiki_says_so_rather_than_looking_sparse(corpus):
     corpus.conn.commit()
     report = coverage(corpus)
     assert report["projected_rate"] < 1.0
-    assert "not the corpus" in report["note"] or "still have no page" in report["note"]
+    assert ("wait on the wiki queue" in report["note"]
+            or "still have no page" in report["note"])
+    assert "linked part of the corpus" in report["note"]
+
+
+def test_a_structural_relation_is_not_counted_as_unbuilt_wiki(corpus):
+    # A relation from a contract to one of its clauses can never reach the
+    # graph: a clause is not a Named type and so never gets a page. Counting
+    # it as a missing page sends the reader to a queue that cannot move the
+    # number. A real six-document corpus of SEC contracts read 11% covered,
+    # with every projectable edge already drawn and 153 structural ones.
+    corpus.execute(
+        "INSERT INTO instance_index (instance_id, type_id, table_name, "
+        "document_id, created_at) VALUES "
+        "('inst_clause_x', 'Clause', 'instances_Clause', 'doc_1', "
+        " '2026-01-01T00:00:00Z')")
+    corpus.execute(
+        "INSERT INTO edges (edge_id, from_instance_id, to_instance_id, "
+        "link_type_id, document_id, source, confidence, status, created_at) "
+        "SELECT 'edge_structural', from_instance_id, 'inst_clause_x', "
+        "       link_type_id, document_id, source, confidence, status, "
+        "       created_at FROM edges LIMIT 1")
+    corpus.conn.commit()
+
+    report = coverage(corpus)
+    assert report["n_edges_structural"] == 1
+    assert report["n_edges_awaiting_pages"] == 0
+    assert "never gets a page" in report["note"]
+    assert "not an unbuilt wiki" in report["note"]
+
+
+def test_a_page_that_is_genuinely_missing_is_still_called_work(corpus):
+    # The other half of the distinction: an endpoint that *is* a Named type
+    # but has no page yet is real queue work, and still says so.
+    corpus.execute("UPDATE entity_mentions SET unlinked_at = datetime('now') "
+                   "WHERE entity_id IN ('ent_C', 'ent_D')")
+    corpus.conn.commit()
+    report = coverage(corpus)
+    assert report["n_edges_awaiting_pages"] > 0
+    assert "wait on the wiki queue" in report["note"]
 
 
 def test_a_corpus_with_no_relations_says_that_rather_than_reporting_sparsity(store):

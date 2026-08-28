@@ -161,22 +161,66 @@ def coverage(store: Store) -> dict:
         "LEFT JOIN entity_mentions m ON m.instance_id = i.instance_id "
         "  AND m.unlinked_at IS NULL WHERE m.instance_id IS NULL") or 0
 
+    # An edge can only ever reach the graph if both its endpoints are the kind
+    # of thing that gets a page. A relation from a contract to one of its
+    # clauses is not a wiki backlog and never becomes one: no amount of review
+    # turns a clause into an entity. Counting it as missing work sends a reader
+    # to a queue that cannot move the number.
+    nameable = _projectable_edges(store, total)
+    awaiting = max(nameable - projected, 0)
+    structural = max(total - nameable, 0)
+
     rate = round(projected / total, 3) if total else None
     if not total:
         note = ("No relations have been extracted, so there is no graph to read. "
                 "This is a corpus with no relation material, not a sparse one.")
-    elif rate is not None and rate < 0.5:
-        note = (f"Only {rate:.0%} of extracted relations reached the graph: the "
-                f"rest have at least one endpoint with no entity page. The "
-                f"structure below describes the linked part of the corpus, not "
-                f"the corpus. Work the wiki queue before reading anything into "
-                f"the shape.")
+    elif nameable and projected < nameable:
+        note = (f"{rate:.0%} of extracted relations reached the graph. "
+                f"{awaiting} more join a named thing to a named thing and wait "
+                f"on the wiki queue; {structural} link to a clause, a date or a "
+                f"document, which never gets a page. Only the first number is "
+                f"work. Read the shape as the linked part of the corpus.")
+    elif structural:
+        note = (f"{rate:.0%} of extracted relations reached the graph. Every "
+                f"relation between two named things is drawn; the other "
+                f"{structural} link to a clause, a date or a document, which "
+                f"never gets a page. This is the shape of the corpus, not an "
+                f"unbuilt wiki.")
     else:
         note = (f"{rate:.0%} of extracted relations reached the graph. "
                 f"{unlinked} mention(s) still have no page.")
     return {"n_edges_total": total, "n_edges_projected": projected,
+            "n_edges_projectable": nameable,
+            "n_edges_awaiting_pages": awaiting,
+            "n_edges_structural": structural,
             "projected_rate": rate, "n_unlinked_mentions": unlinked,
             "note": note}
+
+
+def _projectable_edges(store: Store, total: int) -> int:
+    """Edges whose endpoints are both the kind of thing that gets a page.
+
+    Which types those are is the bundle's business, not this module's: a
+    bundle describing planning applications resolves applicants, not
+    companies. Types implementing `Named` are the ones the wiki is built from.
+    """
+    from . import bundle as bundle_mod
+
+    active = bundle_mod.active(store)
+    if active is None:
+        return total
+    named = list(bundle_mod.implementing_types(active, "Named"))
+    if not named:
+        return 0
+    marks = ",".join("?" * len(EXCLUDED))
+    slots = ",".join("?" * len(named))
+    return store.scalar(
+        "SELECT COUNT(*) FROM edges e "
+        "JOIN instance_index fi ON fi.instance_id = e.from_instance_id "
+        "JOIN instance_index ti ON ti.instance_id = e.to_instance_id "
+        f"WHERE e.status NOT IN ({marks}) "
+        f"AND fi.type_id IN ({slots}) AND ti.type_id IN ({slots})",
+        tuple(EXCLUDED) + tuple(named) + tuple(named)) or 0
 
 
 def build(store: Store, reviewed_only: bool = False) -> dict:
