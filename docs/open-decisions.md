@@ -393,11 +393,35 @@ What has not happened, plainly:
 
 | | Status |
 |---|---|
-| A real model has run against a real document | **No.** No API key and no local model were available in the build environment. Every model result in this repository comes from a substitute populator, an echo model, or a test HTTP server |
-| A real corpus has been ingested | **No.** One hand-built two-page PDF fixture |
-| A person has reviewed extractions they did not write | **No** |
+| A real model has run against a real document | **Yes.** Anthropic, six EX-10 exhibits filed with the SEC, 92,551 characters |
+| A real corpus has been ingested | **Six documents.** Real, and far short of the few hundred this needs |
+| A person has reviewed extractions they did not write | **No.** All 165 were reviewed, but by a machine actor labelled as such. It exercised the review path and found real defects; it is not the human calibration this asks for |
 | `gliner2` has run | **No.** Its weights could not be downloaded |
 | `docling` has run | **No.** It would not install |
+
+### What the first run produced
+
+```
+reviewed 165 of 165 · confirmed 160 · amended 1 · rejected 4
+calibration: insufficient_evidence
+  explicit  1.0  158/158 reviewed, 99% correct
+  named     0.9  3/3    not enough reviewed
+  implied   0.7  1/1    not enough reviewed
+  inferred  0.5  3/3    not enough reviewed
+ai_cloud: 161/162 quotations located in the document
+```
+
+Grounding is answered: essentially nothing was invented, and the one
+non-exact quotation is an *elided* one the alignment caught and downgraded
+rather than a fabrication.
+
+Calibration is not answered, and the reason is worth reading before assuming
+more documents will fix it. **158 of 165 instances sit at `explicit`.** A rubric
+cannot be shown to rank reliability when 96% of what it ranks is at one level,
+and a larger corpus of the same shape produces a larger pile at the same level.
+Either commercial contracts really are that explicit, or the model is not
+applying the rubric and `explicit` is its default. Which of those is true is
+cheap to find out and decides whether the next run is worth paying for.
 
 The deterministic pass *is* exercised for real — it finds four dates and an
 amount in the fixture, grounded to the right pages, through a real browser
