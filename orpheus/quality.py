@@ -162,6 +162,16 @@ def confidence_calibration(store: Store, document_id: str | None = None,
     The rubric is only worth carrying if it ranks. This says plainly whether the
     ordering survives contact with real review, because a rubric that does not
     rank is worse than no rubric at all — people trust it.
+
+    Read what it ranks carefully. No engine here is asked for a confidence, on
+    purpose: a model's opinion of its own certainty is the thing the rubric was
+    invented to avoid storing, so `ALIGNMENT_CONFIDENCE` supplies the level from
+    how exactly the excerpt was located instead. The ordering under test is
+    therefore *grounding* against review — whether a verbatim quotation is
+    confirmed more often than a fuzzy or an unlocatable one — and not a model's
+    self-assessment against review. An engine that does report a confidence
+    keeps its own, and then this compares the two kinds of claim in one column,
+    which is worth knowing before reading a verdict off it.
     """
     levels = extraction_quality(store, document_id, min_reviewed)["by_confidence"]
     usable = [row for row in levels if row["accuracy"] is not None]

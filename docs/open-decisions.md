@@ -415,13 +415,37 @@ Grounding is answered: essentially nothing was invented, and the one
 non-exact quotation is an *elided* one the alignment caught and downgraded
 rather than a fabrication.
 
-Calibration is not answered, and the reason is worth reading before assuming
-more documents will fix it. **158 of 165 instances sit at `explicit`.** A rubric
-cannot be shown to rank reliability when 96% of what it ranks is at one level,
-and a larger corpus of the same shape produces a larger pile at the same level.
-Either commercial contracts really are that explicit, or the model is not
-applying the rubric and `explicit` is its default. Which of those is true is
-cheap to find out and decides whether the next run is worth paying for.
+Calibration is not answered, and looking into why turned up something that
+changes what the question means.
+
+**Confidence is not the model's opinion. It is grounding, restated.** Across
+all 164 cloud extractions the stored confidence is exactly
+`confidence_for_alignment(alignment)`, with no exceptions:
+
+| alignment | confidence | n |
+|---|---|---|
+| `match_exact` | 1.0 `explicit` | 157 |
+| `match_greater` | 0.9 `named` | 3 |
+| `match_fuzzy` | 0.7 `implied` | 1 |
+| unlocated | 0.5 `inferred` | 3 |
+
+That is deliberate, and `population.py` says so: *"a model's opinion of its own
+certainty is exactly what the rubric was invented to avoid storing."* The
+prompt never asks for a confidence. `ALIGNMENT_CONFIDENCE` supplies it.
+
+So the exit criterion below — *if `calibration.verdict` is not `monotonic` the
+rubric is not ranking reliability and everything built on it rests on nothing*
+— was written against a rubric that has since been given a different meaning.
+Nothing is built on a model's self-assessed certainty, because there is no such
+number in the store. What calibration actually asks is **does an exactly
+located quotation get confirmed more often than a fuzzy or an unlocatable
+one?** That is a fair question, arguably a better one, and it is not the
+question the docstring states.
+
+The lopsided distribution is a sample-size problem after all, and a small one.
+At the rates this corpus shows, a second level clears the five-reviewed floor
+at roughly **ten to thirty documents** — not the few hundred assumed above.
+Six was simply too few.
 
 The deterministic pass *is* exercised for real — it finds four dates and an
 amount in the fixture, grounded to the right pages, through a real browser
