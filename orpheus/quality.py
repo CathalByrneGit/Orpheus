@@ -46,6 +46,14 @@ def collect_review_outcomes(store: Store, document_id: str | None = None,
     the extraction numbers: a concept flag has no provenance row, because it is
     not an extraction. Give concept flags provenance and this quietly starts
     reporting rule precision as extraction accuracy.
+
+    Facts a person recorded by hand are excluded for the same reason. The
+    extractor never offered them, so they are not evidence about the extractor,
+    and counting each one as a confirmed extraction would walk the accuracy
+    number upward every time somebody filled a gap the model left. An accepted
+    suggestion is a different case and stays counted: there the machine did
+    offer something and a person agreed, which is exactly what this measures.
+    Provenance carries the offering engine, so the two separate cleanly.
     """
     bundle = bundle or bundle_mod.active(store) or bundle_mod.load()
     clause, params = _scope(document_id)
@@ -63,7 +71,8 @@ def collect_review_outcomes(store: Store, document_id: str | None = None,
                 f"       p.confidence AS confidence, p.source AS source "
                 f'FROM "{table}" i '
                 "LEFT JOIN provenance p ON p.instance_id = i.instance_id "
-                f"WHERE 1 = 1{rule_filter}{clause}", params):
+                "WHERE IFNULL(p.source, '') != 'human'"
+                f"{rule_filter}{clause}", params):
             # An instance with no provenance cannot be attributed, so it is
             # left out rather than counted at an invented confidence.
             if row["confidence"] is None:

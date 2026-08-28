@@ -215,6 +215,57 @@ with the gate worked around.
 
 The local tier sends nothing anywhere and needs no opt-in. Prefer it.
 
+## Asking about a person while reading
+
+The common shape of a question, and the order to answer it in. Somebody reading
+a document asks about a name in front of them: **is this person in the store,
+does anything about them still need checking, what are they connected to, and
+if the extractor missed them, put them in.**
+
+```bash
+orpheus --db store.sqlite search "Castaneda" --json          # is the name here at all
+orpheus --db store.sqlite wiki list --json | grep -i cast    # does a page exist
+orpheus --db store.sqlite wiki show ent_... --json           # state, sources, properties
+orpheus --db store.sqlite graph near ent_... --depth 2 --json
+```
+
+Answer all four parts, and keep them apart:
+
+1. **Present or not.** A name with mentions but no page is *in the corpus and
+   not in the wiki*, which is a different answer from absent. Say which.
+2. **What needs checking.** The page carries `n_confirmed` against total
+   mentions, and each mention its own status. "Two mentions, neither checked"
+   is the answer, not "confirmed".
+3. **Connections.** Report the chain and how much of it anybody has vouched
+   for — `confirmed_throughout`. Everything under *Questions, never findings*
+   applies: a shared counterparty is a question, never an allegation.
+4. **Missing.** If the extractor did not pick them up, `record` is the way in,
+   and the section below is how.
+
+## Recording something extraction missed
+
+```bash
+orpheus --db store.sqlite record doc_... --type-id Person \
+  --set "name=Alex Castaneda" --set "job_title=Director" \
+  --quote "By: /s/ Alex Castaneda" --actor-id act_...
+```
+
+The quote is located in the document by the same code that locates a model's
+quotations, and the write is **refused** if the document does not contain it.
+That refusal is the feature. Where somebody knows something the documents do
+not say, it belongs in the entity page's notes, which is kept apart from the
+cited claims on purpose — do not reach for `record` to get it in anyway.
+
+The row lands `source = human`, `confirmed`, and is left out of extraction
+quality: the extractor never offered it, so it is not evidence about the
+extractor. An accepted suggestion is a different case and is still counted.
+
+**This is a person's judgement, so it is theirs to make.** Draft it — name the
+type, the values and the exact span you would quote — and let them say yes.
+Recording a fact you inferred rather than read is the same failure as
+confirming a queue to clear it, and it is harder to spot afterwards, because
+`human` is the one source nothing downstream questions.
+
 ## Writing to the store
 
 You may propose. You may not decide.
@@ -222,8 +273,8 @@ You may propose. You may not decide.
 - `wiki propose`, `tension find`, `tension propose` — safe, machine proposals,
   everything lands `unconfirmed` or `open`
 - `tension accept` / `resolve` / `withdraw`, confirming a link, confirming an
-  instance — **these are a person's judgement.** Do not do them on the user's
-  behalf unless they explicitly ask for that specific decision.
+  instance, `record` — **these are a person's judgement.** Do not do them on the
+  user's behalf unless they explicitly ask for that specific decision.
 
 The distinction is not bureaucratic. `basis` and `source` record whether a human
 or a machine made each call, and the store's whole value is that the difference

@@ -777,6 +777,32 @@ def cmd_migrate(args) -> int:
     return 0
 
 
+def cmd_record(args) -> int:
+    """Record a fact a person read in a document, with the line they read it on."""
+    from . import record as record_mod
+
+    if not args.set:
+        raise OrpheusError("Nothing to record. Use --set name=... at least once.")
+    properties = dict(pair.split("=", 1) for pair in args.set)
+
+    store = open_store(args, mode="write")
+    try:
+        result = record_mod.record_fact(
+            store, args.document_id, args.type_id, properties,
+            quote=args.quote, actor_id=args.actor_id, note=args.note)
+    finally:
+        store.close()
+
+    if args.json:
+        emit(result, True)
+        return 0
+    print(f"  {result['instance_id']}  {result['type_id']}  "
+          f"page {result['page_no']}  [{result['alignment']}]")
+    print(f"  quoted: {result['excerpt'][:110]!r}")
+    print(f"\n  {result['note']}")
+    return 0
+
+
 def cmd_lint(args) -> int:
     """Look for where the store is misleading a reader, and say where."""
     from . import lint as lint_mod
@@ -1233,6 +1259,19 @@ def build_parser() -> argparse.ArgumentParser:
     migrator.add_argument("--check", action="store_true",
                           help="report what is pending and exit non-zero, "
                                "without applying anything")
+
+    recorder = add("record", cmd_record,
+                   "record a fact a person read that extraction missed")
+    recorder.add_argument("document_id")
+    recorder.add_argument("--type-id", required=True,
+                          help="the bundle type, e.g. Person or Company")
+    recorder.add_argument("--set", action="append", metavar="PROPERTY=VALUE",
+                          help="a value to record; repeatable")
+    recorder.add_argument("--quote", required=True,
+                          help="the text in the document you read it on; it is "
+                               "located there, and refused if it is not")
+    recorder.add_argument("--actor-id", required=True)
+    recorder.add_argument("--note")
 
     linter = add("lint", cmd_lint, "look for where the store misleads a reader")
     linter.add_argument("--document-id")
