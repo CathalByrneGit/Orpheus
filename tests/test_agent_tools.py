@@ -199,3 +199,26 @@ def test_the_passage_tool_says_a_suggestion_is_not_an_extraction(served):
     result = call(agent.passage, served, document_id="doc_1", page_no=1)
     assert "Ardmore Digital Ltd" in json.dumps(result)
     assert "not an extraction" in result["reading"]
+
+
+def test_a_decision_is_attributed_to_an_orpheus_actor(served):
+    # Datasette answers "who is this" in its own terms: under --root that is
+    # the literal string "root", which is nobody here. Writing it into
+    # decided_by attributed a decision to an actor that does not exist, and it
+    # went in quietly because Datasette does not switch foreign keys on, so the
+    # reference the schema declares was never checked. Found by clicking a
+    # card in a live conversation and then reading the row it wrote.
+    resolved = asyncio.run(agent._actor_id(served, {"id": "root"}))
+
+    assert resolved and resolved.startswith("act_"), \
+        f"expected an Orpheus actor id, got {resolved!r}"
+    assert served.get_database("store")  # the resolution needs the database
+
+    rows = asyncio.run(served.get_database("store").execute(
+        "SELECT actor_id FROM actors WHERE actor_id = ?", [resolved]))
+    assert rows.first(), "decided_by must name a row that exists"
+
+
+def test_no_signed_in_identity_yields_no_actor(served):
+    assert asyncio.run(agent._actor_id(served, None)) is None
+    assert asyncio.run(agent._actor_id(served, {})) is None

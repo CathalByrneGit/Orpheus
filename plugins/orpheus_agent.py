@@ -92,8 +92,66 @@ async def _write(datasette, fn):
     return await database.execute_write_fn(run)
 
 
-def _actor_id(actor):
-    return (actor or {}).get("orpheus_actor_id") or (actor or {}).get("id")
+def _sibling_plugin():
+    """The Orpheus Datasette plugin, however it was loaded.
+
+    Not `import orpheus_datasette`. `--plugins-dir` builds each file with
+    `types.ModuleType` and never puts it in `sys.modules`, so that import
+    raises under the only configuration this runs in -- it succeeded in tests
+    only because they put `plugins/` on the path. Pluggy has the real module
+    object, so ask it, and fall back to the import for the test case.
+    """
+    try:
+        from datasette.plugins import pm
+
+        for module in pm.get_plugins():
+            if hasattr(module, "_datasette_identity") and \
+                    hasattr(module, "_resolve_actor"):
+                return module
+    except Exception:  # pragma: no cover - pluggy always present in practice
+        pass
+    try:
+        import orpheus_datasette
+
+        return orpheus_datasette
+    except ImportError:
+        return None
+
+
+class _AsRequest:
+    """Just enough of a request for `_datasette_identity`, which reads only
+    `.actor`. A tool is given the actor and never the request."""
+
+    def __init__(self, actor):
+        self.actor = actor
+
+
+async def _actor_id(datasette, actor):
+    """The Orpheus actor behind a Datasette identity.
+
+    Not `actor["id"]`. Datasette answers "who is this" in its own terms -- for
+    `--root` that is the literal string `root`, which is nobody here. Writing
+    it into `decided_by` attributed a decision to an actor that does not exist,
+    and it went in quietly because Datasette does not switch foreign keys on,
+    so the reference the schema declares was never checked.
+
+    Built by the plugin's own `_datasette_identity` rather than by hand. That
+    dict has a shape -- pinned, is_admin, idp -- and a second copy of it here
+    would drift from the first, which is how this went wrong to begin with.
+    """
+    if not (actor or {}).get("id"):
+        return None
+    database = _database(datasette)
+    if database is None:
+        return None
+    plugin = _sibling_plugin()
+    if plugin is None:
+        return None
+    identity = plugin._datasette_identity(datasette, _AsRequest(actor))
+    if not identity:
+        return None
+    resolved = await plugin._resolve_actor(database, identity)
+    return (resolved or {}).get("actor_id")
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +317,7 @@ _CARD_SCRIPT = (
 
 async def read_page(datasette, actor, document_id: str, page_no: int):
     """Run the pattern pass over a page and show what it offers."""
-    actor_id = _actor_id(actor)
+    actor_id = await _actor_id(datasette, actor)
 
     def run(store):
         # The pattern pass only. It cannot offer something the page does not
@@ -292,7 +350,7 @@ async def read_page(datasette, actor, document_id: str, page_no: int):
 async def settle(datasette, actor, context, suggestion_id: str,
                  decision: str, note: str = None):
     """Accept or dismiss an outstanding offer, once the person says so."""
-    actor_id = _actor_id(actor)
+    actor_id = await _actor_id(datasette, actor)
     if not actor_id:
         return json.dumps({"error": "No signed-in actor, so no decision can be "
                                     "attributed."})
@@ -342,7 +400,7 @@ async def record(datasette, actor, context, document_id: str, page_no: int,
     declined offer leaves evidence, which is the only measure there is of
     whether these are worth reading.
     """
-    actor_id = _actor_id(actor)
+    actor_id = await _actor_id(datasette, actor)
     if not actor_id:
         return json.dumps({"error": "No signed-in actor, so nothing can be "
                                     "offered: a decision has to belong to somebody."})
