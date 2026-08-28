@@ -77,6 +77,14 @@ def uncited_pages(store: Store, limit: int = 50) -> list[dict]:
     return out
 
 
+def _is_rejected(store: Store, table_name: str | None, instance_id: str) -> bool:
+    if not table_name or not store.table_exists(table_name):
+        return False
+    return store.scalar(
+        f'SELECT 1 FROM "{table_name}" WHERE instance_id = ? '
+        "AND status = 'rejected'", (instance_id,)) is not None
+
+
 def ungrounded_quotations(store: Store, document_id: str | None = None,
                           limit: int = 50) -> list[dict]:
     """Excerpts that do not appear in the document they cite.
@@ -87,14 +95,19 @@ def ungrounded_quotations(store: Store, document_id: str | None = None,
     """
     clause, params = ("AND p.document_id = ?", [document_id]) if document_id \
         else ("", [])
-    rows = store.query(
+    # A rejected extraction is not rendered as a citation any more, so it is
+    # not misleading anybody. Reporting it anyway told a reviewer to do the one
+    # thing they had already done, and the finding could never be cleared --
+    # which is how a check teaches people to skip the whole list.
+    rows = [r for r in store.query(
         "SELECT p.instance_id, p.document_id, p.excerpt, p.source, p.confidence, "
-        "       d.filename, i.type_id "
+        "       d.filename, i.type_id, i.table_name "
         "FROM provenance p "
         "LEFT JOIN documents d ON d.document_id = p.document_id "
         "LEFT JOIN instance_index i ON i.instance_id = p.instance_id "
         f"WHERE p.alignment IS NULL AND p.excerpt IS NOT NULL AND p.excerpt != '' "
-        f"{clause} LIMIT ?", (*params, limit))
+        f"{clause} LIMIT ?", (*params, limit * 2))
+        if not _is_rejected(store, r["table_name"], r["instance_id"])][:limit]
     return [_finding(
         "ungrounded_quotation", "high",
         {"instance_id": r["instance_id"], "document_id": r["document_id"],

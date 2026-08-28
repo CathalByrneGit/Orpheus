@@ -278,3 +278,40 @@ def test_a_join_the_graph_depends_on_with_no_confirmed_evidence_is_flagged(corpu
     found = findings_of(lint(corpus), "fragile_join")
     assert [f["where"]["entity_id"] for f in found] == [middle]
     assert "falls into two" in found[0]["suggestion"]
+
+
+def test_a_rejected_extraction_stops_being_reported_as_a_citation(corpus):
+    # The check told a reviewer to reject the finding, and went on saying it
+    # after they had. A finding whose advice has been followed and which still
+    # will not clear is how a check teaches people to skip the whole list.
+    from orpheus.lint import ungrounded_quotations
+
+    store = corpus
+    doc = store.scalar("SELECT document_id FROM documents LIMIT 1")
+    store.insert("instance_index", {
+        "instance_id": "inst_ug", "type_id": "Flag",
+        "table_name": "instances_Flag", "document_id": doc,
+        "created_at": "2026-01-01T00:00:00Z"})
+    store.insert("instances_Flag", {
+        "instance_id": "inst_ug", "document_id": doc,
+        "flag_type": "missing_signature", "severity": "low",
+        "source": "ai_cloud", "confidence": 1.0, "status": "unconfirmed",
+        "created_at": "2026-01-01T00:00:00Z"})
+    store.insert("provenance", {
+        "provenance_id": "prov_ug", "instance_id": "inst_ug",
+        "document_id": doc, "source_label": "t", "page_no": 1,
+        "excerpt": "a sentence this document does not contain",
+        "confidence": 1.0, "alignment": None,
+        "created_at": "2026-01-01T00:00:00Z"})
+    store.conn.commit()
+
+    assert any(f["where"]["instance_id"] == "inst_ug"
+               for f in ungrounded_quotations(store)), \
+        "an ungrounded quotation on a live row is exactly what this check is for"
+
+    store.execute("UPDATE instances_Flag SET status = 'rejected' "
+                  "WHERE instance_id = 'inst_ug'")
+    store.conn.commit()
+
+    assert not any(f["where"]["instance_id"] == "inst_ug"
+                   for f in ungrounded_quotations(store))
