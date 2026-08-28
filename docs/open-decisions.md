@@ -267,6 +267,56 @@ to enable cloud processing deliberately rather than discover it was on. Policy
 alone never authorises a call — an explicit per-request `opt_in` is always
 required as well.
 
+### Where it landed
+
+Forty contracts from CUAD, 1,045 extractions, both engines:
+
+```
+reviewed 198 of 1045 · confirmed 197 · amended 0 · rejected 1
+ai_cloud: 1041/1045 quotations located in the document
+calibration: flat
+  explicit  1.0  150/997 reviewed, 100% correct
+  named     0.9   25/25  reviewed, 100% correct
+  implied   0.7   19/19  reviewed, 100% correct
+```
+
+**Grounding is answered.** Four extractions in 1,045 quoted text their document
+does not contain, and each was recorded at `inferred` rather than as fact. One
+of the four was a genuine fabrication — a name stitched to an address, with a
+suite number that appears nowhere — and it is the single rejection above. The
+design's central claim, that a model's assertion is checked against the
+document rather than believed, holds on real filings.
+
+**The rubric ranks, on evidence just below the bar.** The `inferred` level is
+excluded from the verdict for having four reviewed instances against a
+threshold of five. Include it and the picture is unambiguous:
+
+| level | reviewed | correct |
+|---|---|---|
+| explicit 1.0 | 150 | 100% |
+| named 0.9 | 25 | 100% |
+| implied 0.7 | 19 | 100% |
+| **inferred 0.5** | **4** | **75%** |
+
+`min_reviewed=4` returns `monotonic`; the default of five returns `flat`. The
+threshold was not lowered to make it pass, and should not be: the number would
+then rest on four rows, which is the kind of evidence this file exists to
+refuse.
+
+**What it would take, and why it may not be worth taking.** The bottom level is
+rare *because extraction is good* — 4 unlocated in 1,045, and ten further
+documents through the `llm` engine added none at all. Reaching five is not a
+matter of a bigger corpus so much as a worse one. The criterion below asks for
+a monotonic verdict; on a pipeline this accurate it is close to asking for
+enough failures to measure failure. Rewriting it around the grounding rate,
+which is answerable and answered, is the more honest fix.
+
+**Reviewed by a machine.** All 198 were reviewed under an actor named
+`Claude (machine test reviewer - not human review)`, at the owner's direction
+and recorded as such in `decided_by`. It found the fabrication and four real
+defects in the surrounding code. It is not a domain expert's judgement, and the
+store does not claim it is.
+
 **What would settle it:** whether an individual user may opt a sensitive document
 into cloud processing on a shared server is a question for the organisation's
 information-governance people, not a technical one.
@@ -378,10 +428,11 @@ than upstream work in another project, which is one thing the port bought.
 
 ---
 
-## Extraction quality is unmeasured
+## Extraction quality is measured
 
-**Status: open, and it is the only entry here that Phase 1 cannot be called done
-without.**
+**Status: measured, on 40 real contracts. Grounding is settled. The rubric shows
+every sign of ranking and is four instances short of proving it — see the
+threshold note at the end of this section.**
 
 Phase 1's definition of done is extraction *good enough to trust as a
 foundation*. Everything above is machinery for producing that number and for
