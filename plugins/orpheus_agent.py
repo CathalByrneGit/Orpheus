@@ -62,9 +62,20 @@ _PREFER = ("Use this instead of sql_query: raw SQL over these tables returns "
 
 
 def _database(datasette):
+    """The Orpheus database, or None if this Datasette is not serving one.
+
+    `get_database` raises `KeyError` for a name it does not have, and every
+    caller here is written to treat None as "not configured" -- so a
+    misconfigured name produced a traceback where a message was intended.
+    """
     config = datasette.plugin_config(PLUGIN) or {}
     name = config.get("database")
-    return datasette.get_database(name) if name else None
+    if not name:
+        return None
+    try:
+        return datasette.get_database(name)
+    except KeyError:
+        return None
 
 
 async def _read(datasette, fn):

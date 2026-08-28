@@ -461,6 +461,9 @@ someone who does not run R".
    "documented rule" to "enforced rule".
 4. **Watch `datasette-comments` for a release.** It is the debate gap, it is
    1.0-ready in git, and it needs a frontend build that a release would carry.
+5. **Watch `datasette-enrichments` for a release.** The hook is adopted and the
+   enrichment is written; what is pinned is git, because the released version
+   500s against the Datasette this runs on.
 
 Deliberately not on this list: anything that writes to the store. The rule from
 the first pass survived all three — the agent, the write UI, the enrichment
@@ -538,6 +541,17 @@ Orpheus would otherwise write badly.
 for [all the same reasons](#why-execute_write_sql-must-never-touch-the-store).
 The difference is that Orpheus writes the enrichment class, so what goes inside
 `enrich_batch` is `api.handle()`. The plugin supplies the loop, not the write.
+
+**Built**, on exactly those terms: `plugins/orpheus_enrichments.py` reads a
+selection of `document_pages` through `companion.read_passage()`. See
+[reading a batch](reading-companion.md#reading-a-batch-of-pages).
+
+Two things the runner does not do, found by running it. `default_max_errors` is
+declared on the class and never read, so a job that cannot work logs one error
+per row and finishes reporting success — this enrichment stops itself when a
+whole batch fails identically. And an exception from `enrich_batch` is logged
+against *every* row in the batch, so a single bad page would be recorded as five
+failures and four pages nobody read; failures are caught per row instead.
 
 One tension worth naming: it accounts for cost in `cost_100ths_cent`, and
 Orpheus denominates its budget in

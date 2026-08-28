@@ -162,6 +162,53 @@ offers; `_on_this_page` does that job for free.
 So this is available and honest rather than recommended. It is the mechanism the
 gap called for; on this corpus it did not pay for itself.
 
+## Reading a batch of pages
+
+One passage at a time is right for somebody working through a document and
+wrong for "read the other thirty pages". From the CLI that works and tells you
+nothing while it runs: no progress, no way to stop it once it is clearly going
+wrong, and a failure on page 12 that takes the rest with it.
+
+`plugins/orpheus_enrichments.py` is that half, built on
+[`datasette-enrichments`](datasette-ecosystem.md#datasette-enrichments). Filter
+`document_pages` to what you want read, pick **Read these pages with the
+companion** from the table actions, fill in the form, and it runs as a job with
+per-row progress, an error table, cancel and pause.
+
+**The hook, never the write.** The plugin's own examples write with
+`db.execute_write`, which is `execute_write_sql` by another name. Orpheus writes
+the enrichment class, so what goes inside the batch loop is `read_passage()` —
+the same function the CLI and the API call, on the write connection Datasette
+already serialises.
+
+Three things it does that a loop would not:
+
+- **The gate is asked once, before anything is sent.** The cloud opt-in is on
+  the form rather than in configuration, because "these documents may leave the
+  building" is a decision somebody makes each run. It answers the same for
+  every row, so asking per page would send the first page to find out and then
+  refuse the rest.
+- **One bad page does not take its batch with it.** The runner logs an
+  exception against every row it was handed, so letting a page raise would
+  record five failures and four pages nobody read. Failures are caught per row.
+- **A batch failing one way stops the job.** `default_max_errors` is declared
+  by the runner and never read, so a job that cannot work otherwise logs one
+  error per row and finishes reporting success. A store behind its migrations
+  answers the same for every page in the corpus; that is judged on the *shape*
+  of the failures rather than on words in the message, and never from a single
+  row, because a pattern cannot be read off one observation.
+
+Cost stays in characters. The plugin tracks money in `cost_100ths_cent` and
+Orpheus denominates its budget in
+[characters](network-and-corroboration.md#what-a-budget-is-denominated-in) on
+purpose, so `llm_calls.prompt_chars` keeps the record and that column is left
+alone rather than filled with a number that would rot.
+
+Run against a real 29-page filing with the pattern pass: 29 of 29 done, no
+errors, 11 suggestions, every page recorded as read — including the ones that
+found nothing, because a page nobody opened and a page holding nothing stay
+different facts.
+
 ## What this does not do yet
 
 **Offers can arrive with no properties at all.** Asked to read page 4 of a

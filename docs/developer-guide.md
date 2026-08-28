@@ -24,6 +24,7 @@ not do.
 | `tesseract` + `pytesseract` | OCR | For scanned documents |
 | One of `langextract` / `gliner2` / `llm` | The model pass | Unless you register your own populator |
 | Node ≥ 20 and npm | Building the map's Svelte front end | Optional; without it the map falls back |
+| `datasette-enrichments` | Batch page reads with a progress UI | `[enrichments]`, from git |
 
 ```bash
 pip install -e '.[dev]'          # everything the test suite needs

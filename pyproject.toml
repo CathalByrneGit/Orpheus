@@ -25,6 +25,13 @@ server = ["datasette>=1.0a32"]
 # keep working when it is absent -- the hook returns nothing and the rest of
 # Datasette is unaffected.
 agent = ["datasette-agent>=0.1a0"]
+# Batch operations with a progress UI, a per-row error table and cancel, over a
+# selection the user makes in Datasette. An extra for the same reasons as the
+# agent, and pinned to git rather than a release: 0.5.1 on PyPI calls
+# `permission_allowed`, which Datasette 1.0 renamed, and 500s on the enrichment
+# picker. `main` is fixed and unreleased.
+#   pip install 'datasette-enrichments @ git+https://github.com/datasette/datasette-enrichments'
+enrichments = ["datasette-enrichments>=0.6a0"]
 # The extraction engine. Optional only in the sense that a deployment may
 # register its own populator; without one of the two there is no model pass.
 llm = ["langextract>=1.6"]
