@@ -67,7 +67,7 @@ and `huggingface.co` were not. Confirm before assuming.
 ## The run
 
 ```bash
-pip install -e '.[dev,pdf]' && pip install llm-anthropic
+pip install -e '.[dev,pdf,anthropic]'
 
 orpheus --db store.sqlite init --admin "Your Name"
 orpheus --db store.sqlite budget --set-limit 2000000 --window total
@@ -79,12 +79,32 @@ s.set_setting('cloud_ai_policy', 'org_allow', '<actor id from init>')
 s.close()"
 
 orpheus --db store.sqlite ingest ./corpus \
-  --actor-id act_... --extract --tier cloud --engine llm --cloud-opt-in
+  --actor-id act_... --extract --tier cloud --engine anthropic --cloud-opt-in
 ```
 
-**Use `--engine llm`, not `chat`.** The `chat` engine posts OpenAI-shaped
-requests and defaults its base URL to OpenRouter; `llm-anthropic` speaks
-Anthropic's native shape. Both go through the same gate, budget and audit.
+**Use `--engine anthropic`.** `chat` posts OpenAI-shaped requests and defaults
+its base URL to OpenRouter, which is wrong for Anthropic. `llm` would work for
+an ordinary key but not an **identity-linked** one: those require an
+`anthropic-workspace-id` header on every request, and neither `chat` nor
+`llm-anthropic` can carry a custom header. The `anthropic` engine uses the
+official SDK, which takes `default_headers`.
+
+If the key is identity-linked, the API says so plainly on the first call:
+
+```
+400 anthropic-workspace-id is required when authenticating with an
+    identity-linked API key
+```
+
+The workspace id is configuration, not something to discover — the endpoint
+that lists workspaces needs an admin key. Set it before the run:
+
+```bash
+orpheus --db store.sqlite config --set anthropic_workspace_id=wrkspc_...
+# or: export ANTHROPIC_WORKSPACE_ID=wrkspc_...
+```
+
+All engines go through the same gate, budget and audit.
 
 Then build the wiki and look:
 

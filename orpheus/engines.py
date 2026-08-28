@@ -58,6 +58,7 @@ def available_engines() -> dict[str, bool]:
         "llm": _installed("llm"),
         # Needs only an endpoint, and one is configured by default for Ollama.
         "chat": True,
+        "anthropic": _installed("anthropic"),
     }
 
 
@@ -582,7 +583,108 @@ def _link_instructions(bundle: dict) -> str:
         "Omit `relationships` entirely if the document states no relation.")
 
 
+# ---------------------------------------------------------------------------
+# anthropic — the official SDK, because some keys need a header
+# ---------------------------------------------------------------------------
+
+def anthropic_extract(*, store: Store, document: dict, bundle: dict, text: str,
+                      tier: str, opt_in: bool, actor_id: str | None) -> dict:
+    """Extract with Claude, through the Anthropic SDK.
+
+    `chat` already reaches a lot of providers, so this exists for a specific
+    reason: an **identity-linked API key** requires an `anthropic-workspace-id`
+    header on every request, and neither the OpenAI-shaped `chat` engine nor
+    `llm-anthropic` can carry one. The SDK takes `default_headers`, so this can.
+
+    Everything else is the same as every other engine here. The cloud gate runs
+    before any text is prepared, the call is recorded whether it succeeds or
+    fails, and the spans it returns are located in the document afterwards --
+    a model's claim to have quoted something is not evidence that it did.
+    """
+    from .population import prompt_for
+
+    try:
+        import anthropic as anthropic_sdk
+    except ImportError as exc:
+        raise OrpheusError(
+            "The Anthropic SDK is not installed. `pip install "
+            "'orpheus[anthropic]'`, or choose another extraction_engine."
+        ) from exc
+
+    if tier == "cloud":
+        llm.assert_cloud_allowed(store, opt_in=opt_in, actor_id=actor_id)
+    config = llm.model_config(store, tier)
+    if not config.get("api_key"):
+        raise OrpheusError(
+            "No API key for the cloud tier. Set ORPHEUS_CLOUD_API_KEY or "
+            "ANTHROPIC_API_KEY.")
+
+    headers = {}
+    workspace = _anthropic_workspace(store)
+    if workspace:
+        # Required by identity-linked keys, and harmless on keys that do not
+        # need it -- so it is sent whenever a deployment has configured one
+        # rather than guessed at from the error.
+        headers["anthropic-workspace-id"] = workspace
+
+    model_id = config["model_id"]
+    instructions = (prompt_for(bundle) + "\n\n" + _JSON_INSTRUCTIONS
+                    + _link_instructions(bundle))
+
+    error, content, usage = None, "", None
+    # BaseException, not Exception: the audit is the record of what left this
+    # deployment, and a call recorded as clean when it was not is a wrong
+    # answer to the only question that log exists to answer.
+    try:
+        client = anthropic_sdk.Anthropic(api_key=config["api_key"],
+                                         default_headers=headers or None)
+        # Streamed because a contract is long input and the reply is a list:
+        # a non-streaming request at this size risks the HTTP timeout rather
+        # than the model.
+        with client.messages.stream(
+                model=model_id,
+                max_tokens=int(store.setting("anthropic_max_tokens", 16000)
+                               if store else 16000),
+                system=instructions,
+                messages=[{"role": "user", "content": text}]) as stream:
+            response = stream.get_final_message()
+        usage = response.usage
+        content = "".join(block.text for block in response.content
+                          if block.type == "text")
+        if response.stop_reason == "refusal":
+            error = "refusal: the model declined this document"
+    except BaseException as exc:  # noqa: BLE001
+        error = f"{type(exc).__name__}: {exc}"
+    finally:
+        llm.record_llm_call(
+            store, tier=tier, purpose="populate",
+            # Real token counts where the provider reported them, rather than
+            # a character count standing in for one.
+            prompt_chars=getattr(usage, "input_tokens", None) or len(text),
+            provider="anthropic", model=model_id,
+            document_id=document["document_id"], actor_id=actor_id,
+            excerpt_only=False, payload=text, error=error)
+    if error:
+        raise OrpheusError(f"Extraction failed: {error}")
+    return _parse_chat_payload(content)
+
+
+def _anthropic_workspace(store: Store | None) -> str | None:
+    """The workspace an identity-linked key acts in.
+
+    Configuration, not discovery: the endpoint that lists workspaces needs an
+    admin key, so a deployment that needs this has to be told. Read from
+    settings first so it survives without an environment variable.
+    """
+    if store is not None:
+        configured = store.setting("anthropic_workspace_id", None)
+        if configured:
+            return configured
+    return os.environ.get("ANTHROPIC_WORKSPACE_ID")
+
+
 register_engine("gliner2", gliner2_extract)
 register_engine("llm", llm_extract)
 register_engine("langextract", langextract_extract)
 register_engine("chat", chat_extract)
+register_engine("anthropic", anthropic_extract)

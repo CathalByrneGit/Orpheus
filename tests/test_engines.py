@@ -69,9 +69,11 @@ def test_a_quotation_that_starts_real_and_drifts_is_only_fuzzy():
 # -- the registry -----------------------------------------------------------
 
 def test_every_engine_is_registered_and_reports_whether_it_can_run():
-    assert set(engines.engine_names()) == {"gliner2", "langextract", "llm", "chat"}
+    assert set(engines.engine_names()) == {"gliner2", "langextract", "llm",
+                                           "chat", "anthropic"}
     available = engines.available_engines()
-    assert set(available) == {"gliner2", "langextract", "llm", "chat"}
+    assert set(available) == {"gliner2", "langextract", "llm", "chat",
+                              "anthropic"}
     # chat needs only an endpoint, so it is always a fallback.
     assert available["chat"] is True
 
@@ -527,3 +529,53 @@ def test_capabilities_shows_the_cap_before_a_run_hits_it(store):
     from orpheus.llm import cloud_policy
     store.set_setting("cloud_budget_chars", "500")
     assert cloud_policy(store)["budget"]["chars_limit"] == 500
+
+
+# -- the anthropic engine -----------------------------------------------------
+#
+# `chat` already reaches Anthropic through an OpenAI-compatible front, so this
+# engine exists for one reason: an identity-linked API key requires an
+# `anthropic-workspace-id` header on every request, and neither `chat` nor
+# `llm-anthropic` can carry one.
+
+def test_the_workspace_is_configuration_not_discovery(store, monkeypatch):
+    # The endpoint that lists workspaces needs an admin key, so a deployment
+    # that needs this has to be told rather than have it guessed from an error.
+    from orpheus.engines import _anthropic_workspace
+
+    monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID", raising=False)
+    assert _anthropic_workspace(store) is None
+
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", "wrkspc_env")
+    assert _anthropic_workspace(store) == "wrkspc_env"
+
+    # Settings win, so it survives without an environment variable.
+    store.set_setting("anthropic_workspace_id", "wrkspc_stored")
+    assert _anthropic_workspace(store) == "wrkspc_stored"
+
+
+def test_the_cloud_gate_runs_before_any_text_is_prepared(store):
+    # Same property every other engine has: a refused call sends nothing, and
+    # leaves no audit row claiming it did.
+    from orpheus.engines import anthropic_extract
+    from orpheus.utils import OrpheusError
+
+    store.set_setting("cloud_ai_policy", "disabled")
+    with pytest.raises(OrpheusError) as caught:
+        anthropic_extract(store=store, document={"document_id": "doc_1"},
+                          bundle=load_bundle(), text="anything",
+                          tier="cloud", opt_in=True, actor_id=None)
+    assert "disabled" in str(caught.value)
+    assert store.scalar("SELECT COUNT(*) FROM llm_calls") == 0
+
+
+def test_a_missing_key_is_refused_by_name(store):
+    from orpheus.engines import anthropic_extract
+    from orpheus.utils import OrpheusError
+
+    store.set_setting("cloud_ai_policy", "org_allow")
+    with pytest.raises(OrpheusError) as caught:
+        anthropic_extract(store=store, document={"document_id": "doc_1"},
+                          bundle=load_bundle(), text="anything",
+                          tier="cloud", opt_in=True, actor_id=None)
+    assert "ANTHROPIC_API_KEY" in str(caught.value)
