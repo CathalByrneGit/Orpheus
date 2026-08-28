@@ -161,13 +161,21 @@ orpheus --db store.sqlite ingest ./corpus \
   --actor-id act_... --extract --tier cloud --engine anthropic --cloud-opt-in
 ```
 
-**Use `--engine anthropic`.** `chat` posts OpenAI-shaped requests and defaults
-its base URL to OpenRouter, which is wrong for Anthropic. `llm` would work for
-a workspace-scoped key but not for one that isn't: a key that spans
-workspaces must name the one it acts in, in an `anthropic-workspace-id`
-header on every request, and neither `chat` nor
-`llm-anthropic` can carry a custom header. The `anthropic` engine uses the
-official SDK, which takes `default_headers`.
+**Use `--engine llm`.** One dependency reaches every provider the `llm`
+plugin ecosystem covers, it is the library underneath `datasette-llm`, and
+swapping provider is `pip install llm-<provider>` and a model id:
+
+```bash
+pip install llm-anthropic          # or llm-gemini, llm-openrouter, llm-ollama
+orpheus --db store.sqlite config --set cloud_llm_model=anthropic/claude-sonnet-5
+```
+
+`chat` posts OpenAI-shaped requests and defaults its base URL to OpenRouter,
+which is wrong for Anthropic. The `anthropic` engine is for one case `llm`
+cannot cover: a key that spans workspaces must name the one it acts in, in an
+`anthropic-workspace-id` header on every request, and `llm-anthropic` has no
+way to send one. A workspace-scoped key needs no header, so it does not need
+that engine.
 
 If the key is identity-linked, the API says so plainly on the first call:
 

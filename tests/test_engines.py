@@ -635,3 +635,26 @@ def test_the_budget_is_spent_in_the_unit_it_is_set_in(store, monkeypatch):
     assert "prompt_chars=len(text)" in source
     assert "input_tokens" not in source.split("record_llm_call")[-1], \
         "a token count must not be recorded in a character column"
+
+
+def test_a_schema_capable_model_can_still_return_relationships():
+    # The llm engine takes one of two branches. The non-schema branch has asked
+    # for relationships all along; the schema branch handed the model a schema
+    # with only `extractions` in it, so a provider that enforces schemas could
+    # not return a relationship even though the prompt asked for one. The whole
+    # relation network came out empty, and the graph, the questions and the
+    # corroboration of relations all described a corpus of unconnected things
+    # with nothing to say why. Seen on llm-anthropic: 15 instances, 0 edges.
+    from orpheus import bundle as bundle_mod
+    from orpheus.engines import extraction_schema
+
+    bundle = bundle_mod.load()
+    schema = extraction_schema(bundle)
+
+    assert "relationships" in schema["properties"], \
+        "a schema-capable model must be able to express a relationship"
+    links = schema["properties"]["relationships"]["items"]["properties"]
+    assert links["link_type_id"]["enum"], "the link types come from the bundle"
+    assert set(schema["properties"]["extractions"]["items"]["properties"]) >= {
+        "instance_id", "type", "excerpt", "properties"}, \
+        "relationships refer to extractions by instance_id, so it has to be askable"

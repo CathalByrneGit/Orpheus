@@ -291,7 +291,8 @@ def extraction_schema(bundle: dict) -> dict:
     into the store regardless, where it has to happen anyway.
     """
     type_ids = [type_id for type_id, _ in _extractable_types(bundle)]
-    return {
+    link_ids = [link["id"] for link in (bundle.get("links") or []) if link.get("id")]
+    schema = {
         "type": "object",
         "properties": {
             "extractions": {
@@ -299,6 +300,12 @@ def extraction_schema(bundle: dict) -> dict:
                 "items": {
                     "type": "object",
                     "properties": {
+                        "instance_id": {
+                            "type": "string",
+                            "description": ("A short handle, unique within this "
+                                            "reply, for referring to this "
+                                            "extraction from `relationships`."),
+                        },
                         "type": {"type": "string", "enum": type_ids},
                         "excerpt": {
                             "type": "string",
@@ -314,6 +321,32 @@ def extraction_schema(bundle: dict) -> dict:
         },
         "required": ["extractions"],
     }
+    # Without this a schema-capable model cannot return a relationship even
+    # when the system prompt asks for one, and the whole relation network comes
+    # out empty with nothing to say why: the graph, the questions and the
+    # corroboration of relations all quietly describe a corpus of unconnected
+    # things. The non-schema branch has asked for these all along, which is why
+    # it only showed up on providers that enforce schemas.
+    if link_ids:
+        schema["properties"]["relationships"] = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "from_instance_id": {"type": "string"},
+                    "to_instance_id": {"type": "string"},
+                    "link_type_id": {"type": "string", "enum": link_ids},
+                    "evidence": {
+                        "type": "string",
+                        "description": ("Verbatim text from the document "
+                                        "showing this relationship."),
+                    },
+                },
+                "required": ["from_instance_id", "to_instance_id",
+                             "link_type_id"],
+            },
+        }
+    return schema
 
 
 def llm_extract(*, store: Store, document: dict, bundle: dict, text: str,
@@ -385,9 +418,9 @@ def llm_extract(*, store: Store, document: dict, bundle: dict, text: str,
     finally:
         llm.record_llm_call(
             store, tier=tier, purpose="populate",
-            # Real token counts when the provider reported them, rather than a
-            # character count standing in for one.
-            prompt_chars=getattr(usage, "input", None) or len(text),
+            # Characters, because the column is `prompt_chars` and the budget
+            # is set in characters. See anthropic_extract.
+            prompt_chars=len(text),
             provider="llm:" + str(getattr(model, "needs_key", None) or "local"),
             model=model_id, document_id=document["document_id"],
             actor_id=actor_id, excerpt_only=False, payload=text, error=error)
