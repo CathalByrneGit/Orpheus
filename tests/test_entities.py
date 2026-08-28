@@ -12,8 +12,10 @@ from __future__ import annotations
 import pytest
 
 import orpheus.bundle as bundle_mod
-from orpheus.entities import (candidates_for_mention, confirm_entity,
-                              confirm_link, create_entity, describe_entity,
+from orpheus.entities import (BASES, candidates_for_mention, confirm_entity,
+                              confirm_link, could_be_one_thing, create_entity,
+                              describe_entity, distinguishing_tokens,
+                              same_but_for_an_initial,
                               duplicate_pages, entities_in_document,
                               entity_page, get_entity, link_mention,
                               list_entities, merge_entities, propose_entities,
@@ -767,3 +769,180 @@ def test_a_company_is_still_grouped_across_documents_by_name(contracts):
     # The rule is per type, not a general retreat from name matching.
     result = propose_entities(contracts, type_id="Company", actor_id="act_a")
     assert {e["basis"] for e in result["entities"]} <= {"identifier", "naive_key"}
+
+
+# ---------------------------------------------------------------------------
+# Which names could be one thing
+# ---------------------------------------------------------------------------
+#
+# Spelling distance alone says yes far too often, because every name in one
+# corpus shares its boilerplate. All the pairs below came out of the
+# 40-document run, with the score `token_sort_ratio` gave them.
+
+def test_two_names_each_with_a_word_the_other_lacks_are_two_things():
+    # 87.8 and 80.0 respectively, and neither pair is one company.
+    assert not could_be_one_thing("EFTC OPERATING CORP.", "K*TEC OPERATING CORP.")
+    assert not could_be_one_thing("SUNTRON CORPORATION", "UTEK Corporation")
+
+
+def test_a_name_that_extends_another_stays_a_candidate():
+    # 89.3. The whole of one name is inside the other, so only one side carries
+    # the difference -- a brand, a parent, or the same thing written fuller.
+    assert could_be_one_thing("HealthPlan Services, Inc.",
+                              "Sykes HealthPlan Services, Inc.")
+    assert distinguishing_tokens("HealthPlan Services, Inc.",
+                                 "Sykes HealthPlan Services, Inc.") == (set(), {"sykes"})
+
+
+def test_the_documented_false_split_is_still_offered():
+    # `naive_key`'s known failure. If this rule withheld it, the one case the
+    # fuzzy matcher exists to catch would never reach a person.
+    assert could_be_one_thing("Ernst & Young", "Ernst and Young")
+
+
+def test_a_word_and_its_near_spelling_are_one_word():
+    # A plural or a typo is exactly what fuzzy matching is for, and filtering
+    # it out on the way to a person would defeat the point.
+    assert could_be_one_thing("Halloran Instruments, Inc.", "Halloran Instrument Inc.")
+    assert could_be_one_thing("Ardmore Digital Ltd", "Ardmoor Digital Limited")
+    # But two words that merely look alike are still two words.
+    assert not could_be_one_thing("Acme Operating Ltd", "Acme Operations Ltd")
+
+
+def test_a_legal_form_or_a_title_is_never_the_distinguishing_word():
+    assert could_be_one_thing("Ardmore Digital Limited", "Ardmore Digital Ltd")
+    assert could_be_one_thing("Dr. Mitchell Felder", "Mitchell Felder")
+    # A middle initial is one character, so it distinguishes nothing on its own.
+    assert could_be_one_thing("Mitchell Felder", "Mitchell S. Felder")
+
+
+def test_group_and_holdings_still_distinguish():
+    # They are absent from the generic list for the same reason they are absent
+    # from the suffix list: a holding company is not its subsidiary. Both are
+    # still *offered*, because offering is not merging -- what must not happen
+    # is them sharing a key, which is tested in test_store.
+    assert distinguishing_tokens("Kestrel Medical Group",
+                                 "Kestrel Medical Ltd") == ({"group"}, set())
+
+
+def test_the_rule_only_ever_withholds_a_candidate(corpus):
+    # It never merges and never links. Two pages it declines to offer can still
+    # be merged by a person who knows better.
+    pytest.importorskip("rapidfuzz")
+    a = create_entity(corpus, "Company", "EFTC OPERATING CORP.", actor_id="act_a")
+    b = create_entity(corpus, "Company", "K*TEC OPERATING CORP.", actor_id="act_a")
+    assert not [p for p in duplicate_pages(corpus, type_id="Company")
+                if {p["keep"]["entity_id"], p["merge"]["entity_id"]} == {a, b}]
+    assert merge_entities(corpus, a, b, actor_id="act_a")["kept"] == a
+
+
+def test_a_middle_initial_is_offered_as_its_own_reason():
+    # 90.9% similar says nothing a reviewer can check. "Same first and last
+    # name, differing by an initial" says what to look at.
+    assert same_but_for_an_initial("Mitchell Felder", "Mitchell S. Felder")
+    assert same_but_for_an_initial("Mary Jane Watson", "Mary J. Watson")
+    # An initial that expands to the name it stands for.
+    assert same_but_for_an_initial("John A. Smith", "John Alan Smith")
+
+
+def test_two_people_who_differ_by_their_initial_are_two_people():
+    # The failure this basis would cause if it merged rather than offered.
+    assert not same_but_for_an_initial("John A. Smith", "John B. Smith")
+    assert not same_but_for_an_initial("John Paul Smith", "John Peter Smith")
+    # Identical names are an exact key match, which is a stronger basis.
+    assert not same_but_for_an_initial("John A. Smith", "John A. Smith")
+    # And a surname alone has no first and last to agree on.
+    assert not same_but_for_an_initial("Felder", "Felder")
+
+
+def test_a_middle_initial_candidate_outranks_a_spelling_score(corpus):
+    corpus.execute(
+        "INSERT INTO instances_Person (instance_id, document_id, name, naive_key,"
+        " source, confidence, status, created_at)"
+        " VALUES ('p_1','doc_1','Mitchell S. Felder','mitchell s felder',"
+        "'ai_cloud',0.9,'unconfirmed',datetime('now'))")
+    corpus.execute(
+        "INSERT INTO instance_index (instance_id, type_id, table_name, document_id,"
+        " created_at) VALUES ('p_1','Person','instances_Person','doc_1',datetime('now'))")
+    corpus.conn.commit()
+    create_entity(corpus, "Person", "Mitchell Felder", actor_id="act_a")
+
+    candidates = candidates_for_mention(corpus, "p_1")
+    assert candidates and candidates[0]["basis"] == "initials"
+    assert "differing by an initial" in candidates[0]["evidence"]
+
+
+def test_a_company_is_never_offered_a_middle_initial(corpus):
+    # A middle initial is a personal-name idea. The bundle says which types
+    # have personal names, and this basis only applies to those.
+    corpus.execute(
+        "INSERT INTO instances_Company (instance_id, document_id, name, naive_key,"
+        " source, confidence, status, created_at)"
+        " VALUES ('c_1','doc_1','Acme S. Trading','acme s trading',"
+        "'ai_cloud',0.9,'unconfirmed',datetime('now'))")
+    corpus.execute(
+        "INSERT INTO instance_index (instance_id, type_id, table_name, document_id,"
+        " created_at) VALUES ('c_1','Company','instances_Company','doc_1',datetime('now'))")
+    corpus.conn.commit()
+    create_entity(corpus, "Company", "Acme Trading", actor_id="act_a")
+
+    assert "initials" not in {c["basis"] for c in candidates_for_mention(corpus, "c_1")}
+
+
+def test_two_pages_under_one_key_are_the_strongest_kind_of_split(corpus):
+    # The same test `propose_entities` groups on. Reporting it as a spelling
+    # percentage describes it as something weaker than it is.
+    a = create_entity(corpus, "Company", "Ardmore Digital Limited",
+                      actor_id="act_a", source="ai_local")
+    create_entity(corpus, "Company", "Ardmore Digital Ltd",
+                  actor_id="act_a", source="ai_local")
+
+    pairs = duplicate_pages(corpus, type_id="Company")
+    assert pairs and pairs[0]["basis"] == "naive_key"
+    assert "name key" in pairs[0]["evidence"]
+    assert a in {pairs[0]["keep"]["entity_id"], pairs[0]["merge"]["entity_id"]}
+
+
+def test_a_shared_key_is_found_even_when_the_spellings_are_far_apart(corpus):
+    # The fuzzy pass cannot see this one: the strings are too different to
+    # clear the threshold, and the key is identical.
+    create_entity(corpus, "Company", "Foo Co Ltd", actor_id="act_a",
+                  source="ai_local")
+    create_entity(corpus, "Company", "Foo", actor_id="act_a", source="ai_local")
+
+    bases = {p["basis"] for p in duplicate_pages(corpus, type_id="Company")}
+    assert "naive_key" in bases
+
+
+def test_the_key_pass_works_without_rapidfuzz(corpus, monkeypatch):
+    # Exact matching is what the rest of the system rests on, so a missing
+    # optional install must not take the strongest check with it.
+    import builtins
+    real = builtins.__import__
+
+    def refuse(name, *args, **kwargs):
+        if name == "rapidfuzz":
+            raise ImportError("not installed")
+        return real(name, *args, **kwargs)
+
+    create_entity(corpus, "Company", "Ardmore Digital Limited",
+                  actor_id="act_a", source="ai_local")
+    create_entity(corpus, "Company", "Ardmore Digital Ltd",
+                  actor_id="act_a", source="ai_local")
+    monkeypatch.setattr(builtins, "__import__", refuse)
+
+    pairs = duplicate_pages(corpus, type_id="Company")
+    assert [p["basis"] for p in pairs] == ["naive_key"]
+
+
+def test_the_strongest_reason_is_offered_first(corpus):
+    # A 90% spelling match above a shared key would put the weaker reason at
+    # the top of a reviewer's list.
+    pytest.importorskip("rapidfuzz")
+    for name in ("Ardmore Digital Limited", "Ardmore Digital Ltd",
+                 "Ardmoor Digital Holdings"):
+        create_entity(corpus, "Company", name, actor_id="act_a", source="ai_local")
+
+    bases = [p["basis"] for p in duplicate_pages(corpus, type_id="Company")]
+    assert bases[0] == "naive_key"
+    assert bases == sorted(bases, key=lambda b: BASES.index(b))

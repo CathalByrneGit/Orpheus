@@ -23,11 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from .rubric import RESERVED_PROPS
-from .utils import OrpheusError, from_json
+from .utils import NAME_STYLES, OrpheusError, from_json, naive_key
 
 SCHEMA_DIR = Path(__file__).parent / "schemas"
 BUNDLE_DIR = Path(__file__).parent / "bundles"
-DEFAULT_BUNDLE = BUNDLE_DIR / "contract-core-0.3.0.json"
+DEFAULT_BUNDLE = BUNDLE_DIR / "contract-core-0.4.0.json"
 
 SPEC_SCHEMA = SCHEMA_DIR / "ontologySpecR.bundle.schema.json"
 ORPHEUS_SCHEMA = SCHEMA_DIR / "orpheus.bundle.schema.json"
@@ -549,6 +549,29 @@ def object_type(bundle: dict, type_id: str) -> dict | None:
         if obj.get("id") == type_id:
             return obj
     return None
+
+
+def name_style(obj: dict | None) -> str | None:
+    """How this type's names normalise: `personal`, `organisation`, or unsaid.
+
+    The engine has no business knowing that this particular domain calls its
+    people `Person`. A bundle describing planning applications normalises an
+    applicant's name the same way under a different type id, so the bundle
+    says and `naive_key` obeys.
+
+    Unsaid means `organisation`, which is what every caller got before there
+    was a choice -- so an older bundle keeps the keys it already has.
+    """
+    if not obj:
+        return None
+    style = (obj.get("extensions", {}).get("orpheus", {}) or {}).get("nameStyle")
+    return style if style in NAME_STYLES else None
+
+
+def key_for(bundle: dict | None, type_id: str | None, name) -> str:
+    """`naive_key` for a name, in whatever style this type's bundle asks for."""
+    obj = object_type(bundle, type_id) if (bundle and type_id) else None
+    return naive_key(name, name_style(obj))
 
 
 def managed_object_types(bundle: dict) -> list[dict]:

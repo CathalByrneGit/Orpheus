@@ -604,7 +604,96 @@ MIGRATIONS: list[dict] = [
             "ON question_reviews (status)",
         ],
     },
+    {
+        "version": 10,
+        "name": "recompute_keys_per_name_style",
+        # `naive_key` now normalises a personal name differently from an
+        # organisation's: an honorific leads one, a legal form trails the other.
+        # Before this, every name was normalised as an organisation, so
+        # "Dr. Mitchell Felder" and "Mitchell Felder" were two keys and two
+        # pages for one man -- three, with "Mitchell S. Felder" -- splitting his
+        # relations across them.
+        #
+        # Stored keys are recomputed for the same reason migration 5 did it: a
+        # store that keeps matching on the old basis is silently wrong rather
+        # than visibly out of date. Pages are recomputed too, which migration 5
+        # had no need to do because `entities` did not exist yet.
+        "run": lambda store: _recompute_keys_per_style(store),
+    },
 ]
+
+
+def _recompute_keys_per_style(store) -> int:
+    """Recompute every stored key in the style its type asks for.
+
+    Covers both places a key is stored: the instance tables and `entities`.
+    A page written under the old style and looked up under the new one silently
+    never matches, which reads as "no page exists" rather than as a bug.
+
+    A store with no active bundle has nothing to ask, and this is correctly a
+    no-op -- the default style is what those keys were already computed with.
+    """
+    from . import bundle as bundle_mod
+    from .utils import naive_key, new_id, now, to_json
+
+    bundle = bundle_mod.active(store)
+    if bundle is None:
+        return 0
+
+    styles = {o["id"]: bundle_mod.name_style(o)
+              for o in bundle_mod.object_types(bundle)}
+    if not any(styles.values()):
+        return 0
+
+    changed = 0
+    for type_id, style in styles.items():
+        if not style:
+            continue
+        obj = bundle_mod.object_type(bundle, type_id)
+        table = bundle_mod.table_name(obj) if obj else None
+        if not table or not store.table_exists(table):
+            continue
+        columns = {row[1] for row in store.execute(f'PRAGMA table_info("{table}")')}
+        if not {"naive_key", "name"} <= columns:
+            continue
+        for row in store.query(
+                f'SELECT instance_id, name, naive_key FROM "{table}" '
+                "WHERE name IS NOT NULL AND name != ''"):
+            fresh = naive_key(row["name"], style)
+            if fresh == row["naive_key"]:
+                continue
+            store.execute(f'UPDATE "{table}" SET naive_key = ? WHERE instance_id = ?',
+                          (fresh, row["instance_id"]))
+            changed += 1
+
+    for row in store.query(
+            "SELECT entity_id, type_id, canonical_name, naive_key FROM entities "
+            "WHERE canonical_name IS NOT NULL AND canonical_name != ''"):
+        fresh = naive_key(row["canonical_name"], styles.get(row["type_id"]))
+        if fresh == row["naive_key"]:
+            continue
+        store.execute("UPDATE entities SET naive_key = ? WHERE entity_id = ?",
+                      (fresh, row["entity_id"]))
+        changed += 1
+
+    if changed:
+        # Anything matched on the old keys is now out of date. Silently stale is
+        # worse than visibly stale, which is why the staleness machinery exists.
+        store.execute(
+            "UPDATE concept_evaluations SET stale = 1, stale_reason = ? "
+            "WHERE kind = 'corpus' AND COALESCE(stale, 0) = 0",
+            ("Name matching keys were recomputed per name style; corpus matches "
+             "need re-running.",))
+        store.execute(
+            "INSERT INTO edit_history (id, table_name, row_id, document_id, action, "
+            "previous_value, new_value, edited_by, edited_at, note) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (new_id("edit"), "instances_*,entities", "naive_key", None, "migrate",
+             None, to_json({"rows_changed": changed, "migration": 10}), None, now(),
+             "Keys are now computed in the style the bundle gives each type, so a "
+             "personal name no longer keeps the honorific that split it from "
+             "itself."))
+    return changed
 
 
 def _recompute_naive_keys(store) -> int:

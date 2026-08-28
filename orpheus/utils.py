@@ -99,7 +99,7 @@ _PUNCT = re.compile(r"[^\w\s]", re.UNICODE)
 # and leaves nothing to notice. Conflating a parent with its subsidiary is also
 # precisely the error that matters most in procurement and conflict-of-interest
 # work, which is where this is heading.
-_LEGAL_FORMS = (
+LEGAL_FORMS = _LEGAL_FORMS = (
     "limited", "ltd", "plc", "llp", "llc", "lp", "inc", "incorporated",
     "corporation", "corp", "company", "co", "sa", "nv", "bv", "ag", "gmbh",
     "oy", "ab", "as", "aps", "pty", "dac", "cic", "ug", "kg", "srl", "spa",
@@ -112,26 +112,63 @@ _TRAILING_FORM = re.compile(
 _LEADING_THE = re.compile(r"^the\s+")
 _SPACE = re.compile(r"\s+")
 
+# A title a person is addressed by, which is not part of their name. The
+# corpus run produced "Dr. Mitchell Felder", "Mitchell Felder" and "Mitchell S.
+# Felder" as three pages for one man, splitting his three relations across
+# them; the first of those differs from the second by nothing but this.
+#
+# Leading, and repeatedly, for the same reason legal forms are stripped
+# trailing and repeatedly: "Prof. Dr. Meier" stacks two.
+HONORIFICS = _HONORIFICS = (
+    "mr", "mrs", "ms", "miss", "mx", "dr", "prof", "professor", "sir", "dame",
+    "lord", "lady", "rev", "reverend", "fr", "hon", "capt", "col", "maj",
+    "sgt", "lt", "gen",
+)
+_LEADING_HONORIFIC = re.compile(
+    r"^(?:(?:" + "|".join(_HONORIFICS) + r")\s+)+"
+)
 
-def naive_key(name: Any) -> str:
+#: How a type's names are normalised. `organisation` strips trailing legal
+#: forms, `personal` strips leading honorifics. A bundle says which per object
+#: type, because the engine has no business knowing that this domain calls its
+#: people `Person` -- a planning-applications bundle normalises an applicant's
+#: name the same way under a different type id.
+NAME_STYLES = ("organisation", "personal")
+
+
+def naive_key(name: Any, style: str | None = None) -> str:
     """Normalise a name for naive cross-document matching.
 
-    Deliberately crude: lowercase, strip punctuation, drop a leading "the" and
-    any trailing legal forms, collapse whitespace. This is a stepping stone to
-    entity resolution, not entity resolution, and anything built on it must be
-    labelled unresolved -- see `rubric.NAIVE_RESOLUTION`. Its known failure is
-    tested rather than hidden: "Ernst & Young" and "Ernst and Young" produce
-    different keys, because the ampersand becomes a space and the word does not.
+    Deliberately crude: lowercase, strip punctuation, drop a leading "the",
+    collapse whitespace, and then apply whichever of the two style-specific
+    strips the bundle asked for. This is a stepping stone to entity resolution,
+    not entity resolution, and anything built on it must be labelled unresolved
+    -- see `rubric.NAIVE_RESOLUTION`. Its known failure is tested rather than
+    hidden: "Ernst & Young" and "Ernst and Young" produce different keys,
+    because the ampersand becomes a space and the word does not.
 
-    Trailing, and repeatedly, because "Foo Co Ltd" is one company under two
-    stacked forms. Anchoring matters: an unanchored match took the "co" out of
-    "Costa Coffee" and the "the" out of "The Boston Consulting Group".
+    Legal forms are stripped trailing, and repeatedly, because "Foo Co Ltd" is
+    one company under two stacked forms. Anchoring matters: an unanchored match
+    took the "co" out of "Costa Coffee" and the "the" out of "The Boston
+    Consulting Group".
+
+    Honorifics are stripped leading, and only for a `personal` name. Doing it
+    to every name would take the "Dr" out of "Dr Pepper" -- a false merge is
+    strictly worse than a false split, and this function's output is matched on
+    for *equality*, so a bad strip here merges silently.
+
+    `style` defaults to `organisation`, which is what every caller did before
+    there was a choice, so an older bundle that says nothing keeps its keys.
     """
     text = str(name or "").lower()
     text = _PUNCT.sub(" ", text)
     text = _SPACE.sub(" ", text).strip()
     text = _LEADING_THE.sub("", text)
-    stripped = _TRAILING_FORM.sub("", text).strip()
-    # A name that is *only* a legal form keeps it, since an empty key would
-    # match every other empty key.
+
+    if style == "personal":
+        stripped = _LEADING_HONORIFIC.sub("", text).strip()
+    else:
+        stripped = _TRAILING_FORM.sub("", text).strip()
+    # A name that is *only* a legal form, or only a title, keeps it: an empty
+    # key would match every other empty key.
     return stripped or text

@@ -120,7 +120,8 @@ def amend_instance(store: Store, instance_id: str, changes: dict, actor_id: str,
     # Derived from `name`, so it has to be recomputed rather than left stale --
     # otherwise a corrected name still matches under the old key.
     if "name" in changes and "naive_key" in bundle_mod.property_ids(obj):
-        updates["naive_key"] = naive_key(changes["name"])
+        updates["naive_key"] = naive_key(changes["name"],
+                                         bundle_mod.name_style(obj))
 
     assignments = ", ".join(f'"{c}" = ?' for c in updates)
     with store.transaction():

@@ -92,7 +92,10 @@ def insert_instance(store: Store, bundle: dict, type_id: str, instance_id: str,
     # Derived, never model output. It has to stay a pure function of `name`, or
     # cross-document matching quietly varies by extraction run.
     if "naive_key" in declared and values.get("name"):
-        values["naive_key"] = naive_key(values["name"])
+        # In the style the bundle asks for: a personal name drops an honorific,
+        # an organisation drops a trailing legal form, and applying either to
+        # the other merges things that are not the same.
+        values["naive_key"] = naive_key(values["name"], bundle_mod.name_style(obj))
 
     try:
         store.insert(table, values)

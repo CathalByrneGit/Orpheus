@@ -58,6 +58,7 @@ has checked it.
 | `document` | The type is document-scoped, and this is its document | `explicit` |
 | `identifier` | A stated registration number matched exactly | `named` |
 | `naive_key` | A normalised name matched exactly | `implied` |
+| `initials` | Two personal names agree on first and last, differing by a middle initial | `inferred` |
 | `similar` | Names close but not equal after normalising | `inferred` |
 | `search` | A full-text hit | `inferred` |
 
@@ -128,6 +129,85 @@ survivor. Found by running the thing, not by reasoning about it — a three-line
 corpus produced four pages where three were right.
 
 Neither function ever merges anything.
+
+### What the 40-document run found, and what fixed it
+
+The wiki rests almost entirely on the weakest basis there is: **178 of 180 pages
+had nothing behind them but a normalised name**, because only 2 of 74 companies
+stated a registration number. So how good the name rules are is not a detail.
+
+Run against the real corpus, `duplicate_pages()` offered seven merges. Three
+were right, one was arguable, and **three were wrong**:
+
+```
+90.9  Mitchell Felder        <-> Mitchell S. Felder     one man
+88.2  Dr. Mitchell Felder    <-> Mitchell Felder        one man
+81.1  Dr. Mitchell Felder    <-> Mitchell S. Felder     one man
+89.3  HealthPlan Services    <-> Sykes HealthPlan Services
+87.8  EFTC OPERATING CORP.   <-> K*TEC OPERATING CORP.  two companies
+80.0  SUNTRON CORPORATION    <-> UTEK Corporation       two companies
+80.0  Franchisee             <-> Franchisor             not names at all
+```
+
+Three separate defects, and each needed a different answer.
+
+**A title is not part of a name.** "Dr. Mitchell Felder" and "Mitchell Felder"
+were two keys and two pages for one man, holding two of his three relations
+between them. `naive_key` now strips leading honorifics — but only for a
+*personal* name, because doing it to every name takes the "Dr" out of "Dr
+Pepper", and this function is matched on for equality, so a bad strip merges
+silently. Which types have personal names is [the bundle's
+business](data-model.md#interfaces-asking-one-question-across-several-types),
+not the engine's.
+
+**A spelling score is not a reason.** "Mitchell Felder" and "Mitchell S.
+Felder" are 90.9% similar, which tells a reviewer nothing they can check. They
+are now offered on their own basis — `initials`, "same first and last name,
+differing by an initial" — ranked above `similar` because it is structural
+rather than a character distance. It never merges: "John A. Smith" and "John B.
+Smith" pass the first-and-last test and are two people, so contradicting
+initials are refused outright, and even agreeing ones are only a candidate.
+
+**Boilerplate carried the false matches.** Most of "EFTC OPERATING CORP." is
+words every name in the corpus has. Corpus frequency does not separate them
+either — in 74 company names, "operating" and "healthplan" both appear twice,
+and only one of those pairs is real. What separates them is *which side carries
+the difference*: a name that extends another is a candidate, and a pair where
+each name has a distinctive word the other lacks is two things. `EFTC` against
+`K*TEC`, `SUNTRON` against `UTEK`. A near-spelling does not count as
+distinctive, so "Instruments"/"Instrument" survives — the boundary is measured,
+at 0.85 on `difflib`'s ratio, with the numbers recorded beside the constant.
+
+Result on the same corpus: **seven candidates became four**, the three wrong
+ones gone and none of the right ones lost. The list now leads with the
+strongest reason rather than the highest percentage:
+
+```
+naive_key  Dr. Mitchell Felder  <-> Mitchell Felder
+           both filed under the name key 'mitchell felder'
+initials   Mitchell Felder      <-> Mitchell S. Felder
+           same first and last name, differing by an initial
+similar    HealthPlan Services  <-> Sykes HealthPlan Services, Inc.
+           names 89% similar
+```
+
+Two pages under one key is now its own basis, and it runs **without
+rapidfuzz** — it is the same test `propose_entities` groups on, so calling it
+"88% similar" described it as something weaker than it is, and it finds pairs
+the fuzzy pass cannot see at all ("Foo Co Ltd" and "Foo" share a key and score
+too low to be offered).
+
+**The graph does not help here, and it was worth checking.** Resolving entities
+by who they appear with is the obvious idea. Measured: EFTC and K\*TEC share a
+document *and* a neighbouring page, and they are different companies — because
+that is what a contract does, it names two different parties in one filing.
+Co-occurrence is evidence of being different as often as of being the same.
+
+**One more thing the run produced**: pages called `Franchisee`, `Franchisor` and
+`[•]`. The extractor read the word a contract uses for a party as the party, and
+the wiki gave each a page. They are now a lint finding, `unnamed_page` — flagged
+for rejection, never deleted, because a page is evidence about how well
+extraction works.
 
 And neither is offered for a
 [document-scoped type](data-model.md#documentscoped-when-a-name-is-a-title-not-an-identifier).

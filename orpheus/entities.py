@@ -30,19 +30,22 @@ it trustworthy rather than merely convenient:
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from . import bundle as bundle_mod
 from .audit import record_edit
 from .rubric import CONFIDENCE, EXCLUDED_STATUSES, STATUSES
 from .store import Store
-from .utils import (NotFound, OrpheusError, naive_key, new_id, now,
+from .utils import (HONORIFICS, LEGAL_FORMS, NotFound, OrpheusError,
+                    naive_key, new_id, now,
                     require_choice, require_string)
 
 # What a link rests on. Not a confidence score — a kind of evidence. An exact
 # registration number and a normalised name are not the same claim, and the
 # difference has to survive into anything built on top.
-BASES = ("human", "document", "identifier", "naive_key", "similar", "search")
+BASES = ("human", "document", "identifier", "naive_key", "initials",
+         "similar", "search")
 
 BASIS_CONFIDENCE = {
     "human": CONFIDENCE["explicit"],
@@ -57,6 +60,11 @@ BASIS_CONFIDENCE = {
     "identifier": CONFIDENCE["named"],
     # A normalised name. The caveat that follows this everywhere is the point.
     "naive_key": CONFIDENCE["implied"],
+    # Two personal names agreeing on first and last, differing by a middle
+    # initial. Ranked above `similar` because it is a structural reason rather
+    # than a character distance, and a reviewer can check it by reading it. Not
+    # ranked higher than that: two people do share a first and last name.
+    "initials": CONFIDENCE["inferred"],
     # Names that are close but not equal after normalising. Weaker than an
     # exact key by definition -- it is offered as a candidate, never linked
     # automatically.
@@ -109,6 +117,18 @@ NAIVE_CAVEAT = (
 # ---------------------------------------------------------------------------
 # Reading mentions
 # ---------------------------------------------------------------------------
+
+def _key(store: Store, type_id: str | None, name,
+         bundle: dict | None = None) -> str:
+    """The naive key for a name, in the style this type's bundle asks for.
+
+    Every comparison in this module has to use the same one. A page written
+    with an organisation key and looked up with a personal one silently never
+    matches, which reads as "no page exists" rather than as a bug.
+    """
+    return bundle_mod.key_for(
+        bundle if bundle is not None else bundle_mod.active(store), type_id, name)
+
 
 def _document_scoped(store: Store, bundle: dict | None = None) -> set[str]:
     """Types whose identity is the document they were read from.
@@ -192,7 +212,7 @@ def create_entity(store: Store, type_id: str, canonical_name: str,
         "entity_id": entity_id,
         "type_id": type_id,
         "canonical_name": canonical_name,
-        "naive_key": naive_key(canonical_name),
+        "naive_key": _key(store, type_id, canonical_name, bundle),
         "description": description,
         "source": source,
         "confidence": CONFIDENCE["explicit"] if source == "human"
@@ -256,7 +276,8 @@ def rename_entity(store: Store, entity_id: str, canonical_name: str,
             "UPDATE entities SET canonical_name = ?, naive_key = ?, "
             "status = 'amended', source = 'human', confidence = ?, "
             "amended_by = ?, amended_at = ? WHERE entity_id = ?",
-            (canonical_name, naive_key(canonical_name), CONFIDENCE["explicit"],
+            (canonical_name, _key(store, before["type_id"], canonical_name),
+             CONFIDENCE["explicit"],
              actor_id, now(), entity_id))
         record_edit(store, "entities", entity_id, None, "amend",
                     previous={"canonical_name": before["canonical_name"]},
@@ -467,6 +488,146 @@ def merge_entities(store: Store, keep_id: str, merge_id: str, actor_id: str,
 # Proposing
 # ---------------------------------------------------------------------------
 
+# Words that say how a thing is incorporated or addressed, not which thing it
+# is. Two names differing only in these are two renderings of one name; two
+# names differing in anything else are making different claims.
+#
+# `group` and `holdings` are deliberately absent, for the reason they are absent
+# from the suffix list: they denote a different legal entity in a corporate
+# structure, so "Kestrel Medical Group" and "Kestrel Medical Ltd" differ in
+# something that matters and stay a question for a person.
+_GENERIC_TOKENS = frozenset(LEGAL_FORMS) | frozenset(HONORIFICS) | {
+    "the", "and", "of", "for", "a", "an",
+}
+
+_TOKEN = re.compile(r"\w+", re.UNICODE)
+
+
+def _distinctive(token: str) -> bool:
+    """Does this word say *which* thing is meant?
+
+    A single letter does not -- it is an initial, and "Mitchell S. Felder"
+    differs from "Mitchell Felder" by one.
+    """
+    return len(token) > 1 and token.lower() not in _GENERIC_TOKENS
+
+
+#: Above this, two words are one word written twice rather than two words.
+#:
+#: Measured on the cases that matter, with `difflib`'s ratio:
+#:
+#:     instruments / instrument   0.952   the same word
+#:     medical     / medicals     0.933   the same word
+#:     services    / service      0.933   the same word
+#:     digital     / digitel      0.857   a typo
+#:     kestrel     / kestral      0.857   a typo
+#:     ardmore     / ardmoor      0.857   a typo
+#:     ---------------------------------  the line
+#:     operating   / operations   0.842   different words
+#:     franchisee  / franchisor   0.800   different words
+#:     eftc        / tec          0.571   different words
+#:
+#: `difflib` rather than rapidfuzz because this rule decides which candidates
+#: are offered at all, and it must not change depending on an optional install.
+SAME_WORD = 0.85
+
+
+def _has_counterpart(token: str, others: set[str]) -> bool:
+    """Is this word a spelling of one of those?"""
+    from difflib import SequenceMatcher
+
+    return any(SequenceMatcher(None, token, other).ratio() >= SAME_WORD
+               for other in others)
+
+
+def distinguishing_tokens(a: str, b: str) -> tuple[set[str], set[str]]:
+    """The distinctive words each name has and the other does not.
+
+    Pure, and the whole of the rule below: if *both* sides come back non-empty,
+    the two names are naming different things.
+
+    A word with a near-spelling on the other side does not count -- "Halloran
+    Instruments, Inc." and "Halloran Instrument Inc." differ by a plural, which
+    is exactly the case fuzzy matching exists for and must not be filtered out
+    on its way to a person.
+    """
+    left = {t.lower() for t in _TOKEN.findall(a or "")}
+    right = {t.lower() for t in _TOKEN.findall(b or "")}
+    return ({t for t in left - right
+             if _distinctive(t) and not _has_counterpart(t, right - left)},
+            {t for t in right - left
+             if _distinctive(t) and not _has_counterpart(t, left - right)})
+
+
+_INITIAL = re.compile(r"^\w$")
+
+
+def same_but_for_an_initial(a: str, b: str) -> bool:
+    """Do these two personal names agree except for a middle initial?
+
+    "Mitchell Felder" and "Mitchell S. Felder" are one man written twice, and
+    the 40-document run made them two pages holding two of his three relations.
+    A spelling score says 90.9 and does not say *why*; this says why, which is
+    what a reviewer needs to decide.
+
+    Never a merge, always an offer. "John A. Smith" and "John B. Smith" satisfy
+    the first-and-last-name test and are two people, so the initials themselves
+    are checked for a contradiction -- but even agreeing initials are only ever
+    a candidate, because two people do share a name.
+    """
+    left = [t.lower() for t in _TOKEN.findall(a or "")]
+    right = [t.lower() for t in _TOKEN.findall(b or "")]
+    if len(left) < 2 or len(right) < 2:
+        return False
+    if (left[0], left[-1]) != (right[0], right[-1]):
+        return False
+    # The middles, which is where an initial lives.
+    inner_left = [t for t in left[1:-1]]
+    inner_right = [t for t in right[1:-1]]
+    if inner_left == inner_right:
+        return False        # identical names, not this basis
+    # Every middle part that both carry has to agree, and at least one side
+    # must be an initial rather than a different given name: "John A. Smith"
+    # and "John B. Smith" contradict, and "John Paul Smith" and "John Peter
+    # Smith" are two names rather than one abbreviated.
+    if not any(_INITIAL.match(t) for t in inner_left + inner_right):
+        return False
+    for x in inner_left:
+        for y in inner_right:
+            if _INITIAL.match(x) or _INITIAL.match(y):
+                if x[0] != y[0]:
+                    return False
+            elif x != y:
+                return False
+    return True
+
+
+def could_be_one_thing(a: str, b: str) -> bool:
+    """Could these two names be two renderings of one thing?
+
+    Spelling distance alone says yes far too often, because names in one corpus
+    share their boilerplate. Measured on the 40-document run, `token_sort_ratio`
+    scored "EFTC OPERATING CORP." against "K*TEC OPERATING CORP." at 87.8 and
+    "SUNTRON CORPORATION" against "UTEK Corporation" at 80.0 -- two pairs of
+    unrelated companies -- because most of each string is words every name has.
+    Corpus frequency does not separate them either: in 74 company names
+    "operating" and "healthplan" both appear twice, and only one of those pairs
+    is real.
+
+    What separates them is which side carries the difference. A name that
+    *extends* another is a candidate -- "Sykes HealthPlan Services, Inc." over
+    "HealthPlan Services, Inc.", "Mitchell S. Felder" over "Mitchell Felder",
+    "Ernst and Young" over "Ernst & Young". A pair where each name has a
+    distinctive word the other lacks is two different things, whatever the
+    characters say.
+
+    This only ever withholds a candidate. Nothing here merges anything, and two
+    pages this rejects can still be merged by a person who knows better.
+    """
+    left, right = distinguishing_tokens(a, b)
+    return not (left and right)
+
+
 def similar_names(store: Store, name: str, type_id: str,
                   threshold: float | None = None,
                   limit: int = 5) -> list[dict]:
@@ -510,7 +671,11 @@ def similar_names(store: Store, name: str, type_id: str,
         matched = row["canonical_name"]
         # An exact key match is reported as `naive_key` by the caller; this is
         # only for the ones that differ.
-        if naive_key(matched) == naive_key(name):
+        if _key(store, type_id, matched) == _key(store, type_id, name):
+            continue
+        # Each carrying a distinctive word the other lacks means two things,
+        # whatever the characters say.
+        if not could_be_one_thing(name, matched):
             continue
         out.append({**dict(row), "basis": "similar", "score": round(score, 1),
                     "evidence": f"name {score:.0f}% similar to {matched!r}"})
@@ -540,17 +705,12 @@ def duplicate_pages(store: Store, type_id: str | None = None,
     still be merged by hand; what is withheld is the machine offering it on
     evidence it cannot stand behind.
     """
-    try:
-        from rapidfuzz import fuzz
-    except ImportError:
-        return []
-
     scoped = _document_scoped(store)
     if type_id and type_id in scoped:
         return []
     clause = "AND type_id = ?" if type_id else ""
     rows = [r for r in store.query(
-        "SELECT entity_id, type_id, canonical_name, status FROM entities "
+        "SELECT entity_id, type_id, canonical_name, naive_key, status FROM entities "
         f"WHERE merged_into IS NULL AND status != 'rejected' {clause} "
         "ORDER BY canonical_name", (type_id,) if type_id else ())
         if r["type_id"] not in scoped]
@@ -560,27 +720,69 @@ def duplicate_pages(store: Store, type_id: str | None = None,
         "SELECT COUNT(*) FROM entity_mentions WHERE entity_id = ? "
         "AND unlinked_at IS NULL", (row["entity_id"],)) or 0 for row in rows}
 
+    def offer(a, b, basis, score, evidence):
+        # The page with more evidence behind it is the better survivor, so it
+        # is named first -- but this is a suggestion, and merge() takes
+        # whichever order a person chooses.
+        if counts[a["entity_id"]] < counts[b["entity_id"]]:
+            a, b = b, a
+        return {"keep": {**dict(a), "n_mentions": counts[a["entity_id"]]},
+                "merge": {**dict(b), "n_mentions": counts[b["entity_id"]]},
+                "basis": basis, "score": round(score, 1), "evidence": evidence}
+
     pairs = []
+    seen: set[frozenset] = set()
+
+    # Two pages under one key first, and without rapidfuzz. This is the
+    # strongest evidence of a split there is -- stronger than any spelling
+    # score, because it is the same test `propose_entities` groups on -- and
+    # reporting it as "88% similar" describes it as something weaker than it
+    # is. It also finds pairs the fuzzy pass cannot: "Foo Co Ltd" and "Foo"
+    # share a key and score too low to be offered.
+    by_key: dict[tuple, list] = {}
+    for row in rows:
+        if row["naive_key"]:
+            by_key.setdefault((row["type_id"], row["naive_key"]), []).append(row)
+    for group in by_key.values():
+        for index, left in enumerate(group):
+            for right in group[index + 1:]:
+                seen.add(frozenset((left["entity_id"], right["entity_id"])))
+                pairs.append(offer(
+                    left, right, "naive_key", 100.0,
+                    f"both filed under the name key {left['naive_key']!r}"))
+
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        # Exact matching still works and is what the rest of the system rests
+        # on, so the key pass above is returned rather than nothing.
+        return pairs[:limit]
+
     for index, left in enumerate(rows):
         for right in rows[index + 1:]:
             if left["type_id"] != right["type_id"]:
+                continue
+            if frozenset((left["entity_id"], right["entity_id"])) in seen:
                 continue
             score = fuzz.token_sort_ratio(left["canonical_name"].lower(),
                                           right["canonical_name"].lower())
             if score < cutoff:
                 continue
-            # The page with more evidence behind it is the better survivor, so
-            # it is named first -- but this is a suggestion, and merge() takes
-            # whichever order a person chooses.
-            a, b = ((left, right) if counts[left["entity_id"]]
-                    >= counts[right["entity_id"]] else (right, left))
-            pairs.append({
-                "keep": {**dict(a), "n_mentions": counts[a["entity_id"]]},
-                "merge": {**dict(b), "n_mentions": counts[b["entity_id"]]},
-                "score": round(score, 1),
-                "evidence": f"names {score:.0f}% similar",
-            })
-    pairs.sort(key=lambda p: -p["score"])
+            if not could_be_one_thing(left["canonical_name"],
+                                      right["canonical_name"]):
+                continue
+            initials = same_but_for_an_initial(left["canonical_name"],
+                                               right["canonical_name"])
+            pairs.append(offer(
+                left, right,
+                "initials" if initials else "similar", score,
+                "same first and last name, differing by an initial" if initials
+                else f"names {score:.0f}% similar"))
+
+    # Strongest evidence first, and only then the score. A 90% spelling match
+    # ranked above a shared key would put the weaker reason at the top of a
+    # reviewer's list.
+    pairs.sort(key=lambda p: (BASES.index(p["basis"]), -p["score"]))
     return pairs[:limit]
 
 
@@ -595,7 +797,7 @@ def candidates_for_mention(store: Store, instance_id: str,
     found = mention(store, instance_id)
     properties = found["properties"]
     name = properties.get("name") or ""
-    key = properties.get("naive_key") or naive_key(name)
+    key = properties.get("naive_key") or _key(store, found["type_id"], name)
 
     out: dict[str, dict] = {}
 
@@ -619,6 +821,19 @@ def candidates_for_mention(store: Store, instance_id: str,
                 (key, found["type_id"], limit)):
             out.setdefault(row["entity_id"], {**dict(row), "basis": "naive_key",
                                               "evidence": f"name key {key!r}"})
+
+    if name and bundle_mod.name_style(
+            bundle_mod.object_type(bundle_mod.active(store),
+                                   found["type_id"])) == "personal":
+        for row in store.query(
+                "SELECT entity_id, canonical_name, status FROM entities "
+                "WHERE type_id = ? AND merged_into IS NULL AND status != 'rejected'",
+                (found["type_id"],)):
+            if same_but_for_an_initial(name, row["canonical_name"]):
+                out.setdefault(row["entity_id"], {
+                    **dict(row), "basis": "initials",
+                    "evidence": f"same first and last name as "
+                                f"{row['canonical_name']!r}, differing by an initial"})
 
     if name:
         for candidate in similar_names(store, name, found["type_id"],
@@ -699,7 +914,7 @@ def propose_entities(store: Store, type_id: str | None = None,
             # it empty on every row written before.
             key = (found["type_id"],
                    f"doc:{found['document_id']}:"
-                   f"{found['naive_key'] or naive_key(found['name'] or '')}")
+                   f"{found['naive_key'] or _key(store, found['type_id'], found['name'], bundle)}")
             identifier = None
         elif identifier:
             key = (found["type_id"], f"id:{identifier}")
@@ -783,7 +998,7 @@ def _page_for(store: Store, type_id: str, canonical_name: str,
             "  AND m.unlinked_at IS NULL "
             "WHERE e.merged_into IS NULL AND e.type_id = ? "
             "AND m.document_id = ? AND e.naive_key = ? LIMIT 1",
-            (type_id, document_id, naive_key(canonical_name)))
+            (type_id, document_id, _key(store, type_id, canonical_name)))
         return row["entity_id"] if row else None
 
     if identifier:
@@ -804,7 +1019,7 @@ def _page_for(store: Store, type_id: str, canonical_name: str,
     row = store.one(
         "SELECT entity_id FROM entities WHERE merged_into IS NULL "
         "AND type_id = ? AND naive_key = ? LIMIT 1",
-        (type_id, naive_key(canonical_name)))
+        (type_id, _key(store, type_id, canonical_name)))
     return row["entity_id"] if row else None
 
 
@@ -972,7 +1187,7 @@ def list_entities(store: Store, type_id: str | None = None,
         params.append(status)
     if query:
         clauses.append("(e.canonical_name LIKE ? OR e.naive_key LIKE ?)")
-        params += [f"%{query}%", f"%{naive_key(query)}%"]
+        params += [f"%{query}%", f"%{_key(store, type_id, query)}%"]
 
     return [dict(r) for r in store.query(
         "SELECT e.entity_id, e.type_id, e.canonical_name, e.status, e.description, "

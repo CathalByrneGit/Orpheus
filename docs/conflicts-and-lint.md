@@ -133,6 +133,7 @@ reader who trusts the output:
 | `unchecked_conflict` | medium | a tension raised and never ruled on |
 | `orphan_mention` | medium | a confirmed mention no page includes |
 | `split_page` | medium | two pages that are probably one thing |
+| `unnamed_page` | medium | a page filed under a role word, or under something with no letters in it |
 | `unextracted_document` | medium | ingested, and nothing read from it |
 | `stale_evaluation` | medium | an analysis whose evidence has since been amended |
 | `unreviewed_grouping` | low | a page joining 3+ documents on machine evidence alone |

@@ -223,6 +223,58 @@ def split_pages(store: Store, limit: int = 25) -> list[dict]:
         for pair in entities_mod.duplicate_pages(store, limit=limit)]
 
 
+# A word a document uses to say what part somebody plays, rather than who they
+# are. These are not names, and a page filed under one is the extractor having
+# read a role as a party.
+_ROLE_WORDS = frozenset("""
+    franchisee franchisor licensor licensee sublicensee supplier customer buyer
+    seller purchaser vendor contractor subcontractor client consultant party
+    parties distributor reseller sponsor agent lender borrower guarantor
+    employer employee manufacturer developer owner tenant landlord
+    disclosing receiving recipient assignor assignee lessor lessee
+""".split())
+
+
+def unnamed_pages(store: Store, limit: int = 50) -> list[dict]:
+    """Pages filed under something that is not a name.
+
+    The 40-document run produced pages called "Franchisee", "Franchisor" and
+    "[.]" -- the extractor read the word a contract uses for a party as the
+    party, and the wiki faithfully gave each one a page. They then sit in the
+    graph as nodes, in the queue as work, and in a merge candidate list beside
+    each other, all of which is noise standing in for one extraction error.
+
+    Nothing is deleted. A page is evidence about how well extraction works, and
+    the same reason a rejected instance is kept applies here: a person rejects
+    it, and the rejection is the record.
+    """
+    rows = store.query(
+        "SELECT entity_id, type_id, canonical_name, status FROM entities "
+        "WHERE merged_into IS NULL AND status NOT IN ('rejected', 'confirmed') "
+        "ORDER BY canonical_name LIMIT ?", (limit * 4,))
+
+    out = []
+    for row in rows:
+        name = (row["canonical_name"] or "").strip()
+        bare = name.lower().strip(".").removeprefix("the ").strip()
+        if bare in _ROLE_WORDS:
+            why = f"{name!r} is the part somebody plays, not who they are"
+        elif not any(ch.isalpha() for ch in name):
+            why = f"{name!r} has no letters in it"
+        else:
+            continue
+        out.append(_finding(
+            "unnamed_page", "medium",
+            {"entity_id": row["entity_id"], "type_id": row["type_id"],
+             "name": name},
+            f"a {row['type_id']} page is filed under {name!r}, and {why}",
+            ("Reject the page, and check the extraction behind it -- the "
+             "mentions on it belong to whoever the document actually named.")))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def unextracted_documents(store: Store, limit: int = 50) -> list[dict]:
     """Documents ingested and never extracted from.
 
@@ -339,6 +391,7 @@ CHECKS = {
     "unchecked_conflict": lambda s, d: unchecked_conflicts(s),
     "orphan_mention": lambda s, d: orphan_mentions(s),
     "split_page": lambda s, d: split_pages(s),
+    "unnamed_page": lambda s, d: unnamed_pages(s),
     "unextracted_document": lambda s, d: unextracted_documents(s),
     "stale_evaluation": lambda s, d: stale_evaluations(s),
     "unreviewed_grouping": lambda s, d: unreviewed_groupings(s),
@@ -348,7 +401,7 @@ CHECKS = {
 # The cheap ones. `smoothed_conflict` and `split_page` both compare every
 # mention against every other, which is fine for a page and slow for a corpus.
 SHALLOW = ("uncited_page", "ungrounded_quotation", "unchecked_conflict",
-           "unextracted_document", "stale_evaluation")
+           "unextracted_document", "stale_evaluation", "unnamed_page")
 
 
 def lint(store: Store, deep: bool = True, document_id: str | None = None,

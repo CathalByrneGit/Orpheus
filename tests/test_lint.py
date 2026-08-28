@@ -315,3 +315,65 @@ def test_a_rejected_extraction_stops_being_reported_as_a_citation(corpus):
 
     assert not any(f["where"]["instance_id"] == "inst_ug"
                    for f in ungrounded_quotations(store))
+
+
+# -- pages filed under something that is not a name --------------------------
+
+def test_a_page_named_after_a_role_is_flagged(corpus):
+    # The 40-document run produced pages called "Franchisee" and "Franchisor":
+    # the extractor read the word a contract uses for a party as the party.
+    from orpheus.lint import unnamed_pages
+
+    # As the extractor makes them: proposed, not asserted by a person.
+    for name in ("Franchisee", "the Licensor", "Sub-Contractor"):
+        create_entity(corpus, "Company", name, actor_id="act_a", source="ai_local")
+    found = {f["where"]["name"] for f in unnamed_pages(corpus)}
+    assert found == {"Franchisee", "the Licensor"}, found
+
+
+def test_a_page_with_no_letters_in_its_name_is_flagged(corpus):
+    from orpheus.lint import unnamed_pages
+
+    create_entity(corpus, "Company", "[•]", actor_id="act_a", source="ai_local")
+    assert [f["where"]["name"] for f in unnamed_pages(corpus)] == ["[•]"]
+
+
+def test_a_real_name_that_merely_contains_a_role_word_is_left_alone(corpus):
+    # The check is on the whole name, not a word in it: a company really can be
+    # called this, and a false finding teaches people to skip the whole list.
+    from orpheus.lint import unnamed_pages
+
+    for name in ("Franchisee Support Services Ltd", "Owner Operator Group",
+                 "Agent Provocateur"):
+        create_entity(corpus, "Company", name, actor_id="act_a", source="ai_local")
+    assert unnamed_pages(corpus) == []
+
+
+def test_a_settled_page_is_not_raised_again(corpus):
+    # A rejected page is somebody's answer, and a confirmed one is somebody
+    # saying the name is right -- reporting either tells a reviewer to do what
+    # they have already done, and the finding could never be cleared.
+    from orpheus.entities import confirm_entity, reject_entity
+    from orpheus.lint import unnamed_pages
+
+    rejected = create_entity(corpus, "Company", "Franchisee", actor_id="act_a",
+                             source="ai_local")
+    confirmed = create_entity(corpus, "Company", "Franchisor", actor_id="act_a",
+                              source="ai_local")
+    assert len(unnamed_pages(corpus)) == 2
+
+    reject_entity(corpus, rejected, actor_id="act_a", note="not a company")
+    confirm_entity(corpus, confirmed, actor_id="act_a")
+    assert unnamed_pages(corpus) == []
+
+
+def test_the_check_never_deletes_the_page_it_flags(corpus):
+    # A page is evidence about how well extraction works, for the same reason a
+    # rejected instance is kept.
+    from orpheus.lint import unnamed_pages
+
+    entity_id = create_entity(corpus, "Company", "Franchisee", actor_id="act_a",
+                              source="ai_local")
+    unnamed_pages(corpus)
+    assert corpus.scalar("SELECT COUNT(*) FROM entities WHERE entity_id = ?",
+                         (entity_id,)) == 1

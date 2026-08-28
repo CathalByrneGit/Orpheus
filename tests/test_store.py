@@ -173,6 +173,62 @@ def test_a_legal_form_inside_a_name_is_left_alone():
     assert naive_key("") == ""
 
 
+def test_a_title_is_not_part_of_a_persons_name():
+    """Three pages for one man, found by running 40 real filings.
+
+    "Dr. Mitchell Felder", "Mitchell Felder" and "Mitchell S. Felder" were three
+    keys, three pages, and his three relations split across them.
+    """
+    from orpheus.utils import naive_key
+
+    assert naive_key("Dr. Mitchell Felder", "personal") == \
+           naive_key("Mitchell Felder", "personal")
+    # Stacked, like stacked legal forms.
+    assert naive_key("Prof. Dr. Meier", "personal") == naive_key("Meier", "personal")
+    # A middle initial is a real difference, and is left to a candidate rather
+    # than merged here: John A. Smith is not John B. Smith.
+    assert naive_key("Mitchell S. Felder", "personal") != \
+           naive_key("Mitchell Felder", "personal")
+
+
+def test_a_title_stripped_from_a_company_would_be_a_false_merge():
+    # Which is why the style is per type and not a general rule. This function's
+    # output is matched on for equality, so a bad strip merges silently.
+    from orpheus.utils import naive_key
+
+    assert naive_key("Dr Pepper Snapple Group") == "dr pepper snapple group"
+    assert naive_key("Dr Pepper Snapple Group", "organisation") == \
+           "dr pepper snapple group"
+    # And a name that is only a title keeps it, for the same reason a name that
+    # is only a legal form does.
+    assert naive_key("Dr.", "personal") == "dr"
+
+
+def test_each_style_leaves_the_other_ones_work_alone():
+    # A personal name does not lose a trailing word that happens to be a legal
+    # form, and an organisation does not lose a leading honorific.
+    from orpheus.utils import naive_key
+
+    assert naive_key("Mary Coe", "personal") == "mary coe"
+    assert naive_key("Ardmore Digital Ltd", "organisation") == "ardmore digital"
+    # An unsaid style is the organisation one, so an older bundle keeps its keys.
+    assert naive_key("Ardmore Digital Ltd") == naive_key("Ardmore Digital Ltd",
+                                                          "organisation")
+
+
+def test_the_bundle_says_which_style_a_type_uses():
+    import orpheus.bundle as bundle_mod
+
+    bundle = bundle_mod.load()
+    assert bundle_mod.key_for(bundle, "Person", "Dr. Mitchell Felder") == \
+           "mitchell felder"
+    assert bundle_mod.key_for(bundle, "Company", "Dr Pepper Snapple Group") == \
+           "dr pepper snapple group"
+    # A type the bundle does not describe falls back rather than raising: the
+    # caller is asking for a key, not for a schema check.
+    assert bundle_mod.key_for(bundle, "NoSuchType", "Ardmore Ltd") == "ardmore"
+
+
 def test_the_known_false_split_is_still_there():
     # Documented rather than hidden, so the limitation cannot quietly vanish.
     from orpheus.utils import naive_key
@@ -208,6 +264,45 @@ def test_stored_keys_are_recomputed_when_an_old_store_is_opened(tmp_path):
         assert len(set(keys)) == 2, keys
         # The recompute is recorded, like any other change to the store.
         assert reopened.one("SELECT note FROM edit_history WHERE action = 'migrate'")
+    finally:
+        reopened.close()
+
+
+def test_an_old_stores_personal_keys_are_recomputed_in_the_new_style(tmp_path):
+    # The page and the instance both hold a key, and they have to agree: a page
+    # written in one style and looked up in the other silently never matches,
+    # which reads as "no page exists" rather than as a bug.
+    import orpheus.bundle as bundle_mod
+
+    path = tmp_path / "old.sqlite"
+    store = Store(str(path), mode="write")
+    bundle_mod.register(store, bundle_mod.load())
+    bundle_mod.apply_schema(store, bundle_mod.load())
+    store.execute("INSERT INTO documents (document_id, filename, file_hash, byte_size,"
+                  " n_pages, date_added, visibility, review_status)"
+                  " VALUES ('doc_1','a.txt','h',10,1,datetime('now'),'private','unreviewed')")
+    store.execute(
+        "INSERT INTO instances_Person (instance_id, document_id, name, naive_key,"
+        " source, confidence, status, created_at)"
+        " VALUES ('i1','doc_1','Dr. Mitchell Felder','dr mitchell felder',"
+        "'ai_local',1.0,'unconfirmed',datetime('now'))")
+    store.execute(
+        "INSERT INTO entities (entity_id, type_id, canonical_name, naive_key,"
+        " source, confidence, status, created_at)"
+        " VALUES ('ent_1','Person','Dr. Mitchell Felder','dr mitchell felder',"
+        "'ai_local',0.7,'unconfirmed',datetime('now'))")
+    store.execute("DELETE FROM schema_migrations WHERE version = 10")
+    store.conn.commit()
+    store.close()
+
+    reopened = Store(str(path), mode="write", force_lock=True)
+    try:
+        assert reopened.scalar(
+            "SELECT naive_key FROM instances_Person WHERE instance_id = 'i1'") == \
+            "mitchell felder"
+        assert reopened.scalar(
+            "SELECT naive_key FROM entities WHERE entity_id = 'ent_1'") == \
+            "mitchell felder"
     finally:
         reopened.close()
 
