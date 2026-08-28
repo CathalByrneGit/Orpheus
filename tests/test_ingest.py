@@ -121,7 +121,19 @@ def test_ingesting_a_real_pdf(seeded, tmp_path):
     assert document["byte_size"] == PDF.stat().st_size
 
     pages = document_pages(seeded, result["document_id"])
-    assert [p["char_count"] for p in pages] == [684, 544]
+    # Not an exact count. Three PDF text backends are interchangeable here
+    # (docling, then pdfminer, then the pdftotext binary), and they disagree
+    # by a character or two of trailing whitespace per page. Pinning the
+    # number pinned whichever backend happened to be installed: this assertion
+    # read as green on a machine with only /usr/bin/pdftotext and failed the
+    # moment the documented `[pdf]` extra put pdfminer ahead of it. What the
+    # test is actually for is that the pages split in the right place and both
+    # carry their text.
+    counts = [p["char_count"] for p in pages]
+    assert len(counts) == 2
+    assert counts[0] == pytest.approx(684, abs=4)
+    assert counts[1] == pytest.approx(544, abs=4)
+    assert all(page["text"].strip() for page in pages)
 
 
 def test_the_original_is_kept_content_addressed(seeded, tmp_path):
