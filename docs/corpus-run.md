@@ -1,12 +1,74 @@
 # The corpus run
 
 The one thing Phase 1 has been waiting on. Everything in this store is built to
-answer a single question — **is extraction good enough to build on?** — and that
-question has never been asked of a real model, so it is still open.
+answer a single question — **is extraction good enough to build on?**
 
-This is the runbook. It exists because the run has to happen in a session that
-was *created* with an API key in its environment, which means whoever does it
-starts without the conversation that built this.
+**The run has now happened**, against Anthropic's API, on six real contracts
+filed with the SEC. What it found is in [What the first run found](#what-the-first-run-found)
+below. The runbook that follows is still the way to do it again.
+
+---
+
+## What the first run found
+
+Six EX-10 exhibits, 92,551 characters, taken from the [Contract Understanding
+Atticus Dataset](https://github.com/TheAtticusProject/cuad) (CC BY 4.0), which
+publishes real contracts pulled from EDGAR filings. Two clusters, chosen so the
+corpus-level features had something to work on rather than one document each:
+
+- **NETGEAR** — a distributor agreement and its two amendments, one naming
+  Ingram Micro. The same parties restated across three documents.
+- **ScanSource** — three distributor agreements with different counterparties.
+
+The headline number, from `orpheus report`:
+
+```
+ai_cloud: 154/154 quotations located in the document (0% not found)
+```
+
+**No quotation was invented.** Every excerpt the model claimed to have taken
+from a contract was found in that contract, at a located offset. This is the
+one result the whole grounding design exists to produce, and it is the first
+time it has been measured against a real model on real text rather than a
+stand-in.
+
+Calibration is still open, and honestly so: `insufficient_evidence`, 0 of 154
+reviewed. The rubric cannot be checked until a person reviews instances. That
+is the next number, and it needs a human, not a bigger corpus.
+
+What worked, on real text:
+
+- **Corroboration told agreement from copying.** NETGEAR as supplier and
+  Ingram Micro as buyer were each asserted in three documents in three
+  *different* wordings, and counted. Their postal addresses appear in just as
+  many documents in one identical wording, and were refused — that is boilerplate
+  travelling down an amendment chain, not three sources agreeing.
+- **Conflicts surfaced that a reader would want.** Cisco Systems is `supplier`
+  in one document and `payer` in another.
+- **Relations reached the graph at all**, which they did not before the
+  `edges` fix: 172 edges across six documents.
+
+Four defects it found, all now fixed, none of which the test suite could have
+caught on its own:
+
+1. The `anthropic` engine asked Anthropic for `gemini-2.5-flash` — the cloud
+   tier's default model — and all six documents failed with a 404 that read
+   like an outage.
+2. Bridge questions rendered each hop in the order the walk reached it, so a
+   chain read `NETGEAR employed_by Lloyd Cainey`. The store held the opposite,
+   and correctly; the *display* asserted something false, in the one feature
+   whose whole rule is not to.
+3. `coverage` reported 11% and told the reader to work the wiki queue. Every
+   relation between two named things was already drawn; the other 153 joined a
+   contract to a clause or a date, which never gets a page. The advice pointed
+   at a queue that could not move the number.
+4. Report columns cut names to width with no ellipsis, printing `Zebra
+   Technologies International, LLC` as `Zebra Technologies Inter`.
+
+A fifth, found by the install rather than the run: `tests/test_ingest.py`
+pinned PDF page lengths to 684 and 544 characters, which are `pdftotext`'s
+numbers. Installing the documented `[pdf]` extra puts `pdfminer` ahead of it
+and moves both by one. The test was green *because* the extra was missing.
 
 ---
 
@@ -15,11 +77,12 @@ starts without the conversation that built this.
 - Every surface works end to end, driven through a browser against a live
   Datasette: ingest, extract, review, the wiki, tensions, the network,
   corroboration, the reading companion, questions, the markdown export.
-- Two real defects have already been found by running real documents rather
-  than tests — `edges` was unreachable because no engine emitted relationships,
-  and `propose` fragmented every page on a second run. Both are fixed. Expect
-  the corpus run to find more of that class; that is what it is for.
-- `orpheus report` is written and has nothing to compute over.
+- Six real defects have now been found by running real documents rather than
+  tests — `edges` unreachable because no engine emitted relationships, `propose`
+  fragmenting every page on a second run, and the four above. All are fixed.
+  Expect any further corpus to find more of that class; that is what it is for.
+- `orpheus report` has something to compute over, and 154 located quotations to
+  compute it from.
 
 ## What the run has to produce
 
@@ -56,6 +119,22 @@ that the hand-picked value held, which is also a result.
 variables are read when the container starts, so it has to be set at creation.
 Orpheus already reads that variable and resolves the provider as `anthropic` —
 no code change.
+
+**Documents.** `sec.gov` is blocked by the agent proxy, so EDGAR cannot be
+read directly, but CUAD carries real filing exhibits and clones from GitHub:
+
+```bash
+GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 \
+  https://github.com/TheAtticusProject/cuad /tmp/cuad
+unzip -o /tmp/cuad/data.zip CUADv1.json -d /tmp/cuad
+```
+
+`CUADv1.json` holds 510 contracts as `data[].paragraphs[0].context`, titled
+`FILER_DATE-EXHIBIT-NAME`. Pick documents that *share parties* — a corpus of six
+unrelated contracts leaves corroboration, the network and the tension checks
+with nothing to find. The filer prefix is the cheap way to spot clusters, and
+an amendment chain is the best single thing to include: the same relationship
+restated, which is exactly what corroboration is built to count.
 
 **A network policy that allows `api.anthropic.com`.** Worth checking: at the
 time of writing, `api.anthropic.com` and `generativelanguage.googleapis.com`
