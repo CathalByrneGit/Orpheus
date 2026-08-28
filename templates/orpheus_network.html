@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Network{% endblock %}
 {% block content %}
+<p><a href="{{ urls.path('/-/orpheus/map') }}">Draw this as a map &rarr;</a></p>
 <p><a href="{{ urls.path('/-/orpheus') }}">&larr; Orpheus</a>
    &middot; <a href="{{ urls.path('/-/orpheus/wiki') }}">Wiki</a>
    &middot; <a href="{{ urls.path('/-/orpheus/lint') }}">Lint</a></p>

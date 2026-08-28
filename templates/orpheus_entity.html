@@ -7,6 +7,7 @@
 {% if note %}<p class="message-info">{{ note }}</p>{% endif %}
 
 <h1>{{ entity.canonical_name }}</h1>
+<p><a href="{{ urls.path('/-/orpheus/map') }}?entity={{ entity.entity_id }}&depth=2">See this page in the map &rarr;</a></p>
 <p style="color:#666">
   {{ entity.type_id }} &middot; {{ entity.status }} &middot;
   {{ page.counts.documents }} document(s) &middot;

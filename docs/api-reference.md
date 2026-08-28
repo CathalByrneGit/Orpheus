@@ -325,11 +325,20 @@ See [Reading with the machine](reading-companion.md).
 |---|---|---|---|
 | `GET` | `/graph/topology` | **administrator** | `?seed=`, `?reviewed_only=1` |
 | `GET` | `/graph/edges` | actor | `?link_type_id=`, `?reviewed_only=1` |
+| `GET` | `/graph/map` | **administrator**, or actor with `?entity_id=` | `?depth=2` (1–4), `?reviewed_only=1` |
 | `GET` | `/graph/entities/<entity_id>` | actor | `?depth=1` — one page and its neighbours |
 | `GET` | `/graph/paths` | actor | `?from=`, `?to=`, `?max_paths=5`, `?max_length=6` |
 | `GET` | `/graph/centrality` | **administrator** | `?sample=` to approximate betweenness |
 | `GET` | `/corroboration` | **administrator** | `?min_documents=2` |
 | `GET` | `/entities/<entity_id>/corroboration` | actor | Scoped to one page |
+
+`/graph/map` is the same projection in the shape a drawing needs: `nodes` and
+`edges` together, with `coverage` and a caveat alongside. It reads
+`graph.build`, so a picture cannot show a relation the text views would not.
+Uncentred it spans every document in the store and is administrator-only for
+the reason `/graph/topology` is; passing `entity_id` scopes it to one page and
+its neighbours out to `depth`, which any actor may ask for. Edges are returned
+only between pages that are also in `nodes`, so nothing is drawn to nowhere.
 
 `/graph/edges` returns one row per `(from_page, link_type, to_page)`, with every
 contributing edge kept whole underneath it — its document, evidence, confidence

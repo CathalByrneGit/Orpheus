@@ -116,6 +116,22 @@ def _actor_id(actor: dict | None) -> str | None:
     return actor.get("actor_id") if actor else None
 
 
+def _int(body: dict, key: str, default: int) -> int:
+    """A number out of a query string, or a message saying it was not one.
+
+    Every count and depth on this surface arrives as text, and `int("")` --
+    which is what an empty form field sends -- is a traceback, not an answer.
+    A caller who mistypes a limit should be told so.
+    """
+    raw = body.get(key, default)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ApiError(400, f"{key} must be a whole number, not {raw!r}.")
+
+
 # ---------------------------------------------------------------------------
 # Open routes
 # ---------------------------------------------------------------------------
@@ -169,7 +185,7 @@ def get_bundle(store, **_):
 @route("GET", "/documents")
 def list_documents(store, actor, body, **_):
     return {"documents": auth.visible_documents(store, actor,
-                                                limit=int(body.get("limit", 100)))}
+                                                limit=_int(body, "limit", 100))}
 
 
 @route("POST", "/documents")
@@ -356,7 +372,7 @@ def post_corpus_analysis(store, document_id, actor, body, **_):
 def get_entities(store, body, **_):
     return {"entities": entities_mod.list_entities(
         store, type_id=body.get("type_id"), status=body.get("status"),
-        query=body.get("q"), limit=int(body.get("limit", 100)))}
+        query=body.get("q"), limit=_int(body, "limit", 100))}
 
 
 @route("POST", "/entities")
@@ -375,7 +391,7 @@ def get_duplicate_pages(store, body, **_):
     mention has a home, so the split is invisible exactly when the machine has
     finished."""
     return {"pairs": entities_mod.duplicate_pages(
-        store, type_id=body.get("type_id"), limit=int(body.get("limit", 50)))}
+        store, type_id=body.get("type_id"), limit=_int(body, "limit", 50))}
 
 
 @route("GET", r"/entities/(?P<entity_id>[^/]+)")
@@ -461,14 +477,14 @@ def post_entities_propose(store, actor, body, **_):
 def get_unlinked_mentions(store, body, **_):
     return {"mentions": entities_mod.unlinked_mentions(
         store, type_id=body.get("type_id"), document_id=body.get("document_id"),
-        limit=int(body.get("limit", 200)))}
+        limit=_int(body, "limit", 200))}
 
 
 @route("GET", r"/mentions/(?P<instance_id>[^/]+)/candidates")
 def get_mention_candidates(store, instance_id, body, **_):
     return {"instance_id": instance_id,
             "candidates": entities_mod.candidates_for_mention(
-                store, instance_id, limit=int(body.get("limit", 10)))}
+                store, instance_id, limit=_int(body, "limit", 10))}
 
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/entities", permission="view")
@@ -491,7 +507,7 @@ def get_tensions(store, body, **_):
         store, scope=body.get("scope"), subject_id=body.get("subject_id"),
         status=body.get("status"), kind=body.get("kind"),
         open_only=body.get("standing") in ("1", "true", "True", True),
-        limit=int(body.get("limit", 200)))}
+        limit=_int(body, "limit", 200))}
 
 
 @route("POST", "/tensions")
@@ -670,8 +686,55 @@ def get_topology(store, actor, body, **_):
             "so it is an administrator view. GET /graph/entities/<id> is scoped "
             "to one page and its neighbours.")
     return graph_mod.topology(
-        store, seed=int(body.get("seed", graph_mod.DEFAULT_SEED)),
+        store, seed=_int(body, "seed", graph_mod.DEFAULT_SEED),
         reviewed_only=body.get("reviewed_only") in ("1", "true", "True", True))
+
+
+@route("GET", "/graph/map")
+def get_graph_map(store, actor, body, **_):
+    """Nodes and edges together, for drawing.
+
+    The other graph routes answer questions in prose or in rows. This one is
+    the shape a picture needs, and it is the same data: no separate projection,
+    so a map cannot show a relation the text views would not.
+
+    Centred on a page it is the scoped view and needs no special permission.
+    Uncentred it spans every document in the store, including ones this actor
+    cannot read, and is administrator-only for exactly the reason
+    `/graph/topology` is.
+    """
+    entity_id = body.get("entity_id") or None
+    reviewed_only = body.get("reviewed_only") in ("1", "true", "True", True)
+    if not entity_id and not actor.get("is_admin"):
+        raise PermissionDenied(
+            "A map of the whole corpus spans documents you may not be able to "
+            "read, so it is an administrator view. Pass entity_id to draw one "
+            "page and its neighbours instead.")
+
+    built = graph_mod.build(store, reviewed_only=reviewed_only)
+    nodes, edges = built["nodes"], built["edges"]
+
+    if entity_id:
+        depth = max(1, min(_int(body, "depth", 2), 4))
+        keep, frontier = {entity_id}, {entity_id}
+        for _hop in range(depth):
+            nxt = set()
+            for node in frontier:
+                nxt |= set(built["adjacency"].get(node, ()))
+            frontier = nxt - keep
+            keep |= nxt
+        nodes = {k: v for k, v in nodes.items() if k in keep}
+        edges = [e for e in edges
+                 if e["from_entity_id"] in keep and e["to_entity_id"] in keep]
+
+    return {
+        "centre": entity_id,
+        "nodes": list(nodes.values()),
+        "edges": edges,
+        "coverage": graph_mod.coverage(store),
+        "caveat": ("The graph is a projection of the wiki, so its completeness "
+                   "is the wiki's. Read `coverage` before reading the shape."),
+    }
 
 
 @route("GET", "/graph/edges")
@@ -687,7 +750,7 @@ def get_graph_edges(store, body, **_):
 def get_neighbourhood(store, entity_id, body, **_):
     """One page and what surrounds it. The view an agent or reviewer wants."""
     return graph_mod.neighbourhood(store, entity_id,
-                                   depth=int(body.get("depth", 1)))
+                                   depth=_int(body, "depth", 1))
 
 
 @route("GET", "/graph/paths")
@@ -703,8 +766,8 @@ def get_paths(store, body, **_):
         raise ApiError(400, "Give `from` and `to` entity ids.")
     return graph_mod.paths_between(
         store, body["from"], body["to"],
-        max_paths=int(body.get("max_paths", 5)),
-        max_length=int(body.get("max_length", 6)))
+        max_paths=_int(body, "max_paths", 5),
+        max_length=_int(body, "max_length", 6))
 
 
 @route("GET", "/graph/centrality")
@@ -777,7 +840,7 @@ def get_corroboration(store, actor, body, **_):
             "read, so it is an administrator view. An entity page carries its "
             "own.")
     return corroboration_mod.summary(
-        store, min_documents=int(body.get("min_documents", 2)))
+        store, min_documents=_int(body, "min_documents", 2))
 
 
 @route("GET", r"/entities/(?P<entity_id>ent_[^/]+)/corroboration")
@@ -804,7 +867,7 @@ def get_quality(store, actor, body, **_):
             "be able to read, so it is an administrator view. "
             "GET /documents/<id>/quality is scoped to one document.")
     return quality.quality_report(store,
-                                  min_reviewed=int(body.get("min_reviewed", 5)))
+                                  min_reviewed=_int(body, "min_reviewed", 5))
 
 
 @route("POST", "/export")
@@ -862,7 +925,7 @@ def get_grounding(store, actor, body, **_):
 @route("GET", r"/documents/(?P<document_id>[^/]+)/quality", permission="view")
 def get_document_quality(store, document_id, body, **_):
     return quality.quality_report(store, document_id,
-                                  min_reviewed=int(body.get("min_reviewed", 1)))
+                                  min_reviewed=_int(body, "min_reviewed", 1))
 
 
 @route("GET", "/concept-parameters")

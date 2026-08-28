@@ -482,3 +482,104 @@ def test_the_whole_topology_still_runs(corpus, without_networkx):
     assert report["counts"]["components"] == 2
     assert report["centrality_method"] == "degree_only"
     assert report["most_between"] == []
+
+
+# -- the map -----------------------------------------------------------------
+#
+# The drawing route. It is tested here rather than with the rest of the HTTP
+# surface because what has to hold is a claim about the projection: a picture
+# that showed a relation the text views do not, or hid one they do, would be
+# the most convincing wrong answer the store could give.
+
+def _map(store, **body):
+    from orpheus.api import handle
+    who = body.pop("who", {"actor_id": "act_a", "is_admin": 1})
+    return handle(store, "GET", "/graph/map", body, actor=who)
+
+
+def test_the_map_is_the_same_graph_the_text_views_read(corpus):
+    graph = build(corpus)
+    status, drawn = _map(corpus)
+    assert status == 200
+    assert {n["entity_id"] for n in drawn["nodes"]} == set(graph["nodes"])
+    assert len(drawn["edges"]) == len(graph["edges"])
+
+
+def test_a_page_with_no_relation_is_still_on_the_map(corpus):
+    # Company G is joined to nothing. Leaving it out would draw a corpus that
+    # is better connected than the one in the store.
+    _, drawn = _map(corpus)
+    assert "ent_G" in {n["entity_id"] for n in drawn["nodes"]}
+
+
+def test_the_map_carries_the_coverage_it_has_to_be_read_against(corpus):
+    _, drawn = _map(corpus)
+    assert drawn["coverage"]["n_edges_projectable"] == 6
+    assert "projection" in drawn["caveat"]
+
+
+def test_the_map_draws_relations_rather_than_assertions(corpus):
+    # Six rows in `edges`, four relations: A -> B is asserted by three
+    # documents. Drawing a line per row would show a corpus with more
+    # relations in it than anyone has claimed.
+    assert len(_map(corpus)[1]["edges"]) == 4
+
+
+def test_an_ego_view_reaches_exactly_as_far_as_it_is_asked_to(corpus):
+    # A -- B -- C -- D, so each hop is known in advance.
+    def around(depth):
+        return {n["entity_id"] for n in _map(corpus, entity_id="ent_A",
+                                             depth=depth)[1]["nodes"]}
+
+    assert around(1) == {"ent_A", "ent_B"}
+    assert around(2) == {"ent_A", "ent_B", "ent_C"}
+    assert around(3) == {"ent_A", "ent_B", "ent_C", "ent_D"}
+    # E and F are a separate component and are never reached, however deep.
+    assert around(4) == {"ent_A", "ent_B", "ent_C", "ent_D"}
+
+
+def test_an_ego_view_returns_no_line_to_a_page_it_did_not_return(corpus):
+    # An edge whose other end is outside the slice is a line drawn to nowhere.
+    _, drawn = _map(corpus, entity_id="ent_A", depth=1)
+    drawn_nodes = {n["entity_id"] for n in drawn["nodes"]}
+    for edge in drawn["edges"]:
+        assert edge["from_entity_id"] in drawn_nodes
+        assert edge["to_entity_id"] in drawn_nodes
+
+
+def test_a_depth_that_is_not_a_number_is_a_message_not_a_traceback(corpus):
+    # An empty form field sends "", and `int("")` is a 500. Every count and
+    # depth on the surface arrives as text, so this is checked once here for
+    # the helper they all share.
+    status, refused = _map(corpus, entity_id="ent_A", depth="deep")
+    assert status == 400
+    assert "whole number" in refused["error"]["message"]
+    # Empty falls back to the default rather than refusing: a field left blank
+    # is not a mistyped number.
+    assert _map(corpus, entity_id="ent_A", depth="")[0] == 200
+
+
+def test_the_depth_of_an_ego_view_is_bounded(corpus):
+    # Unbounded, "depth" is a request to walk the whole corpus from a route
+    # that is deliberately not the whole-corpus one.
+    deep = _map(corpus, entity_id="ent_A", depth=99)[1]
+    assert {n["entity_id"] for n in deep["nodes"]} == {"ent_A", "ent_B",
+                                                       "ent_C", "ent_D"}
+
+
+def test_the_whole_corpus_map_is_administrator_only(corpus):
+    # It spans every document in the store, including ones this actor cannot
+    # read -- the same reason /graph/topology is restricted.
+    ordinary = {"actor_id": "act_b", "is_admin": 0}
+    status, refused = _map(corpus, who=ordinary)
+    assert status == 403
+    assert "entity_id" in refused["error"]["message"]
+
+    # Centred on one page it is the scoped view, and needs no such permission.
+    assert _map(corpus, who=ordinary, entity_id="ent_A")[0] == 200
+
+
+def test_reviewed_only_draws_only_what_has_been_checked(corpus):
+    # Every edge in the fixture is unconfirmed, so the reviewed map has none.
+    assert _map(corpus, reviewed_only="1")[1]["edges"] == []
+    assert _map(corpus)[1]["edges"] != []

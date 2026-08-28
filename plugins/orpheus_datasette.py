@@ -248,6 +248,7 @@ def register_routes():
         (r"^/-/orpheus/read/(?P<document_id>[^/]+)$", read_page),
         (r"^/-/orpheus/lint$", lint_page),
         (r"^/-/orpheus/network$", network_page),
+        (r"^/-/orpheus/map$", map_page),
         (r"^/-/orpheus/questions$", questions_page),
         (r"^/-/orpheus/questions/act$", questions_act),
         (r"^/-/orpheus/wiki$", wiki_index),
@@ -549,6 +550,44 @@ async def questions_act(datasette, request):
                          error=result["error"]["message"])
     return _redirect(datasette, "/-/orpheus/questions",
                      note=f"Recorded as {result['status']}.")
+
+
+async def map_page(datasette, request):
+    """The same relations the network page lists, drawn.
+
+    Not a second source of truth: it reads `/graph/map`, which is `graph.build`
+    with no separate projection, so the picture cannot show a relation the text
+    views would not. The coverage banner leads for the same reason it does
+    there, and more so -- a diagram is more persuasive than a table and says
+    exactly as much.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    entity_id = request.args.get("entity") or ""
+    params = {"depth": request.args.get("depth") or "2"}
+    if entity_id:
+        params["entity_id"] = entity_id
+    if request.args.get("reviewed_only"):
+        params["reviewed_only"] = "1"
+
+    status, payload = await _call(datasette, request, "GET", "/graph/map", params)
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus/network",
+                         error=payload["error"]["message"])
+
+    centre_name = next((n["canonical_name"] for n in payload["nodes"]
+                        if n["entity_id"] == entity_id), None)
+    return await _render(datasette, request, "orpheus_map.html", {
+        # The structure, not a pre-serialised string: `tojson` in the template
+        # escapes it for embedding in a <script>, which a plain dump does not.
+        "payload": {"nodes": payload["nodes"], "edges": payload["edges"]},
+        "coverage": payload["coverage"],
+        "centre": entity_id or None,
+        "centre_name": centre_name,
+        "depth": int(params["depth"]),
+        "reviewed_only": bool(request.args.get("reviewed_only")),
+        "error": request.args.get("error"),
+    })
 
 
 async def network_page(datasette, request):

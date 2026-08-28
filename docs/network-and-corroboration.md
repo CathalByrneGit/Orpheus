@@ -175,6 +175,29 @@ shape before anybody thinks to ask it.
 The lint gained one check the graph makes possible: **`fragile_join`**, an
 articulation point whose links nobody has confirmed.
 
+### Drawing it
+
+`/-/orpheus/map` draws the same projection: force-directed, pan and zoom, drag
+a node, click one for what the store holds about it. The legend doubles as a
+filter, size is the number of relations, and a dashed line is a relation nobody
+has confirmed.
+
+Two things are deliberate. **The coverage banner leads**, as it does on the
+network page and more so — a diagram is more persuasive than a table and says
+exactly as much, and a map read without knowing that 30% of extracted relations
+reached the graph is a confident picture of a fraction of the evidence. And it
+is **not a second source of truth**: the page reads `/graph/map`, which is
+`graph.build` with no separate projection, so the picture cannot show a relation
+the text views would not, or hide one they do.
+
+The whole-corpus map spans every document in the store, so it is an
+administrator view. An entity page links to its own neighbourhood instead —
+scoped to that page out to an adjustable depth, which is the view an ordinary
+actor may ask for.
+
+There is no build step. The layout is a few dozen lines of relaxation in the
+template, so the page works offline and nothing has to be compiled to change it.
+
 ### A defect the run found: proposing twice split every page
 
 Running a real corpus, ingesting one more document and proposing again produced
