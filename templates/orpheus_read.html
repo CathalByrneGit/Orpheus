@@ -157,16 +157,37 @@
   // because the context that was seeded into the first one no longer holds.
   const key = "orpheus_chat_{{ document.document_id }}_{{ page.page_no }}";
 
+  // tojson, not bare interpolation: a filename or a passage carrying a quote
+  // would otherwise end the JS string it is pasted into.
+  const documentId = {{ document.document_id | tojson }};
+  const filename = {{ document.filename | tojson }};
+  const pageNo = {{ page.page_no | tojson }};
+  const nPages = {{ document.n_pages | tojson }};
+  const passage = {{ chat_passage.text | tojson }};
+  const truncated = {{ chat_passage.truncated | tojson }};
+
   const context =
     "I am reading a document in this Orpheus store and have a question about " +
     "the page in front of me.\n\n" +
-    "document_id: {{ document.document_id }}\n" +
-    "filename: {{ document.filename }}\n" +
-    "page_no: {{ page.page_no }} of {{ document.n_pages }}\n\n" +
-    "Read it with orpheus_passage before answering, and use the other " +
-    "orpheus_* tools rather than sql_query: they carry the review state, and " +
-    "an answer written without it reads as settled fact when it is not. Say " +
-    "for anything you report whether a person has confirmed it.\n\n" +
+    "document_id: " + documentId + "\n" +
+    "filename: " + filename + "\n" +
+    "page_no: " + pageNo + " of " + nPages + "\n\n" +
+    "The page reads:\n---\n" + passage + "\n---\n" +
+    (truncated
+      ? "That is the start of the page and not all of it. Call " +
+        "orpheus_passage for the rest before quoting from it.\n\n"
+      : "\n") +
+    // The distinction the whole store turns on, and the one a pasted passage
+    // is most likely to blur: this text is the document, not the store. Having
+    // read that a person signed here says nothing about whether anybody has
+    // checked that the store holds them, which is the question being asked.
+    "That text is the document itself, so a quote taken from it is verbatim — " +
+    "which is what orpheus_record needs. It is not the store. What the store " +
+    "holds about anything named here, and whether a person has confirmed it, " +
+    "comes from the orpheus_* tools; use them rather than sql_query, which " +
+    "returns values without the review state that qualifies them. Say for " +
+    "anything you report whether a person has confirmed it, and do not report " +
+    "something as held by the store when all you have is this passage.\n\n" +
     "My question: ";
 
   const existing = sessionStorage.getItem(key);

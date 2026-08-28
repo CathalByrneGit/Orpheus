@@ -332,9 +332,24 @@ async def read_page(datasette, request):
         # `agent` extra is optional and this page has to read the same without
         # it, so the template asks rather than assuming.
         "agent_available": _agent_available(datasette),
+        "chat_passage": _chat_passage(page.get("text") or ""),
         "error": request.args.get("error"),
         "note": request.args.get("note"),
     })
+
+
+# Pagination targets roughly a printed page, so a passage is normally a few
+# thousand characters. A run of text with no break in it at all is left whole
+# rather than cut mid-token, though, and that one can be much longer -- so
+# there is a ceiling, and when it bites the chat is told to read the rest
+# rather than left believing it has the page.
+CHAT_PASSAGE_LIMIT = 8000
+
+
+def _chat_passage(text: str) -> dict:
+    if len(text) <= CHAT_PASSAGE_LIMIT:
+        return {"text": text, "truncated": False}
+    return {"text": text[:CHAT_PASSAGE_LIMIT], "truncated": True}
 
 
 def _agent_available(datasette) -> bool:
