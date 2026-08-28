@@ -116,6 +116,109 @@
   </div>
 </div>
 
+{% if agent_available %}
+{# ------------------------------------------------------------------ #}
+{# Ask about this page. The chat is datasette-agent's own conversation #}
+{# view in a frame, so streaming, tool rendering and the approval      #}
+{# prompt it raises before a write are its code and not a second       #}
+{# implementation of them here. What this page adds is the one thing   #}
+{# that view cannot know: which document and page you are looking at.  #}
+{# ------------------------------------------------------------------ #}
+<div style="margin-top:2em;border-top:1px solid #ddd;padding-top:1em">
+  <h2>Ask about this page</h2>
+  <p style="color:#666">
+    The chat is told which document and page you are on, and answers through
+    the Orpheus tools, so what comes back carries its source and whether
+    anybody has checked it. It can record something extraction missed, and
+    will ask you before it does.
+  </p>
+
+  <form id="orpheus-ask" style="display:flex;gap:.5em;flex-wrap:wrap">
+    <input id="orpheus-ask-text" type="text" style="flex:1 1 26em;min-width:16em"
+           placeholder="Is this person already in the store? Who signed this?">
+    <button type="submit">Ask</button>
+    <button type="button" id="orpheus-ask-reset" hidden>New chat</button>
+  </form>
+  <p id="orpheus-ask-error" class="message-error" hidden></p>
+
+  <iframe id="orpheus-chat" title="Chat about this page" hidden
+          style="width:100%;height:34em;border:1px solid #ddd;margin-top:1em"></iframe>
+</div>
+
+<script>
+(function () {
+  const form = document.getElementById("orpheus-ask");
+  const input = document.getElementById("orpheus-ask-text");
+  const frame = document.getElementById("orpheus-chat");
+  const reset = document.getElementById("orpheus-ask-reset");
+  const error = document.getElementById("orpheus-ask-error");
+
+  // Keyed by page: moving to the next passage is a different conversation,
+  // because the context that was seeded into the first one no longer holds.
+  const key = "orpheus_chat_{{ document.document_id }}_{{ page.page_no }}";
+
+  const context =
+    "I am reading a document in this Orpheus store and have a question about " +
+    "the page in front of me.\n\n" +
+    "document_id: {{ document.document_id }}\n" +
+    "filename: {{ document.filename }}\n" +
+    "page_no: {{ page.page_no }} of {{ document.n_pages }}\n\n" +
+    "Read it with orpheus_passage before answering, and use the other " +
+    "orpheus_* tools rather than sql_query: they carry the review state, and " +
+    "an answer written without it reads as settled fact when it is not. Say " +
+    "for anything you report whether a person has confirmed it.\n\n" +
+    "My question: ";
+
+  const existing = sessionStorage.getItem(key);
+  if (existing) {
+    frame.src = "/-/agent/" + existing;
+    frame.hidden = false;
+    reset.hidden = false;
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const question = input.value.trim();
+    if (!question) return;
+    const button = form.querySelector("button[type=submit]");
+    button.disabled = true;
+    error.hidden = true;
+
+    try {
+      const message = context + question;
+      const response = await fetch("/-/agent/api/conversations", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({message: message}),
+      });
+      if (!response.ok) throw new Error("could not start a chat (" + response.status + ")");
+      const data = await response.json();
+      // How datasette-agent's own index hands the first message over: the
+      // conversation view picks this up on load and sends it.
+      sessionStorage.setItem("agent_pending_message", message);
+      sessionStorage.setItem(key, data.conversation_id);
+      frame.src = "/-/agent/" + data.conversation_id;
+      frame.hidden = false;
+      reset.hidden = false;
+      input.value = "";
+    } catch (failed) {
+      error.textContent = failed.message;
+      error.hidden = false;
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  reset.addEventListener("click", () => {
+    sessionStorage.removeItem(key);
+    frame.hidden = true;
+    frame.removeAttribute("src");
+    reset.hidden = true;
+  });
+})();
+</script>
+{% endif %}
+
 <p style="color:#666;margin-top:1.5em">
   Nothing on the right is in the store until you record it. What you record
   arrives as a confirmed fact with this page and this excerpt behind it; what

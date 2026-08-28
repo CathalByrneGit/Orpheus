@@ -168,3 +168,30 @@ def test_a_missing_search_index_is_reported_rather_than_thrown(tmp_path):
     result = call(agent.find_entity, datasette, query="Anybody")
     assert result["documents_naming_it_with_no_extraction"] is None
     assert "do not report either" in result["caveat"]
+
+
+def test_the_reading_page_only_offers_a_chat_that_can_answer(served, monkeypatch):
+    # Installed is not enough. Without a model configured for datasette-llm
+    # every chat opens and then fails on the first message, which is a worse
+    # offer than making none.
+    import orpheus_datasette as plugin
+
+    assert not plugin._agent_available(served), \
+        "no default_model is configured in the base test config"
+
+    class WithModel:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def plugin_config(self, name):
+            if name == "datasette-llm":
+                return {"default_model": "anthropic/claude-sonnet-5"}
+            return self._inner.plugin_config(name)
+
+    assert plugin._agent_available(WithModel(served))
+
+
+def test_the_passage_tool_says_a_suggestion_is_not_an_extraction(served):
+    result = call(agent.passage, served, document_id="doc_1", page_no=1)
+    assert "Ardmore Digital Ltd" in json.dumps(result)
+    assert "not an extraction" in result["reading"]

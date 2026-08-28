@@ -328,9 +328,28 @@ async def read_page(datasette, request):
         "progress": progress or {},
         "engines": [name for name, ready in available.items()
                     if ready and name != "deterministic"],
+        # The chat panel is only offered where there is a chat to open. The
+        # `agent` extra is optional and this page has to read the same without
+        # it, so the template asks rather than assuming.
+        "agent_available": _agent_available(datasette),
         "error": request.args.get("error"),
         "note": request.args.get("note"),
     })
+
+
+def _agent_available(datasette) -> bool:
+    """Is datasette-agent installed and usable by this deployment?
+
+    Installed is not enough: without a model configured for `datasette-llm`
+    every chat opens and then fails on the first message, which is a worse
+    offer than not making one.
+    """
+    try:
+        import datasette_agent  # noqa: F401
+    except ImportError:
+        return False
+    config = datasette.plugin_config("datasette-llm") or {}
+    return bool(config.get("default_model"))
 
 
 async def read_act(datasette, request):

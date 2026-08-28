@@ -37,6 +37,7 @@ try:  # optional: `pip install 'orpheus[agent]'`
 except ImportError:  # pragma: no cover - exercised by not installing the extra
     AgentTool = None
 
+from orpheus import companion as companion_mod
 from orpheus import corroboration as corroboration_mod
 from orpheus import entities as entities_mod
 from orpheus import graph as graph_mod
@@ -195,6 +196,23 @@ async def needs_review(datasette, actor, limit: int = 20):
     return json.dumps(await _read(datasette, run), default=str)
 
 
+async def passage(datasette, actor, document_id: str, page_no: int):
+    """The page somebody is reading, and what already stands on it."""
+    def run(store):
+        found = companion_mod.passage(store, document_id, int(page_no),
+                                      status="all")
+        return {
+            "passage": found,
+            "reading": (
+                "This is the text of the page, so a quote taken from it is "
+                "verbatim — which is what orpheus_record needs. Anything under "
+                "`suggestions` is offered and not in the store: a suggestion is "
+                "not an extraction until a person accepts it, so do not report "
+                "one as something the document holds."),
+        }
+    return json.dumps(await _read(datasette, run), default=str)
+
+
 # ---------------------------------------------------------------------------
 # The one write
 # ---------------------------------------------------------------------------
@@ -304,6 +322,19 @@ def _tools():
             input_schema={"type": "object", "properties": {
                 "limit": {"type": "integer"}}, "required": []},
             fn=needs_review,
+        ),
+        AgentTool(
+            name="orpheus_passage",
+            description=_PREFER + "The full text of one page of a document, "
+                        "with what has already been extracted from it and what "
+                        "the reading companion has offered. Use it to read the "
+                        "page somebody is looking at, and to take a verbatim "
+                        "quote for orpheus_record.",
+            input_schema={"type": "object", "properties": {
+                "document_id": {"type": "string"},
+                "page_no": {"type": "integer"}},
+                "required": ["document_id", "page_no"]},
+            fn=passage,
         ),
         AgentTool(
             name="orpheus_record",
