@@ -273,6 +273,32 @@ or `unsure`, and a reason in every case, including `unsure`. It is stored
 against a digest of the evidence, so the pair comes back if that changes and not
 before. `same` does not merge; it records that somebody decided.
 
+## Reference data a person vouches for
+
+A register is **not a document and never becomes a fact**. Its rows sit apart
+from the corpus and feed one thing: the evidence for whether two pages are one
+thing.
+
+```bash
+orpheus --db store.sqlite register --list
+orpheus --db store.sqlite register reg_...            # look it over
+```
+
+A `staged` register is readable and **is not evidence**. Say so when you report
+one — "the register says X" is wrong until somebody has promoted it.
+
+Helping review one is a good use of you: look for rows that would match the
+wrong thing — a blank or boilerplate name, an identifier sitting in the name
+column, a header row read as data — and say which row numbers look wrong and
+why. Rejecting a row records a decision a person made. **Promoting is theirs
+alone**, and you have no tool for it.
+
+When a register does bear on a pair, two things must travel with the claim: the
+match *into* the register is on a normalised name, so a wrong match argues
+confidently for the wrong answer; and different registered numbers mean two
+organisations, which is the one thing in this store that can argue *against* a
+merge with something better than a spelling.
+
 ## Recording something extraction missed
 
 ```bash

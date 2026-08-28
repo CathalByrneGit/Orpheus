@@ -513,6 +513,12 @@ staging table, let a person and a model work over it, and promote it only when
 somebody says so — which is the shape the reading companion already has, where
 [a suggestion is not an extraction](reading-companion.md).
 
+**Built**, on those lines: `orpheus register` stages a delimited file, reports
+which column it read names from rather than assuming, lets rows be rejected with
+a reason, and counts for nothing until an administrator promotes it. Two agent
+tools help a person work through a staged one; neither can promote it. See
+[the register](entities.md#a-register-when-the-documents-cannot-settle-it).
+
 ### `datasette-enrichments`
 
 **The right shape, and the strongest candidate here.** `register_enrichments()`

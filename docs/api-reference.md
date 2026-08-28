@@ -319,6 +319,21 @@ the other measures offers against a person's attention.
 
 See [Reading with the machine](reading-companion.md).
 
+### Registers
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| `GET` | `/registers` | actor | Every register and whether anybody vouched for it |
+| `GET` | `/registers/<id>` | actor | The register and its rows |
+| `POST` | `/registers/<id>/rows/<n>/reject` | **administrator** | `note` |
+| `POST` | `/registers/<id>/promote` | **administrator** | Makes it evidence |
+| `POST` | `/registers/<id>/withdraw` | **administrator** | Stops it counting; keeps it readable |
+
+Reading a staged register is deliberately not restricted — being looked at is
+what staging is for. Promoting is administrator-only because reference data
+every later answer rests on means somebody takes responsibility for what it
+decides. See [the register](entities.md#a-register-when-the-documents-cannot-settle-it).
+
 ### The corpus as a network
 
 | Method | Path | Permission | Notes |

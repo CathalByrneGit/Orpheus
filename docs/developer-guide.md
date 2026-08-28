@@ -303,6 +303,7 @@ orpheus/
 │   ├── review.py            # steps 6/8, schema amendment queue, staleness
 │   ├── concepts.py          # step 7, versioned rule concepts and scores
 │   ├── analysis.py          # step 9, corpus escalation
+│   ├── registers.py         # reference data, held apart from the corpus
 │   ├── quality.py           # the report Phase 1 exists to produce
 │   ├── benchmark.py         # CUAD scoring
 │   ├── auth.py              # actors, tokens, permissions

@@ -244,6 +244,58 @@ The tool's steer now says so, with that example in it, and the recommendation is
 checkable against the quoted passages precisely so a reviewer can catch the next
 one.
 
+### A register, when the documents cannot settle it
+
+Some pairs the corpus cannot answer. Only 2 of 74 companies state a registered
+number, so the decisive, rare value resolution wants is usually not there — and
+it does exist, in registers Orpheus previously did not read.
+
+A register now loads as **reference data, and never as facts**. Its rows live in
+their own tables, never in `instance_index`, `entities` or `edges`. That is not
+squeamishness: a register import is trivially correct, so counting its rows as
+extractions would inflate the number
+[extraction quality](provenance-and-amendment.md) exists to report with work no
+model did — and a register row has no page and no excerpt, so calling it an
+extraction would mean inventing provenance.
+
+```bash
+orpheus register --add companies.csv --name "Companies Register" --type-id Company
+orpheus register reg_...                    # look it over
+orpheus register reg_... --reject 3 --note "header row read as data"
+orpheus register reg_... --promote          # now it counts
+```
+
+**Nothing counts until somebody has vouched for it.** A register arrives
+`staged`: present, readable, and not evidence. That is the review step the
+upload plugins do not have, and promoting is administrator-only — not because
+the rows are sensitive, but because reference data every later answer rests on
+means the person who says it is good takes responsibility for what it decides.
+Which column held the name is reported on the way in and never assumed, because
+a register matched on the wrong column produces confident nonsense. A rejected
+row stays readable and stops counting; a withdrawn register stops counting and
+stays readable, because one somebody relied on is part of how a decision was
+reached.
+
+**And it can argue against.** Everything else in the dossier can only argue
+*for* a merge or fail to. A register giving two pages different registered
+numbers is the first thing in this store that says *no* with something better
+than a spelling — and it settles both cases the rest of this section could not:
+
+```
+EFTC OPERATING CORP. / K*TEC OPERATING CORP.
+   DE-2041881 against DE-3320714      -> two organisations
+HealthPlan Services / Sykes HealthPlan Services
+   FL-P94000012345 against FL-P97000054321  -> two organisations
+```
+
+The second is the pair every name rule here calls arguable, and which otherwise
+needed a model reading the contract's defined terms.
+
+It says how it could be wrong in the same breath. The match *into* the register
+is on a normalised name — the same weak basis the wiki is built on — so a wrong
+match argues confidently for the wrong answer, and the reading says so rather
+than presenting the identifier as settled.
+
 ### A judgement, once made, rests
 
 A pair examined and rejected was offered again on every pass — which is how a
@@ -260,7 +312,8 @@ It is recorded against a **digest of the evidence it rested on**, the rule
 its evidence. A new document carrying a matching address makes this a different
 question, so the digest changes, the pair comes back, and what was decided last
 time stays on file marked `stale` rather than being quietly applied to evidence
-it never saw.
+it never saw. A **register promoted** after somebody decided is exactly that
+case, and is in the digest for it.
 
 **One more thing the run produced**: pages called `Franchisee`, `Franchisor` and
 `[•]`. The extractor read the word a contract uses for a party as the party, and

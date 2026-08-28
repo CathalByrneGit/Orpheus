@@ -658,6 +658,64 @@ MIGRATIONS: list[dict] = [
             "ON resolution_reviews (status)",
         ],
     },
+    {
+        "version": 12,
+        "name": "registers",
+        # A register is reference data, and deliberately not a document.
+        #
+        # Everything else in this store is a fact read out of a document,
+        # carrying a page and an excerpt that `align.py` located. A row in a
+        # companies register has neither, and inventing one would be a lie.
+        # More to the point, a register import is trivially correct -- so
+        # turning its rows into instances would inflate the number extraction
+        # quality exists to report with work no model did.
+        #
+        # So rows live here, never in `instance_index`, `entities` or `edges`,
+        # and what they are for is settling a merge: a registered number two
+        # pages share is the decisive, rare value this corpus does not
+        # otherwise have.
+        "statements": [
+            """
+            CREATE TABLE IF NOT EXISTS registers (
+                register_id  TEXT PRIMARY KEY,
+                name         TEXT NOT NULL,
+                description  TEXT,
+                -- Where it came from, in a person's words. A register is only
+                -- as good as its provenance, and this is not machine-checkable.
+                origin       TEXT,
+                -- staged until somebody has looked at it. A staged register is
+                -- not evidence, which is the whole of the review step.
+                status       TEXT NOT NULL DEFAULT 'staged',
+                created_at   TEXT NOT NULL,
+                created_by   TEXT REFERENCES actors(actor_id),
+                promoted_at  TEXT,
+                promoted_by  TEXT REFERENCES actors(actor_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS register_rows (
+                register_id  TEXT NOT NULL REFERENCES registers(register_id),
+                row_no       INTEGER NOT NULL,
+                -- Promoted out of the row because matching uses them. `name`
+                -- and `naive_key` find a page by what it is called;
+                -- `identifier` is the reason a register is worth having.
+                name         TEXT,
+                naive_key    TEXT,
+                identifier   TEXT,
+                -- Everything else as it arrived, so nothing is lost on the way
+                -- in and a person can see the row they are judging.
+                values_json  TEXT NOT NULL,
+                status       TEXT NOT NULL DEFAULT 'staged',
+                note         TEXT,
+                PRIMARY KEY (register_id, row_no)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_register_rows_key "
+            "ON register_rows (naive_key)",
+            "CREATE INDEX IF NOT EXISTS idx_register_rows_identifier "
+            "ON register_rows (identifier)",
+        ],
+    },
 ]
 
 

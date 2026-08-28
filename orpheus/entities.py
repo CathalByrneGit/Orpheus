@@ -923,6 +923,7 @@ def resolution_evidence(store: Store, a_id: str, b_id: str) -> dict:
         "WHERE entity_id = ? AND unlinked_at IS NULL", (b_id,))}
 
     left, right = distinguishing_tokens(a["canonical_name"], b["canonical_name"])
+    from . import registers as registers_mod
     return {
         "pages": [
             {"entity_id": a_id, "canonical_name": a["canonical_name"],
@@ -945,6 +946,11 @@ def resolution_evidence(store: Store, a_id: str, b_id: str) -> dict:
         },
         "shared_attributes": [r for r in attributes
                               if r["property"] not in _IDENTIFIER_PROPS],
+        # The only part of this that can argue *against* a merge with something
+        # better than a spelling: a register giving the two pages different
+        # registered numbers is saying they are two organisations.
+        "registers": registers_mod.bearing_on(store, a | {"entity_id": a_id},
+                                              b | {"entity_id": b_id}),
         # Reported because a reviewer will ask, and labelled because the
         # obvious reading of it is wrong.
         "weak_signals": {
@@ -1006,6 +1012,12 @@ def evidence_digest(evidence: dict) -> str:
         "names": {k: v for k, v in sorted(evidence["names"].items())},
         "documents": sorted(
             (p["entity_id"], p["n_documents"]) for p in evidence["pages"]),
+        # A register promoted since somebody decided is exactly the new
+        # evidence this digest exists to notice.
+        "registers": sorted(
+            (r["register_id"], r["row_no"])
+            for rows in evidence["registers"]["matches"].values()
+            for r in rows),
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, default=str).encode()

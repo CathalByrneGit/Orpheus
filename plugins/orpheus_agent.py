@@ -44,6 +44,7 @@ from orpheus import graph as graph_mod
 from orpheus.rubric import RESOLUTION_STATUSES
 from orpheus import lint as lint_mod
 from orpheus import record as record_mod
+from orpheus import registers as registers_mod
 from orpheus import search as search_mod
 from orpheus.store import Store
 from orpheus.utils import OrpheusError
@@ -268,6 +269,55 @@ async def compare_pages(datasette, actor, entity_id: str, other_entity_id: str):
                 "anything: a person does that."),
         }
     return json.dumps(await _read(datasette, run), default=str)
+
+
+async def review_register(datasette, actor, register_id: str = "",
+                          limit: int = 25):
+    """A staged register, so a person and a model can look it over together."""
+    def run(store):
+        if not register_id:
+            return {"registers": registers_mod.list_registers(store),
+                    "reading": ("A staged register is readable and is not "
+                                "evidence. Ask for one by id to see its rows.")}
+        return {
+            "register": registers_mod.get_register(store, register_id),
+            "rows": registers_mod.rows(store, register_id, limit=limit),
+            "reading": (
+                "Look for rows that would match the wrong thing: a blank or "
+                "boilerplate name, an identifier in the name column, a row "
+                "that is a header read as data. Say which row numbers look "
+                "wrong and why, and let the person reject them -- "
+                "`orpheus_reject_register_row` records a rejection somebody "
+                "has decided on, and promoting the register is theirs alone. "
+                "A register matched on the wrong column produces confident "
+                "nonsense, so check the name and identifier columns first."),
+        }
+    return json.dumps(await _read(datasette, run), default=str)
+
+
+async def reject_register_row(datasette, actor, register_id: str, row_no: int,
+                              note: str):
+    """Mark one register row as not to be used, with a reason."""
+    actor_id = await _actor_id(datasette, actor)
+
+    def run(store):
+        return registers_mod.review_row(store, register_id, int(row_no),
+                                        "rejected", note=note,
+                                        actor_id=actor_id)
+
+    try:
+        result = await _write(datasette, run)
+    except OrpheusError as refused:
+        return json.dumps({"rejected": False, "refused": str(refused)})
+    if isinstance(result, dict) and result.get("error"):
+        return json.dumps(result)
+    return json.dumps({
+        "rejected": dict(result),
+        "reading": ("The row stays readable and stops counting, because a bad "
+                    "row is evidence about the register. Promoting the "
+                    "register is a person's decision and is not yours to "
+                    "make."),
+    }, default=str)
 
 
 async def record_comparison(datasette, actor, entity_id: str,
@@ -601,6 +651,33 @@ def _tools():
                 "required": ["entity_id", "other_entity_id", "status",
                              "rationale"]},
             fn=record_comparison,
+        ),
+        AgentTool(
+            name="orpheus_review_register",
+            description=_PREFER + "A register of reference data staged for "
+                        "review, with its rows. Use it to help somebody check "
+                        "a register before they promote it: a staged register "
+                        "is readable and does not count as evidence until a "
+                        "person vouches for it. Omit register_id to list them.",
+            input_schema={"type": "object", "properties": {
+                "register_id": {"type": "string"},
+                "limit": {"type": "integer"}},
+                "required": []},
+            fn=review_register,
+        ),
+        AgentTool(
+            name="orpheus_reject_register_row",
+            description="Mark one row of a staged register as not to be used, "
+                        "with a reason. Only for a row a person has decided "
+                        "against -- promoting the register is theirs alone, "
+                        "and this tool cannot do it.",
+            input_schema={"type": "object", "properties": {
+                "register_id": {"type": "string"},
+                "row_no": {"type": "integer"},
+                "note": {"type": "string",
+                         "description": "Why this row should not be used."}},
+                "required": ["register_id", "row_no", "note"]},
+            fn=reject_register_row,
         ),
         AgentTool(
             name="orpheus_corroboration",

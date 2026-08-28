@@ -778,6 +778,99 @@ def cmd_migrate(args) -> int:
     return 0
 
 
+def cmd_register(args) -> int:
+    """Bring a register in, look it over, and promote it when it is right.
+
+    A register is reference data and never becomes a fact: its rows are held
+    apart from the corpus and feed the evidence a person weighs when deciding
+    whether two pages are one thing. Nothing counts until `--promote`.
+    """
+    from . import registers as registers_mod
+
+    if args.list:
+        store = open_store(args)
+        try:
+            found = registers_mod.list_registers(store)
+        finally:
+            store.close()
+        if args.json:
+            emit(found, True)
+            return 0
+        if not found:
+            print("No registers. `orpheus register --add file.csv --name ...`.")
+            return 0
+        for row in found:
+            rejected = f", {row['n_rejected']} rejected" if row["n_rejected"] else ""
+            print(f"  {row['register_id']}  {_clip(row['name'], 28):28} "
+                  f"{row['status']:10} {row['n_rows']} row(s){rejected}")
+        return 0
+
+    store = open_store(args, mode="write")
+    try:
+        if args.add:
+            register_id = registers_mod.create_register(
+                store, args.name or Path(args.add).stem,
+                description=args.description, origin=args.origin or args.add,
+                actor_id=args.actor_id)
+            result = registers_mod.load_csv(
+                store, register_id, Path(args.add).read_text(),
+                name_column=args.name_column,
+                identifier_column=args.identifier_column,
+                type_id=args.type_id, actor_id=args.actor_id)
+            store.conn.commit()
+        elif args.reject is not None:
+            result = registers_mod.review_row(
+                store, args.register_id, args.reject, "rejected",
+                note=args.note, actor_id=args.actor_id)
+            store.conn.commit()
+        elif args.promote:
+            result = registers_mod.promote(store, args.register_id,
+                                           actor_id=args.actor_id,
+                                           note=args.note)
+            store.conn.commit()
+        elif args.withdraw:
+            result = registers_mod.withdraw(store, args.register_id,
+                                            actor_id=args.actor_id,
+                                            note=args.note)
+            store.conn.commit()
+        else:
+            result = {"register": registers_mod.get_register(
+                          store, args.register_id),
+                      "rows": registers_mod.rows(store, args.register_id,
+                                                 limit=args.limit)}
+    finally:
+        store.close()
+
+    if args.json:
+        emit(result, True)
+        return 0
+
+    if args.add:
+        print(f"{result['n_rows']} row(s) staged as {result['register_id']}.")
+        print(f"  {result['caveat']}")
+        print("  Staged means readable and not yet evidence. Look it over, "
+              "then --promote.")
+    elif "rows" in result:
+        register = result["register"]
+        print(f"{register['name']} -- {register['status']}")
+        if register["status"] != "active":
+            print("  Not evidence yet. --promote when it is right.")
+        for row in result["rows"]:
+            mark = " " if row["status"] == "accepted" else \
+                   "x" if row["status"] == "rejected" else "?"
+            print(f"  {mark} {row['row_no']:4} {_clip(row['name'] or '', 34):34} "
+                  f"{row['identifier'] or ''}")
+    elif args.promote:
+        print(f"{result['rows_accepted']} row(s) accepted. It counts as "
+              "evidence now, and a judgement made before it is stale.")
+    elif args.withdraw:
+        print("Withdrawn. It stops counting and stays readable, because a "
+              "register somebody relied on is part of how a decision was made.")
+    else:
+        print(f"Row {result['row_no']} is {result['status']}.")
+    return 0
+
+
 def cmd_record(args) -> int:
     """Record a fact a person read in a document, with the line they read it on."""
     from . import record as record_mod
@@ -1265,6 +1358,35 @@ def build_parser() -> argparse.ArgumentParser:
     migrator.add_argument("--check", action="store_true",
                           help="report what is pending and exit non-zero, "
                                "without applying anything")
+
+    register = add("register", cmd_register,
+                   "bring in reference data a person vouches for")
+    register.add_argument("register_id", nargs="?",
+                          help="an existing register, to show or act on")
+    register.add_argument("--list", action="store_true",
+                          help="every register and its state")
+    register.add_argument("--add", metavar="FILE.csv",
+                          help="stage a delimited file as a new register")
+    register.add_argument("--name", help="what to call it")
+    register.add_argument("--description")
+    register.add_argument("--origin", help="where it came from, in your words")
+    register.add_argument("--type-id",
+                          help="the bundle type its names are, e.g. Company, "
+                               "so they normalise the same way the wiki's do")
+    register.add_argument("--name-column",
+                          help="which column holds the name, if the guess "
+                               "would be wrong")
+    register.add_argument("--identifier-column",
+                          help="which column holds the registered number")
+    register.add_argument("--reject", type=int, metavar="ROW_NO",
+                          help="mark one row as not to be used")
+    register.add_argument("--promote", action="store_true",
+                          help="vouch for it, and let it count as evidence")
+    register.add_argument("--withdraw", action="store_true",
+                          help="stop it counting, without deleting it")
+    register.add_argument("--limit", type=int, default=20)
+    register.add_argument("--note")
+    register.add_argument("--actor-id")
 
     recorder = add("record", cmd_record,
                    "record a fact a person read that extraction missed")

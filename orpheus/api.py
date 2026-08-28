@@ -29,6 +29,7 @@ from . import export_md
 from . import companion as companion_mod
 from . import corroboration as corroboration_mod
 from . import graph as graph_mod
+from . import registers as registers_mod
 from . import questions as questions_mod
 from . import lint as lint_mod
 from . import llm, quality, review, rubric, tensions as tensions_mod
@@ -690,6 +691,66 @@ def get_topology(store, actor, body, **_):
     return graph_mod.topology(
         store, seed=_int(body, "seed", graph_mod.DEFAULT_SEED),
         reviewed_only=body.get("reviewed_only") in ("1", "true", "True", True))
+
+
+# ---------------------------------------------------------------------------
+# Registers
+# ---------------------------------------------------------------------------
+
+@route("GET", "/registers")
+def list_registers(store, actor, body, **_):
+    """Every register and whether anybody has vouched for it."""
+    return {"registers": registers_mod.list_registers(store),
+            "reading": ("A `staged` register is readable and is not evidence. "
+                        "Only an `active` one bears on a merge.")}
+
+
+@route("GET", r"/registers/(?P<register_id>[^/]+)")
+def get_register(store, register_id, actor, body, **_):
+    return {"register": registers_mod.get_register(store, register_id),
+            "rows": registers_mod.rows(store, register_id,
+                                       status=body.get("status"),
+                                       limit=_int(body, "limit", 100))}
+
+
+@route("POST", r"/registers/(?P<register_id>[^/]+)/rows/(?P<row_no>\d+)/reject")
+def reject_register_row(store, register_id, row_no, actor, body, **_):
+    """Mark one row as not to be used. It stays readable."""
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Reference data everybody's answers rest on is an administrator's "
+            "to vouch for.")
+    return registers_mod.review_row(
+        store, register_id, int(row_no), "rejected", note=body.get("note"),
+        actor_id=_actor_id(actor))
+
+
+@route("POST", r"/registers/(?P<register_id>[^/]+)/promote")
+def promote_register(store, register_id, actor, body, **_):
+    """Vouch for a register, and let it count as evidence.
+
+    Administrator-only, and not because the rows are sensitive. A register is
+    reference data every later answer rests on, so the person who says it is
+    good is taking responsibility for what it decides.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Reference data everybody's answers rest on is an administrator's "
+            "to vouch for.")
+    return registers_mod.promote(store, register_id,
+                                 actor_id=_actor_id(actor),
+                                 note=body.get("note"))
+
+
+@route("POST", r"/registers/(?P<register_id>[^/]+)/withdraw")
+def withdraw_register(store, register_id, actor, body, **_):
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Reference data everybody's answers rest on is an administrator's "
+            "to vouch for.")
+    return registers_mod.withdraw(store, register_id,
+                                  actor_id=_actor_id(actor),
+                                  note=body.get("note"))
 
 
 @route("GET", "/graph/map")
