@@ -318,3 +318,236 @@ def test_re_offering_something_already_settled_is_refused(reading):
         propose(reading, "doc_1", 1, "Company", values,
                 quote=PAGES[1][:40], engine="chat", actor_id="act_a")
     assert "already dismissed" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# The rest of the document, behind the passage
+# ---------------------------------------------------------------------------
+#
+# A clause that only makes sense in the light of an earlier definition was read
+# without it, because the model saw one page in isolation. It can now see the
+# rest as background -- and the thing that has to hold is that seeing more does
+# not widen what it may *report*: the offers are still about this page.
+
+@pytest.fixture
+def spy_engine():
+    """An engine that records the prompt and returns whatever it is told to."""
+    from orpheus.engines import _ENGINES, register_engine
+
+    seen = {}
+    plan: list[dict] = []
+
+    def engine(*, store, document, bundle, text, tier, opt_in, actor_id):
+        seen["text"] = text
+        return {"entities": list(plan)}
+
+    register_engine("spy", engine)
+    try:
+        yield seen, plan
+    finally:
+        _ENGINES.pop("spy", None)
+
+
+def _offer(name, excerpt):
+    return {"type_id": "Company", "properties": {"name": name},
+            "excerpt": excerpt, "confidence": 0.9}
+
+
+def test_by_default_a_model_still_sees_one_page(reading, spy_engine):
+    seen, plan = spy_engine
+    read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy")
+
+    assert seen["text"] == PAGES[2]
+    assert PAGES[1] not in seen["text"]
+
+
+def test_the_pages_before_it_are_what_context_means(reading, spy_engine):
+    # A definition comes before the thing it defines, so the budget runs
+    # backwards first.
+    seen, plan = spy_engine
+    result = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy",
+                          context_chars=5000)
+
+    assert PAGES[1] in seen["text"], "the earlier page is the point"
+    assert PAGES[2] in seen["text"], "the passage is still there"
+    assert seen["text"].index(PAGES[1]) < seen["text"].index(PAGES[2])
+    assert result["context_chars"] > 0
+
+
+def test_the_passage_is_marked_off_from_the_background(reading, spy_engine):
+    from orpheus.companion import CONTEXT_MARKER
+
+    seen, _ = spy_engine
+    read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy",
+                 context_chars=5000)
+    before, _, after = seen["text"].partition(CONTEXT_MARKER)
+    assert PAGES[1] in before and PAGES[2] in after
+
+
+def test_a_budget_of_zero_characters_buys_no_context(reading, spy_engine):
+    seen, _ = spy_engine
+    result = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy",
+                          context_chars=0)
+    assert result["context_chars"] == 0
+    assert seen["text"] == PAGES[2]
+
+
+def test_a_budget_too_small_for_a_whole_page_takes_none_of_it(reading, spy_engine):
+    # Whole pages only. Half a definition read as a whole one is worse than not
+    # seeing it at all.
+    seen, _ = spy_engine
+    result = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy",
+                          context_chars=10)
+    assert result["context_chars"] == 0
+    assert seen["text"] == PAGES[2]
+
+
+def test_an_offer_quoting_the_background_is_not_filed_under_this_page(
+        reading, spy_engine):
+    # The failure this guards against. An offer from page 1 filed under page 2
+    # gets a page-scoped fingerprint, a page-relative offset, and sends a
+    # reviewer to the wrong passage to check it.
+    seen, plan = spy_engine
+    plan.append(_offer("Ardmore Digital Ltd", "Ardmore Digital Ltd"))   # page 1
+    plan.append(_offer("Whoever", "This Agreement commences"))          # page 2
+
+    result = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy",
+                          context_chars=5000)
+
+    names = {s["properties"]["name"] for s in result["suggestions"]}
+    assert names == {"Whoever"}
+    assert result["n_outside_the_page"] == 1
+
+
+def test_nothing_is_discarded_when_there_is_no_context_to_stray_into(
+        reading, spy_engine):
+    # Without context the model was only ever shown the page, so an excerpt it
+    # invented is an alignment question rather than a scope one -- and the
+    # alignment machinery already records that.
+    seen, plan = spy_engine
+    plan.append(_offer("Ardmore Digital Ltd", "not on this page at all"))
+
+    result = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy")
+    assert result["n_outside_the_page"] == 0
+    assert len(result["suggestions"]) == 1
+
+
+def test_the_pattern_pass_is_never_given_context(reading):
+    # It matches characters rather than reading, so context is text it could
+    # match in and then mislocate, and it cannot use it for understanding.
+    result = read_passage(reading, "doc_1", 2, actor_id="act_a",
+                          context_chars=5000)
+    assert result["context_chars"] == 0
+
+
+def test_the_context_is_charged_to_the_same_budget_as_the_passage(reading):
+    """A model sent eleven times the text is an eleven-times call, and the
+    audit is where that has to show up. `prompt_chars` counts what was sent."""
+    from orpheus.engines import _ENGINES, register_engine
+    from orpheus.llm import record_llm_call
+
+    def engine(*, store, document, bundle, text, tier, opt_in, actor_id):
+        record_llm_call(store, tier=tier, purpose="companion",
+                        prompt_chars=len(text),
+                        document_id=document["document_id"], actor_id=actor_id)
+        return {"entities": []}
+
+    register_engine("billed", engine)
+    try:
+        read_passage(reading, "doc_1", 2, actor_id="act_a", engine="billed")
+        alone = reading.scalar("SELECT prompt_chars FROM llm_calls "
+                               "ORDER BY rowid DESC LIMIT 1")
+        read_passage(reading, "doc_1", 2, actor_id="act_a", engine="billed",
+                     context_chars=5000)
+        with_context = reading.scalar("SELECT prompt_chars FROM llm_calls "
+                                      "ORDER BY rowid DESC LIMIT 1")
+    finally:
+        _ENGINES.pop("billed", None)
+
+    assert alone == len(PAGES[2])
+    assert with_context > alone, "the context was sent and is not being counted"
+
+
+# ---------------------------------------------------------------------------
+# Two findings that carry nothing but their page
+# ---------------------------------------------------------------------------
+
+def test_two_clauses_on_one_page_are_two_offers(reading, spy_engine):
+    """Found by reading a real contract with a real model.
+
+    It returned four Clauses from one page, each quoting different text, each
+    carrying `{"page_no": 4}` and nothing else. All four fingerprinted the same,
+    so three were dropped as duplicates of the first -- silently, and the count
+    still said four.
+    """
+    seen, plan = spy_engine
+    plan.append({"type_id": "Clause", "properties": {},
+                 "excerpt": "This Agreement commences", "confidence": 0.9})
+    plan.append({"type_id": "Clause", "properties": {},
+                 "excerpt": "terminates on", "confidence": 0.9})
+
+    result = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy")
+
+    assert result["n_offered"] == 2
+    assert len({s["suggestion_id"] for s in result["suggestions"]}) == 2
+
+
+def test_the_same_finding_read_twice_is_still_one_offer(reading, spy_engine):
+    # The property the fingerprint exists for, and it has to survive the fix.
+    seen, plan = spy_engine
+    plan.append({"type_id": "Clause", "properties": {},
+                 "excerpt": "This Agreement commences", "confidence": 0.9})
+
+    first = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy")
+    again = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy")
+    assert again["n_offered"] == 1
+    assert (first["suggestions"][0]["suggestion_id"]
+            == again["suggestions"][0]["suggestion_id"])
+
+
+def test_a_dismissed_finding_is_not_re_offered(reading, spy_engine):
+    seen, plan = spy_engine
+    plan.append({"type_id": "Clause", "properties": {},
+                 "excerpt": "This Agreement commences", "confidence": 0.9})
+
+    first = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy")
+    dismiss_suggestion(reading, first["suggestions"][0]["suggestion_id"],
+                       actor_id="act_a", note="not a clause")
+    assert read_passage(reading, "doc_1", 2, actor_id="act_a",
+                        engine="spy")["n_offered"] == 0
+
+
+def test_a_named_thing_is_still_matched_across_engines(reading, spy_engine):
+    # Where the properties do identify the finding, the excerpt stays out of
+    # the key -- so a second engine quoting different text for the same company
+    # does not re-offer it.
+    seen, plan = spy_engine
+    plan.append({"type_id": "Company", "properties": {"name": "Ardmore Digital Ltd"},
+                 "excerpt": "This Agreement commences", "confidence": 0.9})
+    first = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy")
+
+    plan.clear()
+    plan.append({"type_id": "Company", "properties": {"name": "Ardmore Digital Ltd"},
+                 "excerpt": "terminates on", "confidence": 0.9})
+    again = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy")
+
+    assert (first["suggestions"][0]["suggestion_id"]
+            == again["suggestions"][0]["suggestion_id"])
+
+
+def test_the_number_reported_is_the_number_in_the_store(reading, spy_engine):
+    # n_offered also lands in reading_passages.n_suggested, and from there in
+    # how well the companion is judged to be doing.
+    seen, plan = spy_engine
+    for excerpt in ("This Agreement commences", "terminates on", "31 March 2027"):
+        plan.append({"type_id": "Clause", "properties": {},
+                     "excerpt": excerpt, "confidence": 0.9})
+
+    result = read_passage(reading, "doc_1", 2, actor_id="act_a", engine="spy")
+    held = reading.scalar(
+        "SELECT COUNT(*) FROM suggestions WHERE document_id = 'doc_1' "
+        "AND page_no = 2 AND status = 'offered'")
+    assert result["n_offered"] == held == 3
+    assert reading.scalar(
+        "SELECT n_suggested FROM reading_passages WHERE document_id = 'doc_1' "
+        "AND page_no = 2 AND engine = 'spy'") == 3

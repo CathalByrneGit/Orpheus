@@ -603,7 +603,9 @@ def post_read_passage(store, document_id, page_no, actor, body, **_):
         store, document_id, int(page_no), actor_id=_actor_id(actor),
         engine=body.get("engine", companion_mod.DEFAULT_ENGINE),
         tier=body.get("tier", "local"),
-        opt_in=body.get("cloud_opt_in") in ("1", "true", "True", True))
+        opt_in=body.get("cloud_opt_in") in ("1", "true", "True", True),
+        context_chars=_int(body, "context_chars",
+                           companion_mod.DEFAULT_CONTEXT_CHARS))
 
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/passages/(?P<page_no>\d+)",

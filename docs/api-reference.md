@@ -286,7 +286,7 @@ reviews, "nothing found" says more about how little was checked.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| `POST` | `/documents/<id>/passages/<n>/read` | view | `engine`, `tier`, `cloud_opt_in` |
+| `POST` | `/documents/<id>/passages/<n>/read` | view | `engine`, `tier`, `cloud_opt_in`, `context_chars` |
 | `GET` | `/documents/<id>/passages/<n>` | view | `?status=offered\|accepted\|dismissed\|all` |
 | `GET` | `/documents/<id>/reading` | view | Progress, per actor |
 | `POST` | `/suggestions/<id>/accept` | edit on its document | `properties` corrects on the way in |

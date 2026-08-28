@@ -116,12 +116,63 @@ right: it writes, but what it writes is the reader's own progress and a set of
 proposals, not a change to the document. Requiring `edit` would stop a viewer
 using the companion at all.
 
+## The rest of the document, behind the passage
+
+A model asked about page 7 did not know what page 3 said, so a clause that only
+made sense in the light of an earlier definition was read without it.
+`context_chars` now lets it see the rest of the document as background — pages
+before the passage first, because a definition comes before the thing it
+defines, then forwards with whatever budget is left, and whole pages only, since
+half a definition read as a whole one is worse than not seeing it.
+
+**It is off by default, and it does not widen scope.** Those are separate
+guarantees and both matter.
+
+Off by default because the context is charged to the same budget as everything
+else: `llm_calls.prompt_chars` counts it, a page averages 1,908 characters
+against 20,707 for a document, and a five-fold prompt is a deployment's decision
+rather than this function's.
+
+Not widening scope because the offers are still *about this page*. The model is
+told the background is background, and then the boundary is **enforced anyway**:
+an offer whose excerpt is not in the page is discarded, and the count comes back
+as `n_outside_the_page`. Computed rather than trusted, for the same reason
+alignment is. Without it, a fact from page 3 lands under page 7 with a
+page-scoped fingerprint, a page-relative offset, and a reviewer sent to the
+wrong passage to check it.
+
+### What it was worth, measured
+
+Run against one page of a real SEC filing, three times with three wordings of
+the background instruction:
+
+| instruction ends… | page alone | with 11,365 chars of context |
+|---|---|---|
+| "do not report anything from it" | 11 offers | 11 |
+| "report only things the passage itself contains" | 10 | **2** |
+| "to help you read the passage that follows" | 9 | 12 |
+
+The identical page-alone prompt gave 9, 10 and 11, so run-to-run variance is
+about ±2. Against that, **context neither clearly helped nor hurt the count** —
+but a badly worded instruction is well outside the noise and *suppresses*
+findings, which is why the shipped wording asks for comprehension and says
+nothing about scope. Policing the boundary in the prompt cost eight of ten
+offers; `_on_this_page` does that job for free.
+
+So this is available and honest rather than recommended. It is the mechanism the
+gap called for; on this corpus it did not pay for itself.
+
 ## What this does not do yet
 
-The offers come from one page in isolation. A model asked about page 7 does not
-know what page 3 said, so a clause that only makes sense in the light of an
-earlier definition is read without it. Whole-document context per passage is the
-obvious next thing and is not built.
+**Offers can arrive with no properties at all.** Asked to read page 4 of a
+contract, the model returned `{"type": "Company", "excerpt": "YEC",
+"properties": {}}` — because from that page alone, "YEC" is all there is; the
+name behind the abbreviation is defined on page 1. Whole-document context did
+**not** fix it: the properties came back empty with the background attached too.
+`Company.name` is NOT NULL, so accepting such an offer without correcting it is
+refused rather than silently filed — and `accept_suggestion` takes the
+correction, which is the designed path. But an offer a reviewer must complete
+before it can be accepted should say so, and it does not yet.
 
 Nor is there any streaming: a passage is read when somebody asks for it, not as
 they scroll. That is a deliberate ordering — the write path and the provenance

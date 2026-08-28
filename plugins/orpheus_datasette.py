@@ -349,6 +349,11 @@ async def read_page(datasette, request):
 # rather than left believing it has the page.
 CHAT_PASSAGE_LIMIT = 8000
 
+#: How much of the rest of the document goes with a passage when a reader asks
+#: for it. Roughly a handful of pages: enough to carry the definitions a clause
+#: leans on, and bounded because it is charged to the same budget as the page.
+CONTEXT_CHARS = 12000
+
 
 def _chat_passage(text: str) -> dict:
     if len(text) <= CHAT_PASSAGE_LIMIT:
@@ -387,17 +392,28 @@ async def read_act(datasette, request):
 
     if action == "read":
         engine = form.get("engine") or "deterministic"
+        body = {"engine": engine,
+                "tier": "cloud" if engine != "deterministic" else "local",
+                "cloud_opt_in": "1" if engine != "deterministic" else "0"}
+        if form.get("with_context"):
+            body["context_chars"] = CONTEXT_CHARS
         status, result = await _call(
             datasette, request, "POST",
-            f"/documents/{document_id}/passages/{page_no}/read",
-            {"engine": engine, "tier": "cloud" if engine != "deterministic" else "local",
-             "cloud_opt_in": "1" if engine != "deterministic" else "0"})
+            f"/documents/{document_id}/passages/{page_no}/read", body)
         if status != 200:
             return _redirect(datasette, back, error=result["error"]["message"])
         found = result.get("n_offered", 0)
-        return _redirect(datasette, back, note=(
-            f"{found} thing(s) worth a look." if found else
-            "Read, and nothing stood out. That is recorded too."))
+        note = (f"{found} thing(s) worth a look." if found else
+                "Read, and nothing stood out. That is recorded too.")
+        # What the context cost and what it caught, said plainly. A reader who
+        # turned it on is entitled to know whether it earned the call.
+        if result.get("context_chars"):
+            note += (f" {result['context_chars']} character(s) of the rest of "
+                     "the document went with it")
+            outside = result.get("n_outside_the_page", 0)
+            note += (f", and {outside} offer(s) about it were discarded."
+                     if outside else ".")
+        return _redirect(datasette, back, note=note)
 
     if action in ("accept", "dismiss"):
         body = {"note": form.get("note") or None}

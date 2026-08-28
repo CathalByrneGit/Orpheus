@@ -194,10 +194,19 @@
               {% endfor %}
             </select>
           </label>
+          <label style="margin-left:.5em">
+            <input type="checkbox" name="with_context" value="1">
+            with the rest of the document behind it
+          </label>
           <p style="color:#666;margin:.4em 0 0">The pattern pass cannot offer
           something the page does not contain, so it needs no opt-in and sends
           nothing anywhere. A model does, and goes through the same gate as any
           other model call.</p>
+          <p style="color:#666;margin:.2em 0 0">Context lets a model read a
+          clause in the light of a definition on an earlier page. It sends
+          several pages instead of one, charged to the same budget, and it does
+          not widen what may be reported: an offer quoting the background is
+          discarded rather than filed under this page.</p>
         </form>
 
         {% if page.suggestions %}

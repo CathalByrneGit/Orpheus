@@ -713,7 +713,8 @@ def cmd_read(args) -> int:
     try:
         result = companion.read_passage(
             store, args.document_id, args.page, actor_id=args.actor_id,
-            engine=args.engine, tier=args.tier, opt_in=args.cloud_opt_in)
+            engine=args.engine, tier=args.tier, opt_in=args.cloud_opt_in,
+            context_chars=args.context_chars)
     finally:
         store.close()
 
@@ -1249,6 +1250,11 @@ def build_parser() -> argparse.ArgumentParser:
     reader.add_argument("--engine", default="deterministic")
     reader.add_argument("--tier", default="local", choices=("local", "cloud"))
     reader.add_argument("--cloud-opt-in", action="store_true")
+    reader.add_argument(
+        "--context-chars", type=int, default=0, metavar="N",
+        help="let the model see up to N characters of the rest of the document "
+             "behind the page. Off by default: the context is charged to the "
+             "same budget as the passage.")
     reader.add_argument("--accept", metavar="SUGGESTION_ID")
     reader.add_argument("--dismiss", metavar="SUGGESTION_ID")
     reader.add_argument("--set", action="append", metavar="KEY=VALUE",

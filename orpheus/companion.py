@@ -55,20 +55,47 @@ from .utils import (NotFound, OrpheusError, from_json, new_id, now,
 # over one page. Anything slower than this is not a companion.
 DEFAULT_ENGINE = "deterministic"
 
+#: How much of the rest of the document a model may see alongside the passage.
+#:
+#: Zero is the default, which is the behaviour that existed before there was a
+#: choice: one page, in isolation. The cost is real and is charged in the same
+#: currency as everything else -- `llm_calls.prompt_chars` counts the context,
+#: because the model was sent it. In the calibration corpus a page averages
+#: 1,908 characters and a whole document 20,707, so asking for all of it is
+#: roughly an eleven-fold call.
+DEFAULT_CONTEXT_CHARS = 0
 
-def _fingerprint(type_id: str, properties: dict, page_no: int | None) -> str:
+#: What separates the two halves of the prompt. The model is told, and then the
+#: page boundary is enforced anyway -- see `_on_this_page`.
+CONTEXT_MARKER = "----- the passage to read -----"
+
+
+def _fingerprint(type_id: str, properties: dict, page_no: int | None,
+                 excerpt: str | None = None) -> str:
     """What makes two offers the same offer.
 
     Keyed on the page and the values rather than on the excerpt, so re-running a
     passage with a different engine does not re-offer what a person already
     dismissed. Without this, scrolling back is unusable and the companion
     becomes something to close.
+
+    Except when the values identify nothing. A model reading a real contract
+    returned four Clauses on one page, each quoting different text and each
+    carrying `{"page_no": 4}` and nothing else -- so all four were one
+    fingerprint, and three of them were dropped as duplicates of the first.
+    Where the properties are empty the excerpt is the only thing telling two
+    findings apart, so it goes in the key. That costs the engine-independence
+    above for exactly the offers that never had it to lose.
     """
-    payload = json.dumps({"type": type_id, "page": page_no,
-                          "properties": {k: str(v) for k, v in
-                                         sorted((properties or {}).items())}},
-                         sort_keys=True)
-    return hashlib.sha256(payload.encode()).hexdigest()[:32]
+    identifying = {k: str(v) for k, v in sorted((properties or {}).items())
+                   if k != "page_no" and v not in (None, "")}
+    payload = {"type": type_id, "page": page_no,
+               "properties": {k: str(v) for k, v in
+                              sorted((properties or {}).items())}}
+    if not identifying:
+        payload["excerpt"] = (excerpt or "").strip()
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode()).hexdigest()[:32]
 
 
 # ---------------------------------------------------------------------------
@@ -78,12 +105,23 @@ def _fingerprint(type_id: str, properties: dict, page_no: int | None) -> str:
 def read_passage(store: Store, document_id: str, page_no: int,
                  actor_id: str | None = None, engine: str = DEFAULT_ENGINE,
                  tier: str = "local", opt_in: bool = False,
-                 bundle: dict | None = None) -> dict:
+                 bundle: dict | None = None,
+                 context_chars: int = DEFAULT_CONTEXT_CHARS) -> dict:
     """Offer what this page seems to contain, and record that it was read.
 
     Idempotent by construction: a page read twice re-offers only what is still
     outstanding. What was accepted is an instance now, and what was dismissed
     stays dismissed.
+
+    `context_chars` lets a model see the rest of the document behind the
+    passage, which is what a clause defined on an earlier page needs. It is off
+    by default: the context is charged to the same budget as everything else,
+    and eleven times the prompt for a slightly better read is a deployment's
+    decision rather than this function's.
+
+    What it never changes is the *scope*. The offers are still about this page:
+    an excerpt the page does not contain is discarded rather than filed here,
+    and the count comes back in `n_outside_the_page`.
     """
     store.assert_writable()
     page = store.one(
@@ -96,9 +134,18 @@ def read_passage(store: Store, document_id: str, page_no: int,
         raise OrpheusError("No bundle is registered, so nothing can be typed.")
 
     text = page["text"] or ""
-    found = (_deterministic_offers(text, page_no) if engine == DEFAULT_ENGINE
-             else _engine_offers(store, document_id, page_no, text, bundle,
-                                 engine, tier, opt_in, actor_id))
+    context = ""
+    outside = 0
+    if engine == DEFAULT_ENGINE:
+        # Pattern matching over the page's own characters. Context would be
+        # text it could match in and then mislocate, and it cannot use it for
+        # understanding, so it is not offered any.
+        found = _deterministic_offers(text, page_no)
+    else:
+        context = _context_for(store, document_id, page_no, context_chars)
+        found, outside = _engine_offers(store, document_id, page_no, text,
+                                        bundle, engine, tier, opt_in, actor_id,
+                                        context=context)
 
     # Page-local offsets are lifted to document offsets here, for the same
     # reason the batch pass does it: both write to the same columns, and a
@@ -109,9 +156,11 @@ def read_passage(store: Store, document_id: str, page_no: int,
                   ).get(page_no, 0)
 
     offered = []
+    seen_ids: set[str] = set()
     with store.transaction():
         for item in found:
-            fingerprint = _fingerprint(item["type_id"], item["properties"], page_no)
+            fingerprint = _fingerprint(item["type_id"], item["properties"],
+                                       page_no, item.get("excerpt"))
             settled = store.one(
                 "SELECT suggestion_id, status FROM suggestions "
                 "WHERE document_id = ? AND fingerprint = ? "
@@ -124,7 +173,13 @@ def read_passage(store: Store, document_id: str, page_no: int,
                 "AND fingerprint = ? AND status = 'offered'",
                 (document_id, fingerprint))
             if live:
-                offered.append(get_suggestion(store, live["suggestion_id"]))
+                # Once. Two offers sharing a fingerprint are one suggestion,
+                # and appending it twice reported 9 things to look at where the
+                # store held 3 -- a number that also lands in `n_suggested` and
+                # from there in how well the companion is judged to be doing.
+                if live["suggestion_id"] not in seen_ids:
+                    seen_ids.add(live["suggestion_id"])
+                    offered.append(get_suggestion(store, live["suggestion_id"]))
                 continue
 
             suggestion_id = new_id("sug")
@@ -151,6 +206,7 @@ def read_passage(store: Store, document_id: str, page_no: int,
                 "decided_at": None,
                 "note": None,
             })
+            seen_ids.add(suggestion_id)
             offered.append(get_suggestion(store, suggestion_id))
 
         # Recorded whether or not anything was found. A page read and found to
@@ -167,6 +223,12 @@ def read_passage(store: Store, document_id: str, page_no: int,
 
     return {"document_id": document_id, "page_no": page_no, "engine": engine,
             "suggestions": offered, "n_offered": len(offered),
+            "context_chars": len(context),
+            # Offers the model made about the background rather than the
+            # passage. Reported rather than absorbed: a number that climbs says
+            # the instruction is not holding and the context is costing more
+            # than it returns.
+            "n_outside_the_page": outside,
             "text": text}
 
 
@@ -205,22 +267,110 @@ def _deterministic_offers(text: str, page_no: int) -> list[dict]:
     return offers
 
 
+
+
+def _context_for(store: Store, document_id: str, page_no: int,
+                 budget: int) -> str:
+    """The document around this page, up to a character budget.
+
+    Backwards first. A clause that only makes sense in the light of an earlier
+    definition is the case this exists for, and in a contract the definitions
+    come before the thing they define. Whatever budget is left runs forwards,
+    because a reference to a schedule points the other way.
+
+    Whole pages, never a truncated one: half a definition read as a whole one
+    is worse than not seeing it.
+    """
+    if budget <= 0:
+        return ""
+    pages = {r["page_no"]: r["text"] or "" for r in store.query(
+        "SELECT page_no, text FROM document_pages WHERE document_id = ?",
+        (document_id,))}
+
+    before: list[str] = []
+    left = budget
+    for n in range(page_no - 1, 0, -1):
+        text = pages.get(n)
+        if not text or len(text) > left:
+            break
+        before.append(f"--- Page {n} ---\n{text}")
+        left -= len(text)
+    before.reverse()
+
+    after: list[str] = []
+    for n in range(page_no + 1, max(pages, default=0) + 1):
+        text = pages.get(n)
+        if not text or len(text) > left:
+            break
+        after.append(f"--- Page {n} ---\n{text}")
+        left -= len(text)
+
+    return "\n\n".join(before + after)
+
+
+def _on_this_page(offer: dict, page_text: str) -> bool:
+    """Is this offer about the passage, or about the context around it?
+
+    The model is asked to read one page and given the rest as background, and
+    the difference between those two is not something to take its word for.
+    An offer whose excerpt is not in the page is an offer about somewhere else,
+    and letting it through would file a fact from page 3 under page 7 -- with a
+    page-scoped fingerprint, a page-relative offset, and a reviewer sent to the
+    wrong passage to check it.
+
+    Computed rather than trusted, for the same reason alignment is.
+    """
+    excerpt = (offer.get("excerpt") or "").strip()
+    if not excerpt:
+        # Nothing to check it against. The deterministic pass never produces
+        # this, and a model that does is offering something ungrounded, which
+        # the alignment machinery already records as such.
+        return True
+    return excerpt in page_text
+
+
 def _engine_offers(store: Store, document_id: str, page_no: int, text: str,
                    bundle: dict, engine: str, tier: str, opt_in: bool,
-                   actor_id: str | None) -> list[dict]:
-    """A model, over one page rather than the whole document.
+                   actor_id: str | None,
+                   context: str = "") -> tuple[list[dict], int]:
+    """A model, over one page, with the rest of the document behind it.
 
     Goes through the registry and the cloud gate exactly as a batch run does —
     a companion is not a reason to send text somewhere a batch could not.
+
+    Context is carried in the prompt rather than in a new engine argument.
+    Every engine takes the same keyword-only signature, including any a
+    deployment registered itself through `register_engine`, and widening it
+    would break those silently.
+
+    Returns the offers and how many were discarded for being about the context
+    rather than the passage — a number worth reporting rather than absorbing,
+    because it says how well the boundary is holding.
     """
     from .engines import get_engine
     from .population import normalise_population
 
+    prompt = text
+    if context:
+        # The instruction does not police scope, because `_on_this_page` does
+        # and telling a model twice cost findings: an earlier wording ending
+        # "report only things the passage itself contains" took the same page
+        # from ten offers to two. So this asks for comprehension and nothing
+        # else, and the boundary is enforced afterwards.
+        prompt = (
+            "Background from the rest of this document, to help you read the "
+            "passage that follows it -- it may define an abbreviation the "
+            "passage uses, or name something the passage only refers to.\n\n"
+            f"{context}\n\n{CONTEXT_MARKER}\n\n{text}")
+
     document = store.one("SELECT * FROM documents WHERE document_id = ?",
                          (document_id,))
     raw = get_engine(engine)(store=store, document=document, bundle=bundle,
-                             text=text, tier=tier, opt_in=opt_in,
+                             text=prompt, tier=tier, opt_in=opt_in,
                              actor_id=actor_id)
+    # Located against the passage, never against the prompt. An excerpt from
+    # the background would otherwise be found, given a character offset into
+    # text the page does not contain, and filed as if the page said it.
     population = normalise_population(raw, source_label=f"page {page_no}",
                                       text=text)
     offers = []
@@ -236,7 +386,11 @@ def _engine_offers(store: Store, document_id: str, page_no: int, text: str,
             "source": "ai_cloud" if tier == "cloud" else "ai_local",
             "confidence": entity.get("confidence"),
         })
-    return offers
+
+    if not context:
+        return offers, 0
+    kept = [o for o in offers if _on_this_page(o, text)]
+    return kept, len(offers) - len(kept)
 
 
 # ---------------------------------------------------------------------------
