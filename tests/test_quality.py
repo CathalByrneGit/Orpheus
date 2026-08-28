@@ -7,6 +7,8 @@ evidence yet", which is the answer it will give most often in practice.
 
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 import pytest
@@ -350,3 +352,27 @@ def test_the_span_points_at_the_document_not_the_page(store, tmp_path):
                            "FROM provenance p JOIN instances_KeyDate k "
                            "  ON k.instance_id = p.instance_id"):
         assert text[row["char_start"]:row["char_end"]] == row["raw_text"]
+
+
+def test_the_report_names_the_fields_people_keep_fixing(store):
+    # `orpheus report` crashed with KeyError('type_id') the first time anything
+    # was ever amended: the CLI read type_id/property/n while the function
+    # returns table_name/property_id/n_corrections. The block could not run
+    # until a store had an amendment in it, so nothing caught it until a real
+    # review corrected an invented clause heading.
+    from orpheus.cli import cmd_report
+    from orpheus.quality import property_corrections
+
+    from orpheus.audit import record_edit
+    store.insert("actors", {"actor_id": "act_a", "display_name": "Ada",
+                            "is_admin": 1,
+                            "created_at": "2026-01-01T00:00:00Z"})
+    record_edit(store, "instances_Clause", "inst_1", None, "amend",
+                previous={"heading": "Governing Law"}, new={"heading": ""},
+                actor_id="act_a")
+    store.conn.commit()
+
+    rows = property_corrections(store)
+    assert rows, "an amendment should be reported as a correction"
+    for key in ("table_name", "property_id", "n_corrections"):
+        assert key in rows[0], f"the CLI reads {key} and would crash without it"

@@ -299,7 +299,11 @@ def cmd_report(args) -> int:
     if corrections:
         print("\n  most corrected:")
         for row in corrections[:5]:
-            print(f"    {row['type_id']}.{row['property']}  {row['n']}")
+            line = (f"    {row['table_name']}.{row['property_id']}  "
+                    f"{row['n_corrections']}")
+            if row.get("example_was") is not None or row.get("example_now") is not None:
+                line += f"   e.g. {row['example_was']!r} -> {row['example_now']!r}"
+            print(line)
 
     violations = report["codelist_violations"]
     if violations:

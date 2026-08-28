@@ -366,7 +366,7 @@ def quality_report(store: Store, document_id: str | None = None,
         headline = (f"{overall['accuracy']:.0%} of reviewed instances were "
                     f"confirmed as extracted, {overall['amend_rate']:.0%} needed "
                     f"correcting and {overall['reject_rate']:.0%} were rejected, "
-                    f"over {overall['coverage']:.0%} of the population.")
+                    f"across {overall['coverage']:.0%} of the population.")
 
     return {
         "headline": headline,
