@@ -42,10 +42,16 @@ from .utils import (NotFound, OrpheusError, naive_key, new_id, now,
 # What a link rests on. Not a confidence score — a kind of evidence. An exact
 # registration number and a normalised name are not the same claim, and the
 # difference has to survive into anything built on top.
-BASES = ("human", "identifier", "naive_key", "similar", "search")
+BASES = ("human", "document", "identifier", "naive_key", "similar", "search")
 
 BASIS_CONFIDENCE = {
     "human": CONFIDENCE["explicit"],
+    # Not a match at all: for a document-scoped type the document *is* the
+    # identity, so this link is the rule rather than an inference from it.
+    # Stronger than `identifier` for that reason -- an identifier was extracted
+    # and may be wrong, whereas which document an instance was read from is
+    # recorded by ingest and is not the model's to get wrong.
+    "document": CONFIDENCE["explicit"],
     # A stated company number matching exactly is about as good as machine
     # evidence gets, but the number itself was extracted and may be wrong.
     "identifier": CONFIDENCE["named"],
@@ -103,6 +109,27 @@ NAIVE_CAVEAT = (
 # ---------------------------------------------------------------------------
 # Reading mentions
 # ---------------------------------------------------------------------------
+
+def _document_scoped(store: Store, bundle: dict | None = None) -> set[str]:
+    """Types whose identity is the document they were read from.
+
+    A contract's name is a title, not an identifier: three pairs of documents
+    in the calibration corpus are both called "STRATEGIC ALLIANCE AGREEMENT",
+    and they are different agreements, years and jurisdictions apart. Grouping
+    those on a normalised name would merge them into one page, and a false
+    merge is strictly worse than a false split -- a split leaves two rows a
+    person can join, a merge leaves nothing to notice.
+
+    So a document-scoped type gets one page per document. That is a false
+    *split* by construction where a contract really does appear in two filings,
+    which is the safe direction and exactly what `duplicate_pages()` exists to
+    put in front of a person.
+    """
+    bundle = bundle or bundle_mod.active(store)
+    if bundle is None:
+        return set()
+    return set(bundle_mod.implementing_types(bundle, "DocumentScoped"))
+
 
 def _named_tables(store: Store, bundle: dict | None = None) -> list[tuple[str, str]]:
     """`(type_id, table)` for every type that carries a name.
@@ -504,17 +531,29 @@ def duplicate_pages(store: Store, type_id: str | None = None,
     This is the other half of `similar_names()`: that one catches a mention with
     no page, this one catches two pages that should be one. Neither ever merges
     anything; both produce candidates for a person.
+
+    Document-scoped types are left out. For those the name is a title, so an
+    identical name is near-worthless evidence -- three pairs of unrelated
+    agreements in the calibration corpus are both called "STRATEGIC ALLIANCE
+    AGREEMENT" -- and offering them at a 100% score would misrepresent how good
+    that evidence is and train a reviewer to merge on it. Two such pages can
+    still be merged by hand; what is withheld is the machine offering it on
+    evidence it cannot stand behind.
     """
     try:
         from rapidfuzz import fuzz
     except ImportError:
         return []
 
+    scoped = _document_scoped(store)
+    if type_id and type_id in scoped:
+        return []
     clause = "AND type_id = ?" if type_id else ""
-    rows = store.query(
+    rows = [r for r in store.query(
         "SELECT entity_id, type_id, canonical_name, status FROM entities "
         f"WHERE merged_into IS NULL AND status != 'rejected' {clause} "
         "ORDER BY canonical_name", (type_id,) if type_id else ())
+        if r["type_id"] not in scoped]
 
     cutoff = threshold if threshold is not None else SIMILARITY_THRESHOLD
     counts = {row["entity_id"]: store.scalar(
@@ -642,13 +681,30 @@ def propose_entities(store: Store, type_id: str | None = None,
     if not pending:
         return {"proposed": 0, "linked": 0, "entities": [], "caveat": NAIVE_CAVEAT}
 
-    # Group by identifier where there is one, else by name key.
+    # Group by identifier where there is one, else by name key -- except for a
+    # document-scoped type, where the document *is* the identity and a shared
+    # title is not evidence of anything.
+    scoped = _document_scoped(store)
     groups: dict[tuple, list[dict]] = {}
     for found in pending:
         detail = mention(store, found["instance_id"])["properties"]
         identifier = detail.get("registration_number")
-        key = (found["type_id"], f"id:{identifier}") if identifier \
-            else (found["type_id"], f"key:{found['naive_key']}")
+        if found["type_id"] in scoped:
+            # The document bounds how far the name reaches; the name separates
+            # things inside it. One document really can describe two contracts
+            # -- "AMENDMENT NO. 1" and the agreement it amends sit in the same
+            # filing -- so keying on the document alone merges an amendment
+            # into the thing it changes. `naive_key` is derived here rather
+            # than read, because a bundle that has just gained the column has
+            # it empty on every row written before.
+            key = (found["type_id"],
+                   f"doc:{found['document_id']}:"
+                   f"{found['naive_key'] or naive_key(found['name'] or '')}")
+            identifier = None
+        elif identifier:
+            key = (found["type_id"], f"id:{identifier}")
+        else:
+            key = (found["type_id"], f"key:{found['naive_key']}")
         groups.setdefault(key, []).append({**found, "identifier": identifier})
 
     proposed, attached, linked, entities = 0, 0, 0, []
@@ -656,12 +712,16 @@ def propose_entities(store: Store, type_id: str | None = None,
         for (found_type, key), members in sorted(groups.items()):
             if len(members) < min_mentions:
                 continue
-            basis = "identifier" if key.startswith("id:") else "naive_key"
+            basis = ("document" if key.startswith("doc:")
+                     else "identifier" if key.startswith("id:") else "naive_key")
             # The longest spelling is the least abbreviated, which is the better
             # page title: "Halloran Instruments, Inc." over "Halloran".
             canonical = max((m["name"] for m in members), key=len)
             identifier = members[0].get("identifier") if basis == "identifier" else None
-            entity_id = _page_for(store, found_type, canonical, identifier)
+            scoped_to = members[0]["document_id"] if basis == "document" else None
+            entity_id = _page_for(store, found_type, canonical, identifier,
+                                  document_id=scoped_to)
+
             existing = entity_id is not None
             if existing:
                 # Attached, not renamed. The existing title was somebody's
@@ -670,9 +730,14 @@ def propose_entities(store: Store, type_id: str | None = None,
                 attached += 1
                 canonical = get_entity(store, entity_id)["canonical_name"]
             else:
-                entity_id = create_entity(store, found_type, canonical,
-                                          actor_id=actor_id, source="ai_local",
-                                          status="unconfirmed")
+                # Two documents can legitimately produce two pages with the
+                # same title -- that is the point of a document-scoped type --
+                # so the page says which document it came from rather than
+                # inventing a disambiguating name nobody used.
+                entity_id = create_entity(
+                    store, found_type, canonical, actor_id=actor_id,
+                    source="ai_local", status="unconfirmed",
+                    description=_scope_note(store, scoped_to) if scoped_to else None)
                 proposed += 1
             for member in members:
                 link_mention(store, entity_id, member["instance_id"],
@@ -687,16 +752,40 @@ def propose_entities(store: Store, type_id: str | None = None,
             "entities": entities, "caveat": NAIVE_CAVEAT}
 
 
+def _scope_note(store: Store, document_id: str) -> str:
+    """Which document a document-scoped page came from, for its description."""
+    filename = store.scalar("SELECT filename FROM documents WHERE document_id = ?",
+                            (document_id,))
+    return f"Read from {filename or document_id}."
+
+
 def _page_for(store: Store, type_id: str, canonical_name: str,
-              identifier: str | None) -> str | None:
+              identifier: str | None,
+              document_id: str | None = None) -> str | None:
     """The page this group already belongs to, if there is one.
 
-    Matched on the same two bases the grouping itself uses, in the same order:
-    a stated identifier already cited on a page beats a normalised name, and a
-    normalised name beats nothing. Anything weaker than an exact match is left
-    to `duplicate_pages()` and a person -- attaching on a *similar* name here
-    would be resolution by machine, which is what the whole design refuses.
+    Matched on the same bases the grouping itself uses, in the same order: for
+    a document-scoped type the document, and otherwise a stated identifier
+    already cited on a page, then a normalised name. Anything weaker than an
+    exact match is left to `duplicate_pages()` and a person -- attaching on a
+    *similar* name here would be resolution by machine, which is what the whole
+    design refuses.
     """
+    if document_id:
+        # Re-extracting a document makes new instances for things that already
+        # have a page. Both halves of the identity are matched: the document,
+        # so a different filing with the same title is never pulled in, and the
+        # title, so a document holding an agreement and an amendment to it does
+        # not attach both to whichever page was made first.
+        row = store.one(
+            "SELECT e.entity_id FROM entities e "
+            "JOIN entity_mentions m ON m.entity_id = e.entity_id "
+            "  AND m.unlinked_at IS NULL "
+            "WHERE e.merged_into IS NULL AND e.type_id = ? "
+            "AND m.document_id = ? AND e.naive_key = ? LIMIT 1",
+            (type_id, document_id, naive_key(canonical_name)))
+        return row["entity_id"] if row else None
+
     if identifier:
         table = store.scalar(
             "SELECT table_name FROM instance_index WHERE type_id = ? LIMIT 1",

@@ -55,6 +55,7 @@ has checked it.
 | Basis | What it means | Confidence |
 |---|---|---|
 | `human` | A person said so | `explicit` |
+| `document` | The type is document-scoped, and this is its document | `explicit` |
 | `identifier` | A stated registration number matched exactly | `named` |
 | `naive_key` | A normalised name matched exactly | `implied` |
 | `similar` | Names close but not equal after normalising | `inferred` |
@@ -64,6 +65,12 @@ These are different **kinds** of claim, not points on one scale, and collapsing
 them would lose the distinction permanently. An exact company number is better
 evidence than any spelling, however close — so `propose_entities()` groups on
 identifiers first and falls back to names.
+
+`document` outranks `identifier` because it is not a match at all. For a
+[document-scoped type](data-model.md#documentscoped-when-a-name-is-a-title-not-an-identifier)
+the document *is* the identity, so the link is the rule rather than an inference
+from it — and which document an instance was read from is recorded by ingest,
+not extracted by a model that could get it wrong.
 
 ### `similar` catches what an exact key cannot
 
@@ -121,6 +128,15 @@ survivor. Found by running the thing, not by reasoning about it — a three-line
 corpus produced four pages where three were right.
 
 Neither function ever merges anything.
+
+And neither is offered for a
+[document-scoped type](data-model.md#documentscoped-when-a-name-is-a-title-not-an-identifier).
+For those the name is a title, so an identical name is near-worthless evidence
+of sameness — three pairs of unrelated agreements in the calibration corpus are
+each called "STRATEGIC ALLIANCE AGREEMENT". Offering them at a 100% score would
+misrepresent how good that evidence is, and train a reviewer to merge on it. Two
+such pages can still be merged by hand; what is withheld is the machine offering
+it on evidence it cannot stand behind.
 
 ---
 

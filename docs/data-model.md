@@ -119,7 +119,8 @@ object type silently stops being included in an answer.
 | Interface | Implemented by | The question it answers |
 |---|---|---|
 | `Reviewable` | every extracted type | "What has not been checked yet?" |
-| `Named` | `Company`, `Person` | "Does this name appear anywhere else?" |
+| `Named` | `Company`, `Person`, `Contract` | "Does this name appear anywhere else?" |
+| `DocumentScoped` | `Contract` | "Is this name an identifier, or just a title?" |
 | `PageAnchored` | `Clause`, `KeyDate`, `MonetaryAmount` | "What can I point at on this page?" |
 
 ```python
@@ -140,6 +141,40 @@ if a caller needs those it is asking a type question, not an interface one.
 `bundle.validate()` refuses a bundle where a type declares an interface it
 cannot satisfy. An unchecked interface is worse than none: the cross-type query
 would fail at runtime, or quietly return fewer rows than it should.
+
+#### `DocumentScoped`: when a name is a title, not an identifier
+
+`Named` carries an assumption that holds for a company and not for a contract:
+that two documents using the same name are talking about the same thing. A
+company name identifies a company. A contract name is a *title* — in the
+calibration corpus three pairs of unrelated agreements are each called
+"STRATEGIC ALLIANCE AGREEMENT", years and jurisdictions apart.
+
+`DocumentScoped` says so. A type carrying it is identified by **the document it
+was read from together with its name**: the name separates things inside one
+document, and the document bounds how far the name reaches. So it gets a page
+per contract per filing, and is never grouped, merged or matched across
+documents by name.
+
+The two halves both earn their place, and each was put there by a case the real
+corpus produced:
+
+- **Without the document**, "STRATEGIC ALLIANCE AGREEMENT" in two filings
+  becomes one page — two agreements merged into one, with nothing left to
+  notice it by.
+- **Without the name**, one filing holding both "AMENDMENT NO. 1" and the
+  "Wireless Content License Agreement Number 12965" it amends becomes one page
+  — an amendment merged into the thing it changes.
+
+A false merge is strictly worse than a false split. A split leaves two rows a
+person can join; a merge leaves nothing. So where a contract genuinely does
+appear in two filings this produces two pages, which is the safe direction and
+the case `merge()` exists for.
+
+It also changes what the machine is allowed to *offer*. `duplicate_pages()`
+skips these types, and the corpus escalation leaves them out of its candidate
+pool: for a title, an identical name is near-worthless evidence, and offering
+it at a 100% score would misrepresent how good that evidence is.
 
 `Relationship` implements nothing — it is an edge, not an extracted instance,
 and its primary key is `edge_id`.

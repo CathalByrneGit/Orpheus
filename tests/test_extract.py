@@ -111,7 +111,9 @@ def test_the_run_is_recorded_whether_it_succeeds_or_fails(ready):
     extract(store, document_id, tier="local", actor_id="act_test")
     run = store.one("SELECT * FROM extraction_runs")
     assert run["status"] == "succeeded"
-    assert run["bundle_version"] == "0.2.0"
+    # Read from the shipped bundle rather than pinned: what is under test is
+    # that the run records which ontology produced it, not the number itself.
+    assert run["bundle_version"] == bundle_mod.load()["bundleVersion"]
     assert run["finished_at"]
 
 

@@ -219,7 +219,9 @@ def test_accepting_a_new_property_changes_the_bundle_and_bumps_its_version(with_
     result = review_schema_amendment(store, amendment["amendment_id"], "accepted",
                                      "act_admin")
     assert result["applied_to_bundle"] is True
-    assert result["bundle_version"] == "0.2.1"
+    # The patch bump, computed from whatever the shipped bundle is on, so this
+    # keeps testing the bump rather than a number that moves with the ontology.
+    assert result["bundle_version"] == bump_patch(bundle_mod.load()["bundleVersion"])
 
     # The column exists now, and the property is amendable where it was refused.
     assert "renewal_notice_period" in store.columns("instances_Contract")

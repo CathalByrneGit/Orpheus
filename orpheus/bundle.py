@@ -27,7 +27,7 @@ from .utils import OrpheusError, from_json
 
 SCHEMA_DIR = Path(__file__).parent / "schemas"
 BUNDLE_DIR = Path(__file__).parent / "bundles"
-DEFAULT_BUNDLE = BUNDLE_DIR / "contract-core-0.2.0.json"
+DEFAULT_BUNDLE = BUNDLE_DIR / "contract-core-0.3.0.json"
 
 SPEC_SCHEMA = SCHEMA_DIR / "ontologySpecR.bundle.schema.json"
 ORPHEUS_SCHEMA = SCHEMA_DIR / "orpheus.bundle.schema.json"

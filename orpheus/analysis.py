@@ -142,8 +142,15 @@ def match_counterparties(store: Store, bundle: dict, document_id: str,
     # Searches every type implementing Named, not just the same type: whether a
     # match lands on a Company or a Person is a finding, not something to filter
     # out in advance.
+    #
+    # Document-scoped types are the exception, and the reason is the reason
+    # they are document-scoped: their name is a title, so a name match against
+    # one is not evidence that two documents are about the same thing. Leaving
+    # them in would put 32 contract titles into the candidate pool for every
+    # company and person in the corpus.
+    scoped = set(bundle_mod.implementing_types(bundle, "DocumentScoped"))
     named = [row for row in object_set_by_interface(store, "Named", bundle=bundle)
-             if row.get("naive_key")]
+             if row.get("naive_key") and row.get("type_id") not in scoped]
     registered = identifier_matches(store, document_id)
 
     out = []

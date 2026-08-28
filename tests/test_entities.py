@@ -14,10 +14,11 @@ import pytest
 import orpheus.bundle as bundle_mod
 from orpheus.entities import (candidates_for_mention, confirm_entity,
                               confirm_link, create_entity, describe_entity,
-                              entities_in_document, entity_page, get_entity,
-                              link_mention, list_entities, merge_entities,
-                              propose_entities, reject_entity, rename_entity,
-                              unlink_mention, unlinked_mentions)
+                              duplicate_pages, entities_in_document,
+                              entity_page, get_entity, link_mention,
+                              list_entities, merge_entities, propose_entities,
+                              reject_entity, rename_entity, unlink_mention,
+                              unlinked_mentions)
 from orpheus.utils import NotFound, OrpheusError, naive_key
 
 # One company written two ways with a shared registration number; a genuinely
@@ -617,3 +618,152 @@ def test_a_merged_away_page_is_not_attached_to(corpus):
 
     again = propose_entities(corpus, actor_id="act_a")
     assert again["entities"][0]["entity_id"] != pages[0]["entity_id"]
+
+
+# ---------------------------------------------------------------------------
+# Document-scoped pages
+# ---------------------------------------------------------------------------
+#
+# A Company's name identifies it across documents; a Contract's does not. Its
+# name is a title, and three pairs of unrelated agreements in the calibration
+# corpus are each called "STRATEGIC ALLIANCE AGREEMENT". Grouping those the way
+# companies are grouped merges two agreements into one page, and a false merge
+# is strictly worse than a false split: a split leaves two rows a person can
+# join, a merge leaves nothing to notice.
+
+def _contract(store, instance_id, document_id, name):
+    store.execute(
+        "INSERT INTO instances_Contract (instance_id, document_id, name,"
+        " naive_key, source, confidence, status, created_at)"
+        " VALUES (?,?,?,?,'ai_cloud',1.0,'unconfirmed',datetime('now'))",
+        (instance_id, document_id, name, naive_key(name)))
+    store.execute(
+        "INSERT INTO instance_index (instance_id, type_id, table_name,"
+        " document_id, created_at) VALUES (?,'Contract','instances_Contract',?,"
+        " datetime('now'))", (instance_id, document_id))
+    return instance_id
+
+
+@pytest.fixture
+def contracts(corpus):
+    """The same title in two documents, and a third with its own."""
+    _contract(corpus, "c_1", "doc_1", "STRATEGIC ALLIANCE AGREEMENT")
+    _contract(corpus, "c_2", "doc_2", "STRATEGIC ALLIANCE AGREEMENT")
+    _contract(corpus, "c_3", "doc_3", "SPONSORSHIP AGREEMENT")
+    corpus.conn.commit()
+    return corpus
+
+
+def test_the_same_title_in_two_documents_is_two_pages(contracts):
+    propose_entities(contracts, type_id="Contract", actor_id="act_a")
+    pages = contracts.query(
+        "SELECT entity_id, canonical_name FROM entities WHERE type_id = 'Contract'"
+        " AND merged_into IS NULL")
+    assert len(pages) == 3, "one page per document, not one per title"
+    titles = sorted(p["canonical_name"] for p in pages)
+    assert titles == ["SPONSORSHIP AGREEMENT",
+                      "STRATEGIC ALLIANCE AGREEMENT",
+                      "STRATEGIC ALLIANCE AGREEMENT"]
+
+
+def test_one_document_describing_two_agreements_gets_two_pages(contracts):
+    # Found by running 40 real filings: doc_8d39 holds both "AMENDMENT NO. 1"
+    # and "Wireless Content License Agreement Number 12965" -- an amendment and
+    # the agreement it amends. Keying on the document alone merged them, which
+    # is the same false merge from the other direction.
+    _contract(contracts, "c_4", "doc_1", "AMENDMENT NO. 1")
+    contracts.conn.commit()
+    propose_entities(contracts, type_id="Contract", actor_id="act_a")
+
+    titles = sorted(r["canonical_name"] for r in contracts.query(
+        "SELECT e.canonical_name FROM entities e"
+        " JOIN entity_mentions m ON m.entity_id = e.entity_id"
+        " WHERE e.type_id = 'Contract' AND m.document_id = 'doc_1'"))
+    assert titles == ["AMENDMENT NO. 1", "STRATEGIC ALLIANCE AGREEMENT"]
+
+
+def test_the_same_agreement_read_twice_from_one_document_is_one_page(contracts):
+    # The other side of the rule: two instances, one document, one title. Two
+    # readings of the same thing, not two things.
+    _contract(contracts, "c_1b", "doc_1", "Strategic Alliance Agreement")
+    contracts.conn.commit()
+    propose_entities(contracts, type_id="Contract", actor_id="act_a")
+
+    assert contracts.scalar(
+        "SELECT COUNT(DISTINCT e.entity_id) FROM entities e"
+        " JOIN entity_mentions m ON m.entity_id = e.entity_id"
+        " WHERE e.type_id = 'Contract' AND m.document_id = 'doc_1'") == 1
+
+
+def test_a_contract_page_is_linked_on_the_document_not_the_name(contracts):
+    propose_entities(contracts, type_id="Contract", actor_id="act_a")
+    bases = {r["basis"] for r in contracts.query(
+        "SELECT m.basis FROM entity_mentions m JOIN entities e"
+        " ON e.entity_id = m.entity_id WHERE e.type_id = 'Contract'")}
+    assert bases == {"document"}
+
+
+def test_a_contract_page_says_which_document_it_came_from(contracts):
+    # Two pages with the same title are honest -- both really are called that
+    # -- but unreadable side by side without saying which is which. The
+    # description carries the document rather than inventing a name nobody used.
+    propose_entities(contracts, type_id="Contract", actor_id="act_a")
+    notes = [r["description"] for r in contracts.query(
+        "SELECT description FROM entities WHERE type_id = 'Contract'"
+        " ORDER BY description")]
+    assert notes == ["Read from doc_1.pdf.", "Read from doc_2.pdf.",
+                     "Read from doc_3.pdf."]
+
+
+def test_re_extracting_a_document_attaches_rather_than_minting_a_page(contracts):
+    # Proposing again after ingesting more is the normal thing to do, and
+    # without this the wiki fragments a little every round.
+    _contract(contracts, "c_4", "doc_1", "AMENDMENT NO. 1")
+    contracts.conn.commit()
+    propose_entities(contracts, type_id="Contract", actor_id="act_a")
+    before = contracts.scalar("SELECT COUNT(*) FROM entities"
+                              " WHERE type_id = 'Contract' AND merged_into IS NULL")
+
+    # doc_1 read again: both of its agreements come back as new instances.
+    _contract(contracts, "c_1b", "doc_1", "STRATEGIC ALLIANCE AGREEMENT")
+    _contract(contracts, "c_4b", "doc_1", "AMENDMENT NO. 1")
+    contracts.conn.commit()
+    result = propose_entities(contracts, type_id="Contract", actor_id="act_a")
+
+    assert result["proposed"] == 0 and result["attached"] == 2
+    assert contracts.scalar(
+        "SELECT COUNT(*) FROM entities WHERE type_id = 'Contract'"
+        " AND merged_into IS NULL") == before
+    # And each went back to its own page rather than both to the first.
+    assert contracts.scalar(
+        "SELECT COUNT(*) FROM entity_mentions m JOIN entities e"
+        " ON e.entity_id = m.entity_id WHERE e.canonical_name = 'AMENDMENT NO. 1'"
+        " AND m.unlinked_at IS NULL") == 2
+
+
+def test_a_second_document_never_attaches_to_the_first_ones_page(contracts):
+    # The failure this exists to stop, from the other direction: propose one
+    # document, then the other, and the second must not find the first's page
+    # by its title.
+    propose_entities(contracts, type_id="Contract", actor_id="act_a")
+    pages = {r["entity_id"] for r in contracts.query(
+        "SELECT DISTINCT e.entity_id FROM entities e"
+        " JOIN entity_mentions m ON m.entity_id = e.entity_id"
+        " WHERE e.type_id = 'Contract' AND m.document_id IN ('doc_1','doc_2')")}
+    assert len(pages) == 2
+
+
+def test_two_contracts_sharing_a_title_are_not_offered_as_a_merge(contracts):
+    pytest.importorskip("rapidfuzz")
+    propose_entities(contracts, type_id="Contract", actor_id="act_a")
+    # An identical title scores 100%, which for a Company would be the
+    # strongest candidate there is and for a Contract is near-worthless.
+    assert duplicate_pages(contracts, type_id="Contract") == []
+    assert not [p for p in duplicate_pages(contracts)
+                if p["keep"]["type_id"] == "Contract"]
+
+
+def test_a_company_is_still_grouped_across_documents_by_name(contracts):
+    # The rule is per type, not a general retreat from name matching.
+    result = propose_entities(contracts, type_id="Company", actor_id="act_a")
+    assert {e["basis"] for e in result["entities"]} <= {"identifier", "naive_key"}

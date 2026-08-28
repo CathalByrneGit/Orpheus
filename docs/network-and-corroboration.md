@@ -175,6 +175,35 @@ shape before anybody thinks to ask it.
 The lint gained one check the graph makes possible: **`fragile_join`**, an
 articulation point whose links nobody has confirmed.
 
+### What decides how much of a corpus a graph can describe
+
+Which types get pages, and nothing else. The 40-document run makes the point
+sharply. Only `Company` and `Person` had pages, so 57 of 961 extracted relations
+reached the graph — 6% — and every structural view was really a view of who
+employs whom.
+
+The missing relations were not wrong or unlinked; their other end was a
+`Contract`, and a contract had no page to be. Giving contracts pages took the
+graph to **175 relations, 18%**, and what appeared is exactly the shape the
+structure exists to show:
+
+| link | from → to | edges |
+|---|---|---|
+| `party_to` | Company → Contract | 71 |
+| `signed_by` | Person → Contract | 44 |
+| `employed_by` | Person → Company | 58 |
+| `references` | Contract → Contract | 3 |
+
+Who is party to what, with whom, and who signed it. The rest — 785 edges of
+`contains_clause`, `imposes`, `dated_by`, `valued_at` — join a document to its
+own internals, and a clause is not a thing with an identity across documents.
+Those are correctly outside the graph, and `coverage` counts them as structural
+rather than as work.
+
+The lesson generalises past contracts: **a type without a page is invisible to
+every structural view**, however much the extractor found about it, and the
+number that reveals it is `coverage` rather than anything in the shape.
+
 ### Drawing it
 
 `/-/orpheus/map` draws the same projection: force-directed, pan and zoom, drag
@@ -184,7 +213,7 @@ has confirmed.
 
 Two things are deliberate. **The coverage banner leads**, as it does on the
 network page and more so — a diagram is more persuasive than a table and says
-exactly as much, and a map read without knowing that 30% of extracted relations
+exactly as much, and a map read without knowing what share of extracted relations
 reached the graph is a confident picture of a fraction of the evidence. And it
 is **not a second source of truth**: the page reads `/graph/map`, which is
 `graph.build` with no separate projection, so the picture cannot show a relation
