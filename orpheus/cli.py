@@ -35,6 +35,20 @@ DOCUMENT_SUFFIXES = (".pdf", ".docx", ".txt", ".md",
 # Output
 # ---------------------------------------------------------------------------
 
+def _clip(text: object, width: int) -> str:
+    """Shorten a name for a column, but never silently.
+
+    A name cut to fit reads as a different name: `Zebra Technologies Inter`
+    and `Zebra Technologies International, LLC` are one organisation, and a
+    reader cannot tell that from the column. The ellipsis is the difference
+    between a shortened name and a wrong one.
+    """
+    text = "" if text is None else str(text)
+    if len(text) <= width:
+        return text
+    return text[:width - 1] + "\u2026"
+
+
 def emit(value, as_json: bool) -> None:
     if as_json:
         json.dump(value, sys.stdout, indent=2, default=str)
@@ -334,7 +348,7 @@ def cmd_wiki(args) -> int:
               f"existed, from {result['linked']} mention(s).")
         for entity in result["entities"]:
             where = "existing" if entity.get("existing") else "new"
-            print(f"  {entity['entity_id']}  {entity['canonical_name'][:38]:40} "
+            print(f"  {entity['entity_id']}  {_clip(entity['canonical_name'], 38):40} "
                   f"{entity['n_mentions']:>3} mention(s)  via {entity['basis']:<11}"
                   f" {where}")
         if result["entities"]:
@@ -354,7 +368,7 @@ def cmd_wiki(args) -> int:
             return 0
         for row in rows:
             print(f"  {row['entity_id']}  {row['status']:<12} "
-                  f"{row['canonical_name'][:40]:42} "
+                  f"{_clip(row['canonical_name'], 40):42} "
                   f"{row['n_documents']:>3} doc(s)  "
                   f"{row['n_confirmed'] or 0}/{row['n_mentions']} confirmed")
         return 0
@@ -452,19 +466,19 @@ def cmd_graph(args) -> int:
         if result["components"]:
             print("\n  islands (deterministic):")
             for island in result["components"]:
-                names = ", ".join(t["name"][:24] for t in island["top_entities"])
+                names = ", ".join(_clip(t["name"], 24) for t in island["top_entities"])
                 print(f"    {island['n_entities']:>3} page(s)  {names}")
         if result["articulation_points"]:
             print("\n  pages holding the graph together (deterministic):")
             for point in result["articulation_points"]:
-                print(f"    {point['name'][:36]:38} {point['degree']} link(s)")
+                print(f"    {_clip(point['name'], 36):38} {point['degree']} link(s)")
         if result["disconnected_pairs"]:
             print("\n  clusters that never touch (heuristic):")
             for pair in result["disconnected_pairs"][:10]:
                 print(f"    {pair['labels'][0][:26]:28} <-> {pair['labels'][1][:26]}")
         if result["isolates"]:
             print(f"\n  related to nothing: "
-                  f"{', '.join(i['name'][:24] for i in result['isolates'][:8])}")
+                  f"{', '.join(_clip(i['name'], 24) for i in result['isolates'][:8])}")
         print(f"\n  {result['note']}")
         return 0
 
@@ -477,9 +491,9 @@ def cmd_graph(args) -> int:
             for hop in path["hops"]:
                 state = (f"{hop['n_confirmed']} confirmed"
                          if hop["n_confirmed"] else "nobody has checked this")
-                print(f"      {hop['from_name'][:20]:22} "
+                print(f"      {_clip(hop['from_name'], 20):22} "
                       f"{(hop['link_type_id'] or '?')[:18]:20} "
-                      f"{hop['to_name'][:20]:22} "
+                      f"{_clip(hop['to_name'], 20):22} "
                       f"{hop['n_documents']} doc(s), {state}")
             print()
         return 0
@@ -489,19 +503,19 @@ def cmd_graph(args) -> int:
         if result["by_betweenness"] is not None:
             print("  by betweenness (sits on paths between others):")
             for node in result["by_betweenness"][:15]:
-                print(f"    {node['name'][:32]:34} {node['betweenness']:.4f}  "
+                print(f"    {_clip(node['name'], 32):34} {node['betweenness']:.4f}  "
                       f"{node['degree']} link(s)")
             print()
         print("  by degree (appears in the most relations):")
         for node in result["by_degree"][:15]:
-            print(f"    {node['name'][:32]:34} {node['degree']} link(s)")
+            print(f"    {_clip(node['name'], 32):34} {node['degree']} link(s)")
         return 0
 
     if args.action == "edges":
         print(result["coverage"]["note"] + "\n")
         for edge in result["edges"]:
-            print(f"  {edge['from_name'][:24]:26} {edge['link_type_id'][:18]:20} "
-                  f"{edge['to_name'][:24]:26} {edge['n_documents']} doc(s)")
+            print(f"  {_clip(edge['from_name'], 24):26} {_clip(edge['link_type_id'], 18):20} "
+                  f"{_clip(edge['to_name'], 24):26} {edge['n_documents']} doc(s)")
         return 0
 
     entity = result["entity"]
@@ -509,8 +523,8 @@ def cmd_graph(args) -> int:
           f"{result['n_nodes']} page(s), {result['n_edges']} relation(s) within "
           f"{result['depth']} hop(s)\n")
     for edge in result["edges"]:
-        print(f"  {edge['from_name'][:24]:26} {edge['link_type_id'][:18]:20} "
-              f"{edge['to_name'][:24]:26} {edge['n_documents']} doc(s)")
+        print(f"  {_clip(edge['from_name'], 24):26} {_clip(edge['link_type_id'], 18):20} "
+              f"{_clip(edge['to_name'], 24):26} {edge['n_documents']} doc(s)")
     return 0
 
 
@@ -536,13 +550,13 @@ def cmd_corroboration(args) -> int:
         print(result["headline"] + "\n")
     for claim in result["properties"]:
         mark = "*" if claim["independent"] else "copied"
-        print(f"  [{mark:>6}] {claim['subject_name'][:28]:30} "
+        print(f"  [{mark:>6}] {_clip(claim['subject_name'], 28):30} "
               f"{claim['property_id']:<16} {str(claim['value'])[:26]:28} "
               f"{claim['n_documents']} doc(s) / {claim['n_wordings']} wording(s)")
     for claim in result["relations"]:
         mark = "*" if claim["independent"] else "copied"
-        print(f"  [{mark:>6}] {claim['from_name'][:24]:26} "
-              f"{claim['link_type_id'][:16]:18} {claim['to_name'][:24]:26} "
+        print(f"  [{mark:>6}] {_clip(claim['from_name'], 24):26} "
+              f"{_clip(claim['link_type_id'], 16):18} {_clip(claim['to_name'], 24):26} "
               f"{claim['n_documents']} doc(s) / {claim['n_wordings']} wording(s)")
     if "note" in result:
         print(f"\n  {result['note']}")
@@ -640,8 +654,8 @@ def cmd_questions(args) -> int:
             if "from_name" in hop:
                 state = (f"{hop['n_confirmed']} confirmed"
                          if hop["n_confirmed"] else "nobody has checked this")
-                print(f"        {hop['from_name'][:22]:24} "
-                      f"{hop['link_type_id'][:16]:18} {hop['to_name'][:22]:24} "
+                print(f"        {_clip(hop['from_name'], 22):24} "
+                      f"{_clip(hop['link_type_id'], 16):18} {_clip(hop['to_name'], 22):24} "
                       f"{hop['n_documents']} doc(s), {state}")
             else:
                 print(f"        {hop.get('part', '?'):<16} "
@@ -814,7 +828,7 @@ def cmd_tension(args) -> int:
             return 0
         for conflict in conflicts:
             mark = "recorded" if conflict["existing_tension_id"] else "NEW"
-            print(f"  [{mark:>8}] {conflict['subject_name'][:32]:34} "
+            print(f"  [{mark:>8}] {_clip(conflict['subject_name'], 32):34} "
                   f"{conflict['property_id']:<18} "
                   f"{conflict['n_values']} values")
         return 0
@@ -852,7 +866,7 @@ def cmd_tension(args) -> int:
                 excerpt = " ".join((side.get("excerpt") or "").split())[:40]
                 print(f"      {side.get('filename', '?')[:20]:22} "
                       f"p{side.get('page_no') or '?':<3} "
-                      f"{(side.get('position') or '')[:24]:26} {excerpt!r}")
+                      f"{_clip(side.get('position') or '', 24):26} {excerpt!r}")
         return 0
 
     verbs = {"accept": tensions_mod.accept_tension,
@@ -911,7 +925,7 @@ def _print_page(page: dict) -> None:
         evidence = record["evidence"] or {}
         document = record["document"] or {}
         excerpt = " ".join((evidence.get("excerpt") or "").split())[:44]
-        print(f"    {document.get('filename', '?')[:22]:24} "
+        print(f"    {_clip(document.get('filename', '?'), 22):24} "
               f"p{evidence.get('page_no') or '?':<3} "
               f"{record['link']['status']:<12} {excerpt!r}")
 
