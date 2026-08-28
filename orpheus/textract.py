@@ -248,6 +248,74 @@ def split_pages(text: str) -> list[str]:
     return pages or [""]
 
 
+# A page is the unit a person reads and the anchor every extraction is
+# attributed to. Formats that have real pages keep theirs. Formats that have
+# none used to become a single page of whatever length, which made the reading
+# companion useless on a long contract ("Page 1 of 1" over 40,000 words) and
+# collapsed provenance to one number: every fact in the document cited page 1,
+# which is no better than citing the document. Roughly a printed page of
+# contract text.
+TEXT_PAGE_CHARS = 3000
+
+
+def _units(text: str, pattern: str) -> list[str]:
+    """Split into chunks that still concatenate back to the original.
+
+    The separator is kept on the chunk before it, so joining the result is the
+    input again. Nothing downstream may lose a character: alignment locates
+    excerpts by offset into exactly this text.
+    """
+    parts = re.split(pattern, text)
+    units = []
+    for index in range(0, len(parts), 2):
+        body = parts[index]
+        separator = parts[index + 1] if index + 1 < len(parts) else ""
+        if body or separator:
+            units.append(body + separator)
+    return units or [text]
+
+
+def paginate(text: str, target: int = TEXT_PAGE_CHARS) -> list[str]:
+    """Break text with no page signal of its own into readable pages.
+
+    Splits on blank lines first, then on line breaks, then -- only for a single
+    run of text longer than a page with no break in it at all -- on whitespace.
+    Concatenating the result reproduces the input exactly.
+    """
+    if len(text) <= target:
+        return [text]
+
+    def group(units: list[str], split_further) -> list[str]:
+        pages: list[str] = []
+        current = ""
+        for unit in units:
+            if len(unit) > target and split_further is not None:
+                if current:
+                    pages.append(current)
+                    current = ""
+                pages.extend(split_further(unit))
+                continue
+            if current and len(current) + len(unit) > target:
+                pages.append(current)
+                current = unit
+            else:
+                current += unit
+        if current:
+            pages.append(current)
+        return pages
+
+    def by_words(chunk: str) -> list[str]:
+        # No break of any kind inside a page's worth of text. Cut on spaces so
+        # a word is never split in half; a run with no spaces either is left
+        # whole rather than chopped mid-token.
+        return group(_units(chunk, r"(\s+)"), None) or [chunk]
+
+    def by_lines(chunk: str) -> list[str]:
+        return group(_units(chunk, r"(\n)"), by_words)
+
+    return group(_units(text, r"(\n[ \t]*\n)"), by_lines) or [text]
+
+
 _TAG = re.compile(r"<[^>]+>")
 
 
@@ -273,14 +341,24 @@ def docx_text(path: str | Path) -> str:
     return re.sub(r"\n{3,}", "\n\n", text)
 
 
+def _repaginate(pages: list[str]) -> list[str]:
+    out: list[str] = []
+    for page in pages:
+        out.extend(paginate(page))
+    return out or [""]
+
+
 def page_texts(path: str | Path, kind: str) -> list[str]:
     """Page texts for any supported kind. An image has none until OCR runs."""
     if kind == "pdf":
         return pdf_pages(path)
+    # Form feeds are a real page signal and stay authoritative. Anything the
+    # format left as one undivided run is paginated, because "one page" of
+    # 40,000 words is not a page.
     if kind == "docx":
-        return split_pages(docx_text(path))
+        return _repaginate(split_pages(docx_text(path)))
     if kind == "text":
-        return split_pages(Path(path).read_text(errors="replace"))
+        return _repaginate(split_pages(Path(path).read_text(errors="replace")))
     if kind == "image":
         return [""]
     raise OrpheusError(f"Unhandled document kind: {kind}")

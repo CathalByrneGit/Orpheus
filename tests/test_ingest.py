@@ -246,3 +246,45 @@ def test_a_read_connection_cannot_ingest(db_path, tmp_path):
             ingest(reader, PDF, storage_root=tmp_path)
     finally:
         reader.close()
+
+
+# -- pagination for formats with no pages of their own ------------------------
+
+def test_a_long_text_document_is_not_one_enormous_page(tmp_path):
+    # A real 41,501-character SEC contract ingested as "Page 1 of 1", which
+    # made the reading companion useless and collapsed provenance: every fact
+    # in the document cited page 1, which says no more than citing the file.
+    body = "\n\n".join(
+        f"Section {n}. " + "The parties agree to the following terms. " * 12
+        for n in range(1, 60))
+    path = tmp_path / "long.txt"
+    path.write_text(body)
+
+    pages = textract.page_texts(path, "text")
+    assert len(pages) > 10
+    assert max(len(p) for p in pages) <= textract.TEXT_PAGE_CHARS * 1.2
+
+
+def test_pagination_never_loses_a_character(tmp_path):
+    # Alignment locates every excerpt by offset into this text, and grounding
+    # is computed rather than trusted, so a page split that dropped or added a
+    # character would turn located quotations into unlocatable ones.
+    for body in ("", "short", "x" * 9000, "y\n\n" * 3000,
+                 "\n" * 5000, "word " * 4000):
+        assert "".join(textract.paginate(body)) == body
+
+
+def test_a_form_feed_still_wins(tmp_path):
+    # Real page breaks are a real signal and stay authoritative; only text the
+    # format left undivided gets paginated.
+    path = tmp_path / "ff.txt"
+    path.write_text("page one\fpage two\fpage three")
+    assert textract.page_texts(path, "text") == [
+        "page one", "page two", "page three"]
+
+
+def test_a_run_with_no_break_is_left_whole_rather_than_cut_mid_token(tmp_path):
+    # Better an over-long page than a token sliced in half: the half would
+    # align against nothing and read as a fabrication.
+    blob = "z" * (textract.TEXT_PAGE_CHARS * 3)
+    assert textract.paginate(blob) == [blob]
