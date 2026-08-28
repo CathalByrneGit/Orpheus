@@ -579,3 +579,43 @@ def test_a_missing_key_is_refused_by_name(store):
                           bundle=load_bundle(), text="anything",
                           tier="cloud", opt_in=True, actor_id=None)
     assert "ANTHROPIC_API_KEY" in str(caught.value)
+
+
+def test_the_anthropic_engine_never_asks_anthropic_for_a_gemini_model(
+        store, monkeypatch):
+    # The cloud tier's default provider is Gemini, so its default model id is
+    # a Gemini one. Passed through to Anthropic it returns a 404 naming a
+    # model that plainly exists, which reads as an outage rather than as the
+    # misconfiguration it is. A real six-document corpus run failed this way.
+    from orpheus import engines, llm
+
+    monkeypatch.delenv("ORPHEUS_ANTHROPIC_MODEL", raising=False)
+    monkeypatch.delenv("ORPHEUS_CLOUD_MODEL", raising=False)
+
+    config = llm.model_config(None, "cloud")
+    assert config["model_id"].startswith("gemini")
+
+    resolved = engines._anthropic_model_id(None, "cloud", config)
+    assert resolved == engines.DEFAULT_ANTHROPIC_MODEL
+    assert resolved.startswith("claude")
+
+
+def test_an_anthropic_model_configured_for_the_tier_is_honoured(monkeypatch):
+    # Setting the tier model to a Claude model is a deliberate choice, and
+    # the engine defers to it rather than overriding with its own default.
+    from orpheus import engines
+
+    monkeypatch.delenv("ORPHEUS_ANTHROPIC_MODEL", raising=False)
+    resolved = engines._anthropic_model_id(
+        None, "cloud", {"model_id": "claude-opus-4-1"})
+    assert resolved == "claude-opus-4-1"
+
+
+def test_a_stored_anthropic_model_wins_over_everything(store, monkeypatch):
+    from orpheus import engines
+
+    monkeypatch.setenv("ORPHEUS_ANTHROPIC_MODEL", "claude-from-env")
+    store.set_setting("anthropic_model", "claude-from-settings", None)
+    assert engines._anthropic_model_id(
+        store, "cloud", {"model_id": "gemini-2.5-flash"}) \
+        == "claude-from-settings"

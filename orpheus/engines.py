@@ -627,7 +627,7 @@ def anthropic_extract(*, store: Store, document: dict, bundle: dict, text: str,
         # rather than guessed at from the error.
         headers["anthropic-workspace-id"] = workspace
 
-    model_id = config["model_id"]
+    model_id = _anthropic_model_id(store, tier, config)
     instructions = (prompt_for(bundle) + "\n\n" + _JSON_INSTRUCTIONS
                     + _link_instructions(bundle))
 
@@ -667,6 +667,33 @@ def anthropic_extract(*, store: Store, document: dict, bundle: dict, text: str,
     if error:
         raise OrpheusError(f"Extraction failed: {error}")
     return _parse_chat_payload(content)
+
+
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
+
+
+def _anthropic_model_id(store: Store | None, tier: str, config: dict) -> str:
+    """Which Anthropic model serves this call.
+
+    The tier default names a Gemini model, because the cloud tier's default
+    provider is Gemini. Handing that id to Anthropic is never right -- it is
+    a 404 naming a model that exists, which reads like an outage rather than
+    a misconfiguration. So an explicit setting wins, then the environment,
+    then the tier's model but only when it actually names an Anthropic model,
+    and finally this engine's own default.
+    """
+    if store is not None:
+        configured = store.setting(f"{tier}_anthropic_model", None) \
+            or store.setting("anthropic_model", None)
+        if configured:
+            return configured
+    from_env = os.environ.get("ORPHEUS_ANTHROPIC_MODEL")
+    if from_env:
+        return from_env
+    tier_model = config.get("model_id") or ""
+    if tier_model.startswith("claude"):
+        return tier_model
+    return DEFAULT_ANTHROPIC_MODEL
 
 
 def _anthropic_workspace(store: Store | None) -> str | None:
