@@ -90,6 +90,27 @@ def _chain_digest(chain: list[dict]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:32]
 
 
+def _hop(edge: dict) -> dict:
+    """One hop, stated the way the store states it.
+
+    Connectivity is symmetric, so these walks are undirected -- but a relation
+    is not. Rendering a hop in the order the walk happened to reach it turns
+    `Lloyd Cainey employed_by NETGEAR` into `NETGEAR employed_by Lloyd Cainey`
+    on the way back, which is not a claim the store holds and not one anybody
+    should be shown. Walk in any direction; report the stored one.
+    """
+    return {
+        "from_entity_id": edge["from_entity_id"],
+        "from_name": edge["from_name"],
+        "to_entity_id": edge["to_entity_id"],
+        "to_name": edge["to_name"],
+        "link_type_id": edge["link_type_id"],
+        "n_documents": edge["n_documents"],
+        "n_confirmed": edge["n_confirmed"],
+        "documents": edge["documents"],
+    }
+
+
 def _question(kind: str, summary: str, entities: list[dict], chain: list[dict],
               asks: str, confirmed: bool, documents: list[str]) -> dict:
     return {
@@ -210,14 +231,7 @@ def shared_counterparty(store: Store, graph: dict | None = None,
                 for a, b in ((left, middle), (middle, right)):
                     edge = max(edges[(a, b)],
                                key=lambda e: (e["n_confirmed"], e["n_documents"]))
-                    chain.append({
-                        "from_entity_id": a, "from_name": nodes[a]["canonical_name"],
-                        "to_entity_id": b, "to_name": nodes[b]["canonical_name"],
-                        "link_type_id": edge["link_type_id"],
-                        "n_documents": edge["n_documents"],
-                        "n_confirmed": edge["n_confirmed"],
-                        "documents": edge["documents"],
-                    })
+                    chain.append(_hop(edge))
                     confirmed = confirmed and bool(edge["n_confirmed"])
                 out.append(_question(
                     "shared_counterparty",
@@ -360,14 +374,7 @@ def person_bridges(store: Store, graph: dict | None = None,
                 for a, b in ((person, left), (person, right), (left, right)):
                     edge = max(edges[(a, b)],
                                key=lambda e: (e["n_confirmed"], e["n_documents"]))
-                    chain.append({
-                        "from_entity_id": a, "from_name": nodes[a]["canonical_name"],
-                        "to_entity_id": b, "to_name": nodes[b]["canonical_name"],
-                        "link_type_id": edge["link_type_id"],
-                        "n_documents": edge["n_documents"],
-                        "n_confirmed": edge["n_confirmed"],
-                        "documents": edge["documents"],
-                    })
+                    chain.append(_hop(edge))
                     confirmed = confirmed and bool(edge["n_confirmed"])
                 out.append(_question(
                     "person_bridges",

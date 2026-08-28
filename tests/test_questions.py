@@ -17,7 +17,8 @@ import pytest
 
 import orpheus.bundle as bundle_mod
 from orpheus.graph import build
-from orpheus.questions import (circular_relation, raised, shared_counterparty,
+from orpheus.questions import (circular_relation, person_bridges,
+                               raised, shared_counterparty,
                                two_parts_in_one_document)
 from orpheus.utils import naive_key
 
@@ -387,3 +388,49 @@ def test_one_page_at_its_own_address_is_not_a_question(corpus):
                    "WHERE instance_id = 'i_A_doc_1'")
     corpus.conn.commit()
     assert shared_detail(corpus) == []
+
+
+def test_a_hop_is_stated_the_way_the_store_states_it(corpus):
+    # These walks are undirected because connectivity is symmetric, but a
+    # relation is not. Rendering a hop in the order the walk reached it turned
+    # `Lloyd Cainey employed_by NETGEAR` into `NETGEAR employed_by Lloyd
+    # Cainey` on the way back -- a claim the store does not hold, shown to a
+    # person as evidence. Found on a real corpus of SEC contracts.
+    stored = {
+        (row["from_instance_id"], row["to_instance_id"], row["link_type_id"])
+        for row in corpus.query(
+            "SELECT from_instance_id, to_instance_id, link_type_id FROM edges")
+    }
+    assert stored
+
+    pages = {}
+    for row in corpus.query(
+            "SELECT entity_id, instance_id FROM entity_mentions "
+            "WHERE unlinked_at IS NULL"):
+        pages.setdefault(row["entity_id"], set()).add(row["instance_id"])
+
+    questions = shared_counterparty(corpus) + person_bridges(corpus)
+    assert questions, "the fixture should raise at least one question"
+
+    for question in questions:
+        for hop in question["chain"]:
+            forward = any(
+                (f, t, hop["link_type_id"]) in stored
+                for f in pages.get(hop["from_entity_id"], ())
+                for t in pages.get(hop["to_entity_id"], ()))
+            assert forward, (
+                f"rendered hop {hop['from_name']} {hop['link_type_id']} "
+                f"{hop['to_name']} is not a relation the store holds")
+
+
+def test_reversing_a_rendered_hop_does_not_change_who_the_question_is_about(
+        corpus):
+    # The identity of a question is its kind and its pages, so correcting the
+    # rendered direction must not orphan a reviewer's standing.
+    before = {q["fingerprint"] for q in shared_counterparty(corpus)}
+    corpus.execute(
+        "UPDATE edges SET from_instance_id = to_instance_id, "
+        "to_instance_id = from_instance_id")
+    corpus.conn.commit()
+    after = {q["fingerprint"] for q in shared_counterparty(corpus)}
+    assert before and before == after
