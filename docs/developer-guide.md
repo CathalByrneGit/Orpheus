@@ -39,6 +39,18 @@ deliberate — the engine choice is a setting, not an architecture. See
 
 ---
 
+## A dependency the tests do not prove
+
+`textract` reads a PDF with `pdfminer` if it is installed and falls back to the
+`pdftotext` binary otherwise. The development container has poppler, so the
+browser e2e ingests a real PDF whether or not the `pdf` extra is installed —
+which means **a green suite here does not prove the packaging is right.**
+
+It was wrong: a corpus run in a container without poppler failed on its first
+document with "No PDF text backend is available", against an install line that
+looked complete. If ingest fails, check both `pip install -e '.[pdf]'` and
+`which pdftotext`.
+
 ## Running the tests
 
 ```bash

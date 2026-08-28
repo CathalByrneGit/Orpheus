@@ -122,6 +122,17 @@ buyer will say far more than two hundred unrelated ones.
 asks for `pdf` too — without it every PDF in the corpus fails at ingest with no
 text extracted.
 
+**Why this was not caught by the tests.** `textract` falls back to the
+`pdftotext` binary when `pdfminer` is missing, and the container this was
+developed in happens to have poppler installed. So the browser e2e has been
+ingesting a real PDF successfully all along *through an undeclared system
+dependency*, and the missing Python extra was invisible. A container without
+poppler fails on the first document.
+
+The lesson generalises past this one line: a green suite in one environment says
+nothing about what is declared. If a run fails at ingest, check both — the
+extra, and `which pdftotext`.
+
 Scanned PDFs are the harder case and the more realistic one for public bodies.
 `--ocr` needs Tesseract installed; without it a scan ingests with no text and
 the deterministic pass finds nothing, which the run should record rather than
