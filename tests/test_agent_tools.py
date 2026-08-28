@@ -131,8 +131,12 @@ def test_every_tool_tells_the_model_not_to_use_raw_sql(served):
     tools = agent._tools() if agent.AgentTool is not None else []
     if not tools:
         pytest.skip("datasette-agent is not installed")
-    lookups = [t for t in tools if t.name.startswith("orpheus_")
-               and t.name not in ("orpheus_record", "orpheus_needs_review")]
+    # Tools that answer a question about the corpus carry the steer. The ones
+    # that act on it -- record, settle -- are not alternatives to a query, and
+    # needs_review is a report with no SQL equivalent worth writing.
+    acts = ("orpheus_record", "orpheus_settle_suggestion", "orpheus_needs_review")
+    lookups = [t for t in tools
+               if t.name.startswith("orpheus_") and t.name not in acts]
     assert lookups
     for tool in lookups:
         assert "instead of sql_query" in tool.description

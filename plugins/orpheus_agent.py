@@ -221,6 +221,118 @@ async def passage(datasette, actor, document_id: str, page_no: int):
 # The one write
 # ---------------------------------------------------------------------------
 
+def _offer_card(suggestion: dict) -> str:
+    """One offer, as the person sees it in the conversation."""
+    rows = "".join(
+        f"<tr><td style='color:#666;padding-right:.6em'>{html.escape(str(k))}</td>"
+        f"<td>{html.escape(str(v))}</td></tr>"
+        for k, v in (suggestion.get("properties") or {}).items()
+        if k != "page_no")
+    excerpt = html.escape(suggestion.get("excerpt") or "")
+    sid = html.escape(suggestion.get("suggestion_id") or "")
+    return (
+        f"<div style='border-left:3px solid #1d4ed8;background:#fafafa;"
+        f"padding:.7em 1em;margin:.6em 0'>"
+        f"<p style='margin:0'><strong>{html.escape(suggestion.get('type_id') or '')}"
+        f"</strong> <span style='color:#666'>&middot; "
+        f"{html.escape(str(suggestion.get('confidence')))} &middot; "
+        f"{html.escape(suggestion.get('engine') or '')}</span></p>"
+        f"<table style='margin:.3em 0'>{rows}</table>"
+        f"<blockquote style='color:#444;border-left:3px solid #ccc;"
+        f"padding-left:1em;margin:.4em 0'>{excerpt}</blockquote>"
+        f"<button type='button' data-orpheus-settle='record {sid}'>Record this</button> "
+        f"<button type='button' data-orpheus-settle='dismiss {sid}'>Not worth it</button>"
+        f"</div>")
+
+
+# One listener for every card, however many arrive: a button fills the chat box
+# and sends it, so settling goes back through a tool and the decision is still
+# taken by ask_user rather than by a click the model could have caused.
+_CARD_SCRIPT = (
+    "<script>if(!window.__orpheusSettle){window.__orpheusSettle=1;"
+    "document.addEventListener('click',function(e){"
+    "var b=e.target.closest('[data-orpheus-settle]');if(!b)return;"
+    "var i=document.getElementById('message-input');"
+    "var f=document.getElementById('chat-form');if(!i||!f)return;"
+    "i.value=b.getAttribute('data-orpheus-settle');f.requestSubmit();});}</script>")
+
+
+async def read_page(datasette, actor, document_id: str, page_no: int):
+    """Run the pattern pass over a page and show what it offers."""
+    actor_id = _actor_id(actor)
+
+    def run(store):
+        # The pattern pass only. It cannot offer something the page does not
+        # contain, so it needs no opt-in and sends nothing anywhere -- and the
+        # model pass is this conversation, which is already reading the page.
+        return companion_mod.read_passage(
+            store, document_id, int(page_no), actor_id=actor_id,
+            engine=companion_mod.DEFAULT_ENGINE)
+
+    result = await _write(datasette, run)
+    if isinstance(result, dict) and result.get("error"):
+        return json.dumps(result)
+
+    offers = result.get("suggestions") or []
+    cards = "".join(_offer_card(s) for s in offers)
+    return json.dumps({
+        "_html": (_CARD_SCRIPT + cards) if cards else "",
+        "n_offered": len(offers),
+        "offers": [{"suggestion_id": s["suggestion_id"], "type_id": s["type_id"],
+                    "properties": s.get("properties"),
+                    "confidence": s.get("confidence")} for s in offers],
+        "reading": (
+            "These are offered and not in the store. A suggestion is not an "
+            "extraction until a person accepts it, so do not report one as "
+            "something the document holds. The person has a Record / Not worth "
+            "it button on each; settle one only when they ask you to."),
+    }, default=str)
+
+
+async def settle(datasette, actor, context, suggestion_id: str,
+                 decision: str, note: str = None):
+    """Accept or dismiss an outstanding offer, once the person says so."""
+    actor_id = _actor_id(actor)
+    if not actor_id:
+        return json.dumps({"error": "No signed-in actor, so no decision can be "
+                                    "attributed."})
+    if decision not in ("record", "dismiss"):
+        return json.dumps({"error": "decision must be 'record' or 'dismiss'."})
+
+    def load(store):
+        return companion_mod.get_suggestion(store, suggestion_id)
+
+    offer = await _read(datasette, load)
+    if isinstance(offer, dict) and offer.get("error"):
+        return json.dumps(offer)
+
+    values = "".join(
+        f"<li><code>{html.escape(str(k))}</code>: {html.escape(str(v))}</li>"
+        for k, v in (offer.get("properties") or {}).items() if k != "page_no")
+    verb = "Record" if decision == "record" else "Dismiss"
+    approved = await context.ask_user(
+        f"{verb} this {offer.get('type_id')}?",
+        html=(f"<ul>{values}</ul><blockquote>"
+              f"{html.escape(offer.get('excerpt') or '')}</blockquote>"
+              + ("<p>Recording writes a <strong>confirmed</strong> row with "
+                 "<code>source = human</code>.</p>" if decision == "record" else
+                 "<p>Dismissing keeps the offer, marked dismissed. That is what "
+                 "makes these measurable at all.</p>")))
+    if not approved:
+        return json.dumps({"settled": False,
+                           "reading": "Left outstanding. Nothing changed."})
+
+    def act(store):
+        if decision == "record":
+            return companion_mod.accept_suggestion(
+                store, suggestion_id, actor_id=actor_id, note=note)
+        return companion_mod.dismiss_suggestion(
+            store, suggestion_id, actor_id=actor_id, note=note)
+
+    return json.dumps({"settled": True, "decision": decision,
+                       "suggestion": await _write(datasette, act)}, default=str)
+
+
 async def record(datasette, actor, context, document_id: str, page_no: int,
                  type_id: str, properties: dict, quote: str, note: str = None):
     """Offer a fact extraction missed, through the same queue as a page read.
@@ -351,6 +463,33 @@ def _tools():
             input_schema={"type": "object", "properties": {
                 "limit": {"type": "integer"}}, "required": []},
             fn=needs_review,
+        ),
+        AgentTool(
+            name="orpheus_read_page",
+            description=_PREFER + "Run the pattern pass over a page and show what it "
+                        "offers. Local, instant, and it cannot offer something "
+                        "the page does not contain, so it needs no opt-in. Each "
+                        "offer is shown to the person with its own Record / Not "
+                        "worth it buttons; nothing is in the store until one is "
+                        "pressed.",
+            input_schema={"type": "object", "properties": {
+                "document_id": {"type": "string"},
+                "page_no": {"type": "integer"}},
+                "required": ["document_id", "page_no"]},
+            fn=read_page,
+        ),
+        AgentTool(
+            name="orpheus_settle_suggestion",
+            description="Accept or dismiss one outstanding offer. The person is "
+                        "asked to confirm either way. Call it when they say to "
+                        "— not to tidy a queue, and never on your own reading of "
+                        "whether an offer looks right.",
+            input_schema={"type": "object", "properties": {
+                "suggestion_id": {"type": "string"},
+                "decision": {"type": "string", "enum": ["record", "dismiss"]},
+                "note": {"type": "string"}},
+                "required": ["suggestion_id", "decision"]},
+            fn=settle,
         ),
         AgentTool(
             name="orpheus_passage",
