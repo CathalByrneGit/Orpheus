@@ -192,6 +192,22 @@ def confidence_calibration(store: Store, document_id: str | None = None,
         for i in range(len(usable) - 1)
         if usable[i]["accuracy"] < usable[i + 1]["accuracy"]
     ]
+    # No inversions is not the same as ranking. Every usable level scoring the
+    # same is a flat line, and calling that `monotonic` passes an exit check it
+    # has not earned -- the note even said accuracy rises, on data where it did
+    # not move at all. A rubric that does not separate is exactly as useless as
+    # one that inverts, and harder to notice.
+    accuracies = {row["accuracy"] for row in usable}
+    if not inversions and len(accuracies) == 1:
+        only = next(iter(accuracies))
+        return {
+            "levels": usable, "verdict": "flat", "inversions": [],
+            "note": (f"Every level with enough reviewed instances scored the "
+                     f"same ({only:.0%}), so nothing here shows the rubric "
+                     f"ranking anything. Not a failure and not a pass: it needs "
+                     f"either more review at the levels that were skipped, or a "
+                     f"corpus with enough wrong extractions to separate them."),
+        }
     return {
         "levels": usable,
         "verdict": "monotonic" if not inversions else "inverted",

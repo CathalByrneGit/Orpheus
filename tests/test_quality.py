@@ -376,3 +376,33 @@ def test_the_report_names_the_fields_people_keep_fixing(store):
     assert rows, "an amendment should be reported as a correction"
     for key in ("table_name", "property_id", "n_corrections"):
         assert key in rows[0], f"the CLI reads {key} and would crash without it"
+
+
+def test_every_level_scoring_the_same_is_not_called_monotonic(store):
+    # A flat line has no inversions, so the verdict was `monotonic` and the
+    # note claimed "accuracy rises with the rubric level" on data where it did
+    # not move. Phase 1's exit criterion tests for `monotonic`, so a rubric
+    # that separates nothing would have passed a check it had not earned.
+    from orpheus.quality import confidence_calibration
+
+    def fake(*args, **kwargs):
+        return {"by_confidence": [
+            {"confidence": 1.0, "confidence_label": "explicit",
+             "accuracy": 1.0, "n_reviewed": 60},
+            {"confidence": 0.9, "confidence_label": "named",
+             "accuracy": 1.0, "n_reviewed": 22},
+            {"confidence": 0.7, "confidence_label": "implied",
+             "accuracy": 1.0, "n_reviewed": 15},
+        ]}
+
+    import orpheus.quality as quality_mod
+    original = quality_mod.extraction_quality
+    quality_mod.extraction_quality = fake
+    try:
+        result = confidence_calibration(store)
+    finally:
+        quality_mod.extraction_quality = original
+
+    assert result["verdict"] == "flat"
+    assert "ranking anything" in result["note"]
+    assert not result["inversions"]

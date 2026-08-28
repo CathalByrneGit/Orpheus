@@ -619,3 +619,19 @@ def test_a_stored_anthropic_model_wins_over_everything(store, monkeypatch):
     assert engines._anthropic_model_id(
         store, "cloud", {"model_id": "gemini-2.5-flash"}) \
         == "claude-from-settings"
+
+
+def test_the_budget_is_spent_in_the_unit_it_is_set_in(store, monkeypatch):
+    # `prompt_chars` is summed by budget_status against a limit a person set in
+    # characters. The Anthropic engine recorded the provider's token count
+    # there instead, which read as the more accurate number and was the wrong
+    # one: it spent a character budget in tokens, leaving the cap roughly four
+    # times higher than it was set, and only for that engine.
+    import inspect
+
+    from orpheus import engines
+
+    source = inspect.getsource(engines.anthropic_extract)
+    assert "prompt_chars=len(text)" in source
+    assert "input_tokens" not in source.split("record_llm_call")[-1], \
+        "a token count must not be recorded in a character column"

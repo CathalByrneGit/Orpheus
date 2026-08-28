@@ -658,9 +658,13 @@ def anthropic_extract(*, store: Store, document: dict, bundle: dict, text: str,
     finally:
         llm.record_llm_call(
             store, tier=tier, purpose="populate",
-            # Real token counts where the provider reported them, rather than
-            # a character count standing in for one.
-            prompt_chars=getattr(usage, "input_tokens", None) or len(text),
+            # Characters, like every other engine, because the column is
+            # `prompt_chars` and `budget_status` sums it against a limit a
+            # person set in characters. Putting the provider's token count
+            # here read as a better number and was a worse one: it spent a
+            # character budget in tokens, so the cap sat roughly four times
+            # higher than it was set, and only for this engine.
+            prompt_chars=len(text),
             provider="anthropic", model=model_id,
             document_id=document["document_id"], actor_id=actor_id,
             excerpt_only=False, payload=text, error=error)
