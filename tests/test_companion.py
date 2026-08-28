@@ -239,3 +239,82 @@ def test_the_acceptance_rate_is_reported_per_engine(reading):
     assert entry["engine"] == "deterministic"
     assert entry["acceptance_rate"] == 0.5
     assert entry["n_decided"] == 2
+
+
+# -- an offer from somewhere other than a page read --------------------------
+
+def test_a_chat_offer_is_a_suggestion_like_any_other(reading):
+    # The point of routing it here: an offer that skips this table cannot be
+    # measured, and `suggestion_quality` is the only thing that says whether
+    # these are worth a person's attention.
+    from orpheus.companion import propose, suggestion_quality
+
+    offer = propose(reading, "doc_1", 1, "Company",
+                    {"name": "Ardmore Digital Ltd", "naive_key": "ardmore digital"},
+                    quote=PAGES[1][:40], engine="chat", actor_id="act_a")
+    reading.conn.commit()
+
+    assert offer["status"] == "offered"
+    assert offer["engine"] == "chat"
+    assert offer["alignment"], "the quote is located, not taken on trust"
+    assert offer["char_start"] is not None
+
+    engines = {row["engine"]: row for row in suggestion_quality(reading)["by_engine"]}
+    assert "chat" in engines, "the chat's offers must be measurable per source"
+    assert engines["chat"]["offered"] == 1
+
+
+def test_declining_a_chat_offer_leaves_evidence(reading):
+    from orpheus.companion import dismiss_suggestion, propose, suggestion_quality
+
+    offer = propose(reading, "doc_1", 1, "Company",
+                    {"name": "Ardmore Digital Ltd", "naive_key": "ardmore digital"},
+                    quote=PAGES[1][:40], engine="chat", actor_id="act_a")
+    dismiss_suggestion(reading, offer["suggestion_id"], actor_id="act_a",
+                       note="declined in chat")
+    reading.conn.commit()
+
+    row = reading.one("SELECT status, note FROM suggestions WHERE suggestion_id = ?",
+                      (offer["suggestion_id"],))
+    assert row["status"] == "dismissed"
+    assert row["note"] == "declined in chat"
+    assert not reading.query("SELECT 1 FROM instances_Company"), \
+        "declining must not write an instance"
+
+
+def test_an_offer_quoting_text_the_page_lacks_is_refused(reading):
+    from orpheus.companion import propose
+
+    with pytest.raises(OrpheusError) as excinfo:
+        propose(reading, "doc_1", 1, "Company", {"name": "Elsewhere Ltd"},
+                quote="a sentence this page does not contain", engine="chat",
+                actor_id="act_a")
+    assert "does not contain that quote" in str(excinfo.value)
+    assert not reading.query("SELECT 1 FROM suggestions")
+
+
+def test_the_same_offer_twice_does_not_queue_twice(reading):
+    from orpheus.companion import propose
+
+    values = {"name": "Ardmore Digital Ltd", "naive_key": "ardmore digital"}
+    first = propose(reading, "doc_1", 1, "Company", values,
+                    quote=PAGES[1][:40], engine="chat", actor_id="act_a")
+    second = propose(reading, "doc_1", 1, "Company", values,
+                     quote=PAGES[1][:40], engine="chat", actor_id="act_a")
+    reading.conn.commit()
+    assert first["suggestion_id"] == second["suggestion_id"]
+
+
+def test_re_offering_something_already_settled_is_refused(reading):
+    from orpheus.companion import dismiss_suggestion, propose
+
+    values = {"name": "Ardmore Digital Ltd", "naive_key": "ardmore digital"}
+    offer = propose(reading, "doc_1", 1, "Company", values,
+                    quote=PAGES[1][:40], engine="chat", actor_id="act_a")
+    dismiss_suggestion(reading, offer["suggestion_id"], actor_id="act_a")
+    reading.conn.commit()
+
+    with pytest.raises(OrpheusError) as excinfo:
+        propose(reading, "doc_1", 1, "Company", values,
+                quote=PAGES[1][:40], engine="chat", actor_id="act_a")
+    assert "already dismissed" in str(excinfo.value)

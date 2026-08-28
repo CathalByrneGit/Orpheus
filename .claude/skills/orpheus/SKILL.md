@@ -256,9 +256,19 @@ That refusal is the feature. Where somebody knows something the documents do
 not say, it belongs in the entity page's notes, which is kept apart from the
 cited claims on purpose — do not reach for `record` to get it in anyway.
 
-The row lands `source = human`, `confirmed`, and is left out of extraction
-quality: the extractor never offered it, so it is not evidence about the
-extractor. An accepted suggestion is a different case and is still counted.
+From a chat beside a page this is an **offer**, not a write. It joins the same
+queue a page read fills, the person accepts or declines it there, and declining
+is kept — a dismissed offer is the only evidence there is about whether these
+are worth reading, and an offer that skipped that table could not be measured
+at all. `suggestion_quality` answers per engine, so the chat's rate is its own.
+
+Accepted, the row lands `source = human`, `confirmed`, and is left out of
+extraction quality: the extractor never offered it, so it is not evidence about
+the extractor.
+
+`orpheus record` on the command line is the other case and writes directly. A
+person recording what they read themselves made no offer, so there is nothing
+to measure and nothing to queue.
 
 **This is a person's judgement, so it is theirs to make.** Draft it — name the
 type, the values and the exact span you would quote — and let them say yes.

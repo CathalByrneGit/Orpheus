@@ -43,9 +43,9 @@ from . import bundle as bundle_mod
 from .audit import record_edit
 from .deterministic import (AMOUNT_ROLE_CUES, DATE_ROLE_CUES, find_amounts,
                             find_dates, infer_role)
-from .align import MATCH_EXACT
+from .align import MATCH_EXACT, align
 from .extract import excerpt_around, insert_instance, write_provenance
-from .population import page_offsets
+from .population import confidence_for_alignment, page_offsets
 from .rubric import SUGGESTION_STATUSES
 from .store import Store
 from .utils import (NotFound, OrpheusError, from_json, new_id, now,
@@ -242,6 +242,105 @@ def _engine_offers(store: Store, document_id: str, page_no: int, text: str,
 # ---------------------------------------------------------------------------
 # Deciding
 # ---------------------------------------------------------------------------
+
+def propose(store: Store, document_id: str, page_no: int, type_id: str,
+            properties: dict, quote: str, engine: str,
+            actor_id: str | None = None, bundle: dict | None = None) -> dict:
+    """Offer something that did not come from a pass over the page.
+
+    A page read is not the only way the machine proposes. Somebody reading with
+    a chat beside them gets offers too, and those were going straight to
+    `record` -- an instance written, and no trace at all when the offer was
+    declined. The companion keeps a dismissal precisely because it is the only
+    evidence there is about whether these offers are worth reading, and an
+    offer that skips this table cannot be measured by anything.
+
+    So a proposal from anywhere lands here first, and is accepted or dismissed
+    through the same two functions as any other. `engine` says where it came
+    from, which is what makes the rate answerable per source rather than in
+    aggregate.
+
+    Note this is for a *machine's* offer. A person recording what they read
+    themselves has no offer to measure and goes through `record.record_fact`.
+    """
+    store.assert_writable()
+    quote = (quote or "").strip()
+    if not quote:
+        raise OrpheusError(
+            "An offer has to quote the page it came from. Without it there is "
+            "nothing for the next person to check, and nothing to locate.")
+
+    page = store.one(
+        "SELECT page_no, text FROM document_pages "
+        "WHERE document_id = ? AND page_no = ?", (document_id, page_no))
+    if page is None:
+        raise NotFound(f"No page {page_no} in {document_id}.")
+
+    bundle = bundle or bundle_mod.active(store)
+    if bundle is None:
+        raise OrpheusError("No bundle is registered, so nothing can be typed.")
+    if bundle_mod.object_type(bundle, type_id) is None:
+        raise OrpheusError(
+            f"{type_id} is not a type this bundle declares, so there is "
+            "nowhere for this to go. A schema amendment comes first.")
+
+    # Located in the page, by the code that locates a model's quotations
+    # anywhere else. An offer citing text the page does not contain is the one
+    # kind this surface must not carry: a person skimming offers is reading the
+    # excerpt, not the document.
+    start, end, alignment = align(page["text"] or "", quote)
+    if alignment is None or start is None:
+        raise OrpheusError(
+            f"Page {page_no} of {document_id} does not contain that quote, so "
+            "it cannot be offered against it. Quote the page as written.")
+
+    offset = dict((n, begin + len(f"--- Page {n} ---\n"))
+                  for n, begin, _ in page_offsets(store, document_id)
+                  ).get(page_no, 0)
+
+    fingerprint = _fingerprint(type_id, properties, page_no)
+    with store.transaction():
+        settled = store.one(
+            "SELECT suggestion_id, status FROM suggestions "
+            "WHERE document_id = ? AND fingerprint = ? "
+            "AND status IN ('accepted', 'dismissed') LIMIT 1",
+            (document_id, fingerprint))
+        if settled:
+            raise OrpheusError(
+                f"That was already {settled['status']} on this page. Re-offering "
+                "what somebody has settled is how a queue becomes something to "
+                "be closed.")
+        live = store.one(
+            "SELECT suggestion_id FROM suggestions WHERE document_id = ? "
+            "AND fingerprint = ? AND status = 'offered'",
+            (document_id, fingerprint))
+        if live:
+            return get_suggestion(store, live["suggestion_id"])
+
+        suggestion_id = new_id("sug")
+        store.insert("suggestions", {
+            "suggestion_id": suggestion_id,
+            "document_id": document_id,
+            "page_no": page_no,
+            "type_id": type_id,
+            "properties_json": to_json(properties),
+            "excerpt": (page["text"] or "")[start:end],
+            "char_start": offset + start,
+            "char_end": offset + end,
+            "alignment": alignment,
+            "engine": engine,
+            "source": "ai_cloud",
+            "confidence": confidence_for_alignment(alignment),
+            "fingerprint": fingerprint,
+            "status": "offered",
+            "instance_id": None,
+            "suggested_at": now(),
+            "decided_by": None,
+            "decided_at": None,
+            "note": None,
+        })
+    return get_suggestion(store, suggestion_id)
+
 
 def accept_suggestion(store: Store, suggestion_id: str, actor_id: str,
                       properties: dict | None = None,

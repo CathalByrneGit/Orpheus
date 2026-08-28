@@ -49,6 +49,10 @@ from orpheus.utils import OrpheusError
 
 PLUGIN = "orpheus-datasette"
 
+# What `engine` a chat's offers are filed under, so suggestion_quality can
+# answer per source rather than in aggregate.
+ENGINE = "chat"
+
 # Said on every tool, because the model reads descriptions and not this module.
 _PREFER = ("Use this instead of sql_query: raw SQL over these tables returns "
            "values without the review state that qualifies them, and an answer "
@@ -217,46 +221,71 @@ async def passage(datasette, actor, document_id: str, page_no: int):
 # The one write
 # ---------------------------------------------------------------------------
 
-async def record(datasette, actor, context, document_id: str, type_id: str,
-                 properties: dict, quote: str, note: str = None):
-    """Record a fact extraction missed — after the person approves the draft."""
+async def record(datasette, actor, context, document_id: str, page_no: int,
+                 type_id: str, properties: dict, quote: str, note: str = None):
+    """Offer a fact extraction missed, through the same queue as a page read.
+
+    Not a direct write. The offer becomes a suggestion first, so it is the same
+    kind of thing the companion makes and is measured the same way -- and so a
+    declined offer leaves evidence, which is the only measure there is of
+    whether these are worth reading.
+    """
     actor_id = _actor_id(actor)
     if not actor_id:
         return json.dumps({"error": "No signed-in actor, so nothing can be "
-                                    "recorded: the row has to belong to somebody."})
+                                    "offered: a decision has to belong to somebody."})
+
+    # Offered before the question is asked, because ask_user re-runs everything
+    # above it once answered -- and because an offer nobody accepts is still a
+    # thing that happened.
+    def make(store):
+        return companion_mod.propose(
+            store, document_id, int(page_no), type_id, properties or {},
+            quote=quote, engine=ENGINE, actor_id=actor_id)
+
+    try:
+        suggestion = await _write(datasette, make)
+    except OrpheusError as refused:
+        return json.dumps({
+            "offered": False, "refused": str(refused),
+            "reading": ("Do not retry with a looser quote to get it in. If the "
+                        "page does not say it, the entity page's notes field is "
+                        "where it belongs.")})
+    if isinstance(suggestion, dict) and suggestion.get("error"):
+        return json.dumps(suggestion)
 
     values = "".join(
         f"<li><code>{html.escape(str(k))}</code>: {html.escape(str(v))}</li>"
         for k, v in (properties or {}).items())
-    # ask_user raises QuestionPending and re-runs this function once answered,
-    # so nothing is written before the person has seen the draft.
     approved = await context.ask_user(
-        f"Record this {type_id} in the store?",
+        f"Record this {type_id}?",
         html=(f"<p>Recording writes a <strong>confirmed</strong> row with "
-              f"<code>source = human</code>. That is the one source nothing "
-              f"downstream questions, so it should be what you read, not what "
-              f"anybody inferred.</p><ul>{values}</ul>"
-              f"<p><strong>Quoting:</strong> "
-              f"<blockquote>{html.escape(quote or '')}</blockquote>"
-              f"The quote is located in the document, and refused if it is not "
-              f"there.</p>"))
-    if not approved:
-        return json.dumps({"recorded": False,
-                           "note": "Not recorded. The person declined."})
+              f"<code>source = human</code>: the one source nothing downstream "
+              f"questions, so it should be what you read.</p><ul>{values}</ul>"
+              f"<p><strong>Quoting page {html.escape(str(page_no))}:</strong>"
+              f"<blockquote>{html.escape(suggestion.get('excerpt') or '')}"
+              f"</blockquote>Located in the page, not taken on trust.</p>"
+              f"<p style='color:#666'>Either way this is kept. Saying no is "
+              f"what tells anybody whether these offers are worth reading.</p>"))
 
-    def run(store):
-        return record_mod.record_fact(
-            store, document_id, type_id, properties or {}, quote=quote,
-            actor_id=actor_id, note=note)
+    def settle(store):
+        if approved:
+            return companion_mod.accept_suggestion(
+                store, suggestion["suggestion_id"], actor_id=actor_id, note=note)
+        return companion_mod.dismiss_suggestion(
+            store, suggestion["suggestion_id"], actor_id=actor_id,
+            note=note or "declined in chat")
 
-    try:
-        return json.dumps(await _write(datasette, run), default=str)
-    except OrpheusError as refused:
-        return json.dumps({
-            "recorded": False, "refused": str(refused),
-            "reading": ("Do not retry with a looser quote to get it in. If the "
-                        "document does not say it, the entity page's notes "
-                        "field is where it belongs.")})
+    settled = await _write(datasette, settle)
+    return json.dumps({
+        "offered": True,
+        "accepted": bool(approved),
+        "suggestion": settled,
+        "reading": ("Recorded, and confirmed because a person read it."
+                    if approved else
+                    "Not recorded. The offer is kept as dismissed, which is "
+                    "what makes these measurable at all."),
+    }, default=str)
 
 
 # ---------------------------------------------------------------------------
@@ -338,22 +367,26 @@ def _tools():
         ),
         AgentTool(
             name="orpheus_record",
-            description="Record a fact that extraction missed, quoting the line "
-                        "in the document it was read on. Asks the person to "
-                        "approve the draft first, and is refused if the document "
-                        "does not contain the quote. Draft it and let them "
-                        "decide — never record something you inferred rather "
-                        "than read.",
+            description="Offer a fact that extraction missed, quoting the line "
+                        "on the page it was read on. The offer joins the same "
+                        "queue a page read fills, the person is asked to "
+                        "approve it, and it is refused if the page does not "
+                        "contain the quote. Saying no is kept too. Draft it and "
+                        "let them decide — never offer something you inferred "
+                        "rather than read.",
             input_schema={"type": "object", "properties": {
                 "document_id": {"type": "string"},
+                "page_no": {"type": "integer",
+                            "description": "The page the quote is on"},
                 "type_id": {"type": "string",
                             "description": "A bundle type, e.g. Person"},
                 "properties": {"type": "object", "additionalProperties": True,
                                "description": "The values to record"},
                 "quote": {"type": "string",
-                          "description": "Text from the document, verbatim"},
+                          "description": "Text from that page, verbatim"},
                 "note": {"type": "string"}},
-                "required": ["document_id", "type_id", "properties", "quote"]},
+                "required": ["document_id", "page_no", "type_id", "properties",
+                             "quote"]},
             fn=record,
         ),
     ]
