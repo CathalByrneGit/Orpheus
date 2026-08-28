@@ -324,6 +324,20 @@ def _normalise_extraction(item: Any, spans, source_label, text=None) -> dict:
     if confidence is None:
         confidence = confidence_for_alignment(alignment)
 
+    # The same reasoning one step further. A model that reports which page it
+    # read something on is guessing from the markers in the text it was given,
+    # and it guesses wrong: on a real contract it put the APPOINTMENT clause on
+    # page 2 and SOFTWARE LICENSES on page 6, when the located spans are pages
+    # 1 and 5. Provenance already carries the computed number, so leaving the
+    # claimed one on the instance row put two page numbers on one finding, the
+    # wrong one being the one a reader sees first. Where the span was located,
+    # the located page replaces it; where it was not, nothing is asserted,
+    # because an unlocatable claim about a page is exactly the claim not to
+    # repeat.
+    located_page = page_for_offset(spans, start)
+    if "page_no" in properties:
+        properties["page_no"] = located_page
+
     return {
         "instance_id": instance_id or new_id("inst"),
         "type_id": type_id,
@@ -331,7 +345,7 @@ def _normalise_extraction(item: Any, spans, source_label, text=None) -> dict:
         "confidence": snap_confidence(confidence),
         "excerpt": excerpt,
         "source_label": source_label or "",
-        "page_no": page_for_offset(spans, start),
+        "page_no": located_page,
         # Kept because it is what a reading UI needs and what an excerpt string
         # cannot give: the exact span, not a phrase to go looking for.
         "char_start": start,

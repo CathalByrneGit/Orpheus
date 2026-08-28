@@ -214,3 +214,45 @@ def test_a_registered_populator_replaces_the_engine(seeded):
     entity = result["entities"][0]
     assert entity["page_no"] == 1
     assert entity["confidence"] == CONFIDENCE["explicit"]
+
+
+def test_a_models_claimed_page_is_replaced_by_the_located_one():
+    # Grounding is computed rather than trusted, and a page number is
+    # grounding. On a real SEC contract the model put the APPOINTMENT clause
+    # on page 2 and SOFTWARE LICENSES on page 6; the located spans were pages
+    # 1 and 5. Keeping the claim on the instance row put two page numbers on
+    # one finding, and the wrong one was the one a reader saw first.
+    from orpheus.population import normalise_population
+
+    text = ("--- Page 1 ---\nfirst page body here\n\n"
+            "--- Page 2 ---\nAPPOINTMENT of the distributor\n\n"
+            "--- Page 3 ---\nthird page body here")
+    spans = [(1, 0, 35), (2, 35, 82), (3, 82, len(text))]
+
+    result = normalise_population(
+        {"extractions": [{
+            "instance_id": "x1",
+            "type_id": "Clause",
+            "excerpt": "APPOINTMENT of the distributor",
+            "properties": {"heading": "APPOINTMENT", "page_no": 99},
+        }]},
+        text=text, spans=spans)
+
+    entity = result["entities"][0]
+    assert entity["page_no"] == 2
+    assert entity["properties"]["page_no"] == 2, \
+        "the row must not keep a page number the store knows is wrong"
+
+
+def test_a_type_without_a_page_property_does_not_gain_one():
+    from orpheus.population import normalise_population
+
+    text = "--- Page 1 ---\nAcme Ltd is a party\n"
+    result = normalise_population(
+        {"extractions": [{
+            "instance_id": "x1", "type_id": "Company",
+            "excerpt": "Acme Ltd",
+            "properties": {"name": "Acme Ltd"},
+        }]},
+        text=text, spans=[(1, 0, len(text))])
+    assert "page_no" not in result["entities"][0]["properties"]
