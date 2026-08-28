@@ -19,6 +19,12 @@ dependencies = []
 # Datasette is the surface and the writer, but the core does not import it, so
 # a script or a test can use the store without it.
 server = ["datasette>=1.0a32"]
+# A chat surface inside Datasette, wired to the store through the tools in
+# plugins/orpheus_agent.py. An extra rather than a dependency because it pulls
+# datasette-llm and llm behind it, and because the plugin's own pages have to
+# keep working when it is absent -- the hook returns nothing and the rest of
+# Datasette is unaffected.
+agent = ["datasette-agent>=0.1a0"]
 # The extraction engine. Optional only in the sense that a deployment may
 # register its own populator; without one of the two there is no model pass.
 llm = ["langextract>=1.6"]

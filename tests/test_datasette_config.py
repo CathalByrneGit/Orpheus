@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 import orpheus.bundle as bundle_mod
@@ -144,3 +146,56 @@ def test_the_wiki_index_is_datasettes_own_table_page(generated):
     assert entities["facets"] == ["type_id", "status"]
     assert config["databases"]["orpheus"]["tables"]["entity_mentions"]["facets"] \
         == ["basis", "status"]
+
+
+def test_the_store_never_grants_execute_write_sql():
+    # The invariant the whole design rests on is that nothing writes except
+    # through orpheus core functions. A direct INSERT skips alignment,
+    # provenance, the audit trail and the human/machine source split, and
+    # leaves rows nothing downstream can tell apart from reviewed ones.
+    bundle = bundle_mod.load()
+    config = build_config(bundle, database_name="store", storage_root="s")
+    assert config["databases"]["store"]["permissions"]["execute-write-sql"] is False
+
+
+def test_the_write_denial_holds_even_for_root(tmp_path):
+    # Datasette withholds this permission by default, but `--root` grants
+    # everything the defaults withhold. An explicit deny is what survives that,
+    # and it is the difference between a default and a decision.
+    from datasette.app import Datasette
+    from datasette.resources import DatabaseResource
+    from orpheus.store import connect
+
+    db = tmp_path / "store.sqlite"
+    store = connect(db)
+    store.insert("actors", {"actor_id": "act_a", "display_name": "Ada",
+                            "is_admin": 1, "created_at": "2026-01-01T00:00:00Z"})
+    bundle = bundle_mod.load()
+    bundle_mod.register(store, bundle, actor_id="act_a")
+    bundle_mod.apply_schema(store, bundle)
+    store.conn.commit()
+    config = build_config(bundle, database_name="store", storage_root="s")
+    store.close()
+
+    # asyncio.run rather than a pytest-asyncio dependency, matching
+    # tests/test_datasette_plugin.py.
+    async def check():
+        datasette = Datasette([str(db)], config=config)
+        datasette.root_enabled = True
+        await datasette.invoke_startup()
+        resource = DatabaseResource(database="store")
+        writes = {actor["id"]: await datasette.allowed(
+                      action="execute-write-sql", resource=resource, actor=actor)
+                  for actor in ({"id": "alice"}, {"id": "root"})}
+        reads = await datasette.allowed(
+            action="execute-sql", resource=resource, actor={"id": "alice"})
+        return writes, reads
+
+    writes, reads = asyncio.run(check())
+    for who, allowed in writes.items():
+        assert not allowed, f"{who} must not be able to write around the core"
+
+    # Reading is a different question and stays open: browsing the tables in
+    # Datasette is how a person sees source, confidence and status for
+    # themselves, which is the opposite of the problem above.
+    assert reads

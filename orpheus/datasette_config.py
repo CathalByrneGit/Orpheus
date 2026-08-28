@@ -146,6 +146,18 @@ def build_config(bundle: dict, database_name: str = "orpheus",
             "max_file_size": max_file_size,
         }},
         "databases": {database_name: {
+            # The single invariant this whole design rests on is that nothing
+            # writes except through `orpheus` core functions. A direct INSERT
+            # skips alignment, provenance, the audit trail and the human/machine
+            # source split, and leaves rows nothing downstream can tell apart
+            # from reviewed ones. Datasette already withholds this permission by
+            # default, but the default is a default: an `allow` block added
+            # later for some other reason should not quietly hand it back, and
+            # `--root` grants everything unless something says otherwise.
+            #
+            # This does not restrict Orpheus. The plugin writes by calling the
+            # core in-process, not by executing SQL through Datasette.
+            "permissions": {"execute-write-sql": False},
             "tables": {
                 "actor_tokens": {"allow": False},
             # The wiki's index needs no code: Datasette renders `entities`
