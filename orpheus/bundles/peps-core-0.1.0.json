@@ -1,0 +1,360 @@
+{
+  "specVersion": "0.1.0",
+  "bundleId": "peps-core",
+  "bundleVersion": "0.1.0",
+  "metadata": {
+    "name": "Python Enhancement Proposals",
+    "description": "Drafted from an ontology survey and reviewed by hand.",
+    "createdAt": "2026-08-29T14:09:44Z"
+  },
+  "objects": [
+    {
+      "id": "Proposal",
+      "display": {
+        "name": "Record",
+        "description": "One document of this corpus, and the fields its header block declares."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "pep",
+          "type": "integer",
+          "nullable": true,
+          "display": {
+            "name": "PEP",
+            "description": "Read from a 'PEP:' header."
+          },
+          "source": {
+            "column": "pep"
+          }
+        },
+        {
+          "id": "author",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Author",
+            "description": "Read from a 'Author:' header."
+          },
+          "source": {
+            "column": "author"
+          }
+        },
+        {
+          "id": "created",
+          "type": "date",
+          "nullable": true,
+          "display": {
+            "name": "Created",
+            "description": "Read from a 'Created:' header."
+          },
+          "source": {
+            "column": "created"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Title",
+            "description": "Read from a 'Title:' header."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "proposal_type",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Type",
+            "description": "Read from a 'Type:' header."
+          },
+          "source": {
+            "column": "proposal_type"
+          }
+        },
+        {
+          "id": "post_history",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Post-History",
+            "description": "Read from a 'Post-History:' header."
+          },
+          "source": {
+            "column": "post_history"
+          }
+        },
+        {
+          "id": "python_version",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Python-Version",
+            "description": "Read from a 'Python-Version:' header."
+          },
+          "source": {
+            "column": "python_version"
+          }
+        },
+        {
+          "id": "resolution",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Resolution",
+            "description": "Read from a 'Resolution:' header."
+          },
+          "source": {
+            "column": "resolution"
+          }
+        },
+        {
+          "id": "discussions_to",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Discussions-To",
+            "description": "Read from a 'Discussions-To:' header."
+          },
+          "source": {
+            "column": "discussions_to"
+          }
+        },
+        {
+          "id": "topic",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Topic",
+            "description": "Read from a 'Topic:' header."
+          },
+          "source": {
+            "column": "topic"
+          }
+        },
+        {
+          "id": "sponsor",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Sponsor",
+            "description": "Read from a 'Sponsor:' header."
+          },
+          "source": {
+            "column": "sponsor"
+          }
+        },
+        {
+          "id": "bdfl_delegate",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "BDFL-Delegate",
+            "description": "Read from a 'BDFL-Delegate:' header."
+          },
+          "source": {
+            "column": "bdfl_delegate"
+          }
+        },
+        {
+          "id": "pep_delegate",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "PEP-Delegate",
+            "description": "Read from a 'PEP-Delegate:' header."
+          },
+          "source": {
+            "column": "pep_delegate"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named",
+        "DocumentScoped"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_Proposal"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true
+        }
+      }
+    }
+  ],
+  "links": [],
+  "interfaces": [
+    {
+      "id": "Reviewable",
+      "display": {
+        "name": "Reviewable",
+        "description": "Anything a person can confirm, amend or reject. Every extracted instance."
+      },
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string"
+        },
+        {
+          "id": "document_id",
+          "type": "string"
+        },
+        {
+          "id": "source",
+          "type": "string"
+        },
+        {
+          "id": "confidence",
+          "type": "number"
+        },
+        {
+          "id": "status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "id": "Named",
+      "display": {
+        "name": "Named entity",
+        "description": "An instance with a human name that might also appear in another document."
+      },
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string"
+        },
+        {
+          "id": "document_id",
+          "type": "string"
+        },
+        {
+          "id": "name",
+          "type": "string"
+        },
+        {
+          "id": "naive_key",
+          "type": "string"
+        },
+        {
+          "id": "status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "id": "DocumentScoped",
+      "display": {
+        "name": "Document-scoped",
+        "description": "An instance whose identity is the document it was read from."
+      },
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string"
+        },
+        {
+          "id": "document_id",
+          "type": "string"
+        },
+        {
+          "id": "status",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "actions": [],
+  "queries": [],
+  "extensions": {
+    "orpheus": {
+      "primaryObjectType": "Proposal",
+      "documentTypes": [
+        "standards",
+        "informational",
+        "process",
+        "other"
+      ]
+    }
+  }
+}

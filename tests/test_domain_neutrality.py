@@ -268,3 +268,44 @@ def test_a_domain_with_no_comparable_value_says_so_instead_of_failing(tmp_path):
         assert "comparable value" in comparison["reason"]
     finally:
         store.close()
+
+
+# ---------------------------------------------------------------------------
+# The bundles a survey actually produced
+# ---------------------------------------------------------------------------
+
+def test_the_drafted_bundles_are_valid_and_are_not_about_contracts(store):
+    """Two bundles nobody wrote by hand.
+
+    `peps-core` and `peps-people-core` came out of `orpheus ontology` run over
+    forty Python Enhancement Proposals — see docs/ontology.md. They are checked
+    in because a claim about generality is worth more as an artefact than as a
+    sentence, and because a change to `draft_bundle` that started producing
+    invalid bundles would otherwise show up only the next time somebody
+    surveyed a new corpus.
+    """
+    for name in ("peps-core-0.1.0.json", "peps-people-core-0.1.0.json"):
+        bundle = bundle_mod.load(bundle_mod.BUNDLE_DIR / name)
+        bundle_mod.validate(bundle)
+        bundle_mod.register(store, bundle, actor_id=None, activate=True)
+        bundle_mod.apply_schema(store, bundle)
+        spelled = str(bundle).lower()
+        assert "contract" not in spelled
+        assert "supplier" not in spelled
+
+
+def test_the_richer_of_the_two_carries_what_makes_a_graph(store):
+    """The measured difference between the two passes. A header block gets the
+    fields right and cannot say that `Author:` names a person, so the bundle it
+    drafts has one type, no links, and a graph with no edges."""
+    fields = bundle_mod.load(bundle_mod.BUNDLE_DIR / "peps-core-0.1.0.json")
+    people = bundle_mod.load(
+        bundle_mod.BUNDLE_DIR / "peps-people-core-0.1.0.json")
+    assert len(fields["objects"]) == 1 and fields["links"] == []
+    assert {o["id"] for o in people["objects"]} == {"Proposal", "Person"}
+    assert {l["id"] for l in people["links"]} == {
+        "authored_by", "sponsored_by", "delegated_to"}
+    person = bundle_mod.object_type(people, "Person")
+    # Named, so the same author on six proposals is one page rather than six.
+    assert "Named" in person["implements"]
+    assert "naive_key" in bundle_mod.property_ids(person)

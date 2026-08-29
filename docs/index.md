@@ -11,6 +11,16 @@ by the bundle's `extensions.orpheus` block. The bundle shipped here describes
 public-sector contracts because that is the driving use case and it makes the
 documentation concrete; swapping it swaps the domain.
 
+That claim used to assume somebody already had a bundle to swap in. A corpus
+from a domain nobody has modelled has no type to file an answer under, and the
+first bundle was always written by hand. `orpheus ontology survey` is that
+missing step: it reads a sample of the corpus and proposes object types,
+properties and links as a queue of candidates with located quotations, and a
+person decides. It has been run on forty Python Enhancement Proposals — a
+corpus sharing nothing with contracts — and the whole pipeline ran on the
+bundle it produced with no code changes. See
+[Where an ontology comes from](ontology.md) for what held and what did not.
+
 This documentation covers **Phase 1**: ingest and extraction quality.
 Conflict-of-interest views and the live reading-companion UI remain out of
 scope — see [Open decisions](open-decisions.md) for what is deferred and why.
@@ -41,6 +51,7 @@ out would have made the wiki misleading rather than merely incomplete:
 
 | Document | What it covers |
 |---|---|
+| [Where an ontology comes from](ontology.md) | Surveying a corpus that has no bundle yet — and why the machine proposes types but never authors them |
 | [Data model](data-model.md) | Every table in the store, the ontology bundle, and the confidence rubric |
 | [Pipeline walkthrough](pipeline-walkthrough.md) | Steps 1–9, in execution order, with the function that runs each |
 | [Entities: the wiki](entities.md) | Mentions vs entities, and why a page is a projection rather than a document |

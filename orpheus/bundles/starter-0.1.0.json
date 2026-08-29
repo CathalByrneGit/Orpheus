@@ -1,0 +1,17 @@
+{
+  "specVersion": "0.1.0",
+  "bundleId": "starter",
+  "bundleVersion": "0.1.0",
+  "metadata": {
+    "name": "Starter",
+    "description": "A bundle with no object types, for a corpus nobody has modelled yet. Ingest, classification, the reading companion and the ontology survey all work against it; extraction has nothing to extract into, which is the honest state of a store whose ontology has not been decided. Survey the corpus, review what it proposes, draft a real bundle and register that."
+  },
+  "objects": [],
+  "links": [],
+  "interfaces": [],
+  "extensions": {
+    "orpheus": {
+      "documentTypes": ["other"]
+    }
+  }
+}

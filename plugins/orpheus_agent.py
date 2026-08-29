@@ -43,6 +43,7 @@ from orpheus import entities as entities_mod
 from orpheus import graph as graph_mod
 from orpheus.rubric import RESOLUTION_STATUSES
 from orpheus import lint as lint_mod
+from orpheus import ontology as ontology_mod
 from orpheus import record as record_mod
 from orpheus import registers as registers_mod
 from orpheus import search as search_mod
@@ -588,6 +589,56 @@ async def record(datasette, actor, context, document_id: str, page_no: int,
 _SCHEMA = {"type": "object", "properties": {}, "required": []}
 
 
+async def review_ontology(datasette, actor, status: str = "proposed",
+                          kind: str = ""):
+    """What a survey proposed about a corpus nobody has modelled yet."""
+    def run(store):
+        rows = ontology_mod.candidates(store, status=status,
+                                       kind=kind or None)
+        return {
+            "candidates": rows,
+            "reading": (
+                "`n_documents` of `n_sampled` is how many documents show this, "
+                "counted rather than claimed -- it is not a confidence and the "
+                "model was never asked for one. Read the evidence: every "
+                "candidate carries quotations located in the documents they "
+                "came from.\n"
+                "The useful things to say are the ones the counts cannot: "
+                "which two of these are the same thing under different names, "
+                "which property is really an attribute of a type nobody "
+                "proposed, and which type is a role rather than a thing. Say "
+                "what you think and why, and let the person decide -- "
+                "accepting an object type fixes the shape of every row that "
+                "will ever be filed under it, and that decision is theirs."),
+        }
+    return json.dumps(await _read(datasette, run), default=str)
+
+
+async def decide_ontology_candidate(datasette, actor, candidate_id: str,
+                                    decision: str, accepted_as: str = "",
+                                    note: str = ""):
+    """Record a person's decision about one proposed type, property or link."""
+    actor_id = await _actor_id(datasette, actor)
+
+    def run(store):
+        return ontology_mod.review_candidate(
+            store, candidate_id, decision, actor_id,
+            accepted_as=accepted_as or None, note=note or None)
+
+    try:
+        result = await _write(datasette, run)
+    except OrpheusError as refused:
+        return json.dumps({"decided": False, "refused": str(refused)})
+    if isinstance(result, dict) and result.get("error"):
+        return json.dumps(result)
+    return json.dumps({
+        "decided": {k: v for k, v in dict(result).items() if k != "evidence"},
+        "reading": ("Recorded. Nothing is in the ontology yet: a bundle is "
+                    "drafted from the accepted candidates as a separate step, "
+                    "and registering it is a person's decision."),
+    }, default=str)
+
+
 def _tools():
     return [
         AgentTool(
@@ -698,6 +749,43 @@ def _tools():
             input_schema={"type": "object", "properties": {
                 "entity_id": {"type": "string"}}, "required": ["entity_id"]},
             fn=corroboration_for,
+        ),
+        AgentTool(
+            name="orpheus_review_ontology",
+            description=_PREFER + "What an ontology survey proposed for a "
+                        "corpus that has no bundle yet: object types, "
+                        "properties and links, each with quotations and a "
+                        "count of how many documents show it. Use it to help "
+                        "somebody decide what their documents are about — "
+                        "especially which proposals are the same thing twice, "
+                        "and which property should have been a type.",
+            input_schema={"type": "object", "properties": {
+                "status": {"type": "string",
+                           "enum": ["proposed", "accepted", "amended",
+                                    "rejected"]},
+                "kind": {"type": "string",
+                         "enum": ["object_type", "property", "link_type"]}},
+                "required": []},
+            fn=review_ontology,
+        ),
+        AgentTool(
+            name="orpheus_decide_ontology_candidate",
+            description="Record what the person decided about one proposed "
+                        "type, property or link. `accepted_as` renames it, "
+                        "which is the ordinary move — a survey notices that "
+                        "something recurs and cannot know what it is called. "
+                        "Call it when they say to. Accepting a type shapes "
+                        "every row that will ever be filed under it, so it is "
+                        "never yours to decide on your own reading.",
+            input_schema={"type": "object", "properties": {
+                "candidate_id": {"type": "string"},
+                "decision": {"type": "string",
+                             "enum": ["accepted", "rejected"]},
+                "accepted_as": {"type": "string",
+                                "description": "Accept it under this name"},
+                "note": {"type": "string"}},
+                "required": ["candidate_id", "decision"]},
+            fn=decide_ontology_candidate,
         ),
         AgentTool(
             name="orpheus_needs_review",

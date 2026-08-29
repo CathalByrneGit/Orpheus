@@ -299,6 +299,39 @@ confidently for the wrong answer; and different registered numbers mean two
 organisations, which is the one thing in this store that can argue *against* a
 merge with something better than a spelling.
 
+## Helping decide what a corpus is about
+
+A store whose bundle has no object types has not been modelled yet. That is a
+legitimate state, not a broken one, and `orpheus ontology` is the loop out of
+it.
+
+```bash
+orpheus --db store.sqlite ontology survey --actor-id act_...     # propose
+orpheus --db store.sqlite ontology candidates                    # the queue
+```
+
+Each candidate carries quotations located in the documents they came from, and
+`n_documents` of `n_sampled`: how many documents show it, **counted rather than
+claimed**. That is not a confidence and the model was never asked for one, so do
+not report it as one.
+
+The useful things for you to say are the ones the counts cannot:
+
+- **which two of these are the same thing under different names** — `Author` and
+  `Sponsor` are usually one type with a role;
+- **which property should have been a type** — a `Author: Ada Lovelace
+  <ada@example.org>` field is a string to a pattern and a person to a reader;
+- **which type is a role rather than a thing** — an office and the person
+  holding it are different, and a bundle that conflates them cannot say when
+  the holder changed.
+
+Say what you think and why, quoting the evidence. Then let the person decide.
+Accepting an object type fixes the shape of every row that will ever be filed
+under it — there is a whole module (`schema_ops.py`) that exists because that
+turned out to be permanent once — so it is never yours to decide on your own
+reading. `orpheus_decide_ontology_candidate` records **their** decision;
+drafting and registering a bundle is a separate act you have no tool for.
+
 ## Recording something extraction missed
 
 ```bash

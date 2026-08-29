@@ -658,3 +658,42 @@ def test_a_schema_capable_model_can_still_return_relationships():
     assert set(schema["properties"]["extractions"]["items"]["properties"]) >= {
         "instance_id", "type", "excerpt", "properties"}, \
         "relationships refer to extractions by instance_id, so it has to be askable"
+
+
+# ---------------------------------------------------------------------------
+# Asking a general question
+# ---------------------------------------------------------------------------
+
+def test_an_extractor_cannot_be_asked_an_open_question(store):
+    """`gliner2` and `langextract` are handed a field list and return spans for
+    it. That is what makes them cheap and grounded, and it means there is no
+    shape of call that asks either of them what a corpus is about."""
+    from orpheus.engines import ask, general_engines
+
+    with pytest.raises(OrpheusError) as refused:
+        ask(store=store, system="s", text="t", purpose="survey",
+            engine="gliner2", tier="local", opt_in=False, actor_id=None)
+    assert "cannot be asked an open question" in str(refused.value)
+    assert "chat" in str(refused.value)
+    assert "gliner2" not in general_engines()
+
+
+def test_a_failed_question_is_still_recorded_as_having_been_asked(store,
+                                                                  monkeypatch):
+    """The audit answers "what left this deployment", and the payload left just
+    the same when the call came back an error."""
+    from orpheus import engines
+
+    def explode(base_url, api_key, payload):
+        raise RuntimeError("upstream said no")
+
+    monkeypatch.setattr(engines, "_post_chat", explode)
+    with pytest.raises(OrpheusError):
+        engines.ask(store=store, system="sys", text="body", purpose="survey",
+                    engine="chat", tier="local", opt_in=False, actor_id=None)
+    call = store.one("SELECT * FROM llm_calls ORDER BY seq DESC")
+    assert call["purpose"] == "survey"
+    assert "upstream said no" in call["error"]
+    # System prompt included. A budget that counted only half of every call
+    # would be wrong in the direction that matters.
+    assert call["prompt_chars"] == len("sys") + len("body")

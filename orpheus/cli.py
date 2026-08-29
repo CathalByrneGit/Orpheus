@@ -22,13 +22,18 @@ from pathlib import Path
 
 from . import analysis, auth, bundle as bundle_mod, classify, concepts
 from . import datasette_config, extract as extract_mod, ingest as ingest_mod
-from . import quality, review
+from . import quality, review, textract
 from .store import Store
 from .utils import OrpheusError
 
 DEFAULT_DB = "data/orpheus.sqlite"
-DOCUMENT_SUFFIXES = (".pdf", ".docx", ".txt", ".md",
-                     ".png", ".jpg", ".jpeg", ".tif", ".tiff")
+#: What `orpheus ingest <directory>` will pick up. Derived from the formats
+#: `textract` actually reads rather than listed again here: the two were a copy
+#: of each other, and the copy went stale the first time a format was added --
+#: `.rst` became ingestable and a directory of it still looked empty.
+DOCUMENT_SUFFIXES = tuple(
+    sorted("." + suffix for suffix, kind in textract._KINDS.items()
+           if kind not in ("unknown", "unsupported_doc")))
 
 
 # ---------------------------------------------------------------------------
@@ -1140,6 +1145,68 @@ def cmd_config(args) -> int:
     return 0
 
 
+def cmd_ontology(args) -> int:
+    """Survey a corpus that has no ontology, review what it proposes, draft one.
+
+    Four verbs, one loop: `survey` proposes, `candidates` lists what it
+    proposed, `review` decides, `draft` assembles a bundle out of the decisions.
+    Nothing between the first and the last writes a bundle -- see
+    `orpheus/ontology.py` on why that line is where it is.
+    """
+    from . import ontology
+
+    store = open_store(args, mode="read" if args.action == "candidates"
+                       else "write")
+    try:
+        if args.action == "survey":
+            result = ontology.survey(
+                store, engine=args.engine or ontology.DEFAULT_ENGINE,
+                sample=args.sample, actor_id=args.actor_id, tier=args.tier,
+                opt_in=args.cloud_opt_in, min_support=args.min_support,
+                document_ids=args.document_id or None,
+                primary_type=args.type_id or ontology.DEFAULT_PRIMARY_TYPE,
+                chars_per_document=args.chars_per_document)
+        elif args.action == "candidates":
+            result = {"candidates": ontology.candidates(
+                store, status=args.status, kind=args.kind)}
+        elif args.action == "review":
+            if not args.candidate_id:
+                raise OrpheusError("Give a candidate id to review.")
+            if not args.decision:
+                raise OrpheusError(
+                    "Give --decision accepted or --decision rejected.")
+            result = ontology.review_candidate(
+                store, args.candidate_id, args.decision, args.actor_id,
+                accepted_as=args.to, note=args.note)
+        else:
+            result = ontology.draft_bundle(
+                store, args.bundle_id, bundle_version=args.bundle_version,
+                name=args.name, primary_type=args.type_id or None,
+                document_types=args.document_type or None,
+                document_scoped=args.document_scoped or None)
+            if args.out:
+                Path(args.out).write_text(
+                    json.dumps(result["bundle"], indent=2) + "\n")
+                result["written"] = args.out
+            # Registering is a separate act, on purpose. A drafting command
+            # that also installed the ontology would be the one place an
+            # ontology arrived in a store without anybody choosing it.
+            if args.register:
+                if result["problems"]:
+                    raise OrpheusError(
+                        "This draft has problems, so it is not being "
+                        "registered:\n  - " + "\n  - ".join(result["problems"]))
+                bundle_mod.register(store, result["bundle"],
+                                    actor_id=args.actor_id, activate=True)
+                bundle_mod.apply_schema(store, result["bundle"])
+                result["registered"] = True
+            result.pop("bundle", None)
+    finally:
+        store.close()
+    emit(result, args.json)
+    return 0
+
+
 def cmd_bundle(args) -> int:
     """Validate a bundle without touching a store."""
     schema_checked = bundle_mod.schema_validation_available()
@@ -1266,6 +1333,43 @@ def build_parser() -> argparse.ArgumentParser:
     report = add("report", cmd_report, "extraction quality, measured")
     report.add_argument("--document-id")
     report.add_argument("--min-reviewed", type=int, default=5)
+
+    onto = add("ontology", cmd_ontology,
+               "propose an ontology for a corpus that has none")
+    onto.add_argument("action",
+                      choices=("survey", "candidates", "review", "draft"))
+    onto.add_argument("candidate_id", nargs="?", help="for `review`")
+    onto.add_argument("--actor-id")
+    onto.add_argument("--engine",
+                      help="deterministic (default), or a general model")
+    onto.add_argument("--sample", type=int, default=20,
+                      help="how many documents to read")
+    onto.add_argument("--chars-per-document", type=int, default=6000,
+                      help="how much of each document a model is shown")
+    onto.add_argument("--min-support", type=int, default=2,
+                      help="documents a shape must appear in to be proposed")
+    onto.add_argument("--document-id", action="append", default=[],
+                      help="survey these documents; repeatable")
+    onto.add_argument("--tier", default="local", choices=("local", "cloud"))
+    onto.add_argument("--cloud-opt-in", action="store_true")
+    onto.add_argument("--status", default="proposed")
+    onto.add_argument("--kind", choices=("object_type", "property",
+                                         "link_type"))
+    onto.add_argument("--decision", choices=("accepted", "rejected"))
+    onto.add_argument("--to", help="accept it under this name instead")
+    onto.add_argument("--note")
+    onto.add_argument("--bundle-id", default="drafted-core")
+    onto.add_argument("--bundle-version", default="0.1.0")
+    onto.add_argument("--name", help="the bundle's display name")
+    onto.add_argument("--type-id",
+                      help="the type to hang fields on, or the primary type")
+    onto.add_argument("--document-type", action="append", default=[],
+                      help="the classifier's vocabulary; repeatable")
+    onto.add_argument("--document-scoped", action="append", default=[],
+                      help="types whose identity is the document; repeatable")
+    onto.add_argument("--out", help="write the drafted bundle here")
+    onto.add_argument("--register", action="store_true",
+                      help="register and apply the draft, if it has no problems")
 
     config = add("config", cmd_config, "regenerate the Datasette files")
     config.add_argument("--config", default="config/datasette.yml")

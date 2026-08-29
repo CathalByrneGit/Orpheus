@@ -304,6 +304,7 @@ orpheus/
 │   ├── review.py            # steps 6/8, schema amendment queue, staleness
 │   ├── concepts.py          # step 7, versioned rule concepts and scores
 │   ├── analysis.py          # step 9, corpus escalation
+│   ├── ontology.py          # surveying a corpus that has no bundle yet
 │   ├── registers.py         # reference data, held apart from the corpus
 │   ├── quality.py           # the report Phase 1 exists to produce
 │   ├── benchmark.py         # CUAD scoring
@@ -311,7 +312,7 @@ orpheus/
 │   ├── api.py               # the dispatch table
 │   ├── datasette_config.py  # generates metadata.yml and datasette.yml
 │   ├── cli.py               # the command line
-│   ├── bundles/             # contract-core-0.2.0.json
+│   ├── bundles/             # contract-core-*.json, and starter-0.1.0.json
 │   └── schemas/             # the two JSON Schemas a bundle is checked against
 ├── plugins/orpheus_datasette.py   # the UI, and the API mounted in-process
 ├── frontend/                # the map's front end: Svelte + Vite + d3-force

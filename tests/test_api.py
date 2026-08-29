@@ -349,3 +349,75 @@ def test_a_bad_entity_request_is_a_message_not_a_traceback(with_entities):
     _, call, _ = with_entities
     assert call("POST", "/entities", {"type_id": "Company"})[0] == 400
     assert call("GET", "/entities/ent_nope")[0] == 404
+
+
+# ---------------------------------------------------------------------------
+# The ontology itself
+# ---------------------------------------------------------------------------
+
+def test_surveying_is_an_administrator_decision(api):
+    """Not because a survey is dangerous, but because of what it is for: the
+    queue it fills is the input to a decision that shapes every row the store
+    will ever hold."""
+    _, call, _, _ = api
+    status, body = call("POST", "/ontology/survey", who="owner")
+    assert status == 403
+    assert "administrator" in body["error"]["message"]
+
+
+def test_a_survey_proposes_and_a_person_decides(api):
+    store, call, document_id, _ = api
+    store.execute(
+        "INSERT INTO document_pages (document_id, page_no, text, text_source, "
+        "char_count) VALUES (?, 99, ?, 'native', 60)",
+        (document_id, "Reference: A/1\nOwner: Ada Lovelace\nStatus: Open\n"))
+    store.conn.commit()
+
+    status, surveyed = call("POST", "/ontology/survey", {"min_support": 1},
+                            who="admin")
+    assert status == 200
+    assert surveyed["n_candidates"] >= 1
+
+    status, listed = call("GET", "/ontology/candidates", who="owner")
+    assert status == 200
+    # Counted, not claimed -- and the route says so, because a number between
+    # 0 and 1 next to a machine's proposal reads as a confidence.
+    assert "not a confidence" in listed["reading"]
+
+    candidate = next(c for c in listed["candidates"]
+                     if c["kind"] == "object_type")
+    status, refused = call(
+        "POST", f"/ontology/candidates/{candidate['candidate_id']}/review",
+        {"decision": "accepted"}, who="owner")
+    assert status == 403
+
+    status, decided = call(
+        "POST", f"/ontology/candidates/{candidate['candidate_id']}/review",
+        {"decision": "accepted", "accepted_as": "Matter"}, who="admin")
+    assert status == 200
+    assert (decided["status"], decided["accepted_as"]) == ("amended", "Matter")
+
+
+def test_drafting_returns_a_bundle_and_does_not_install_it(api):
+    """The one property this route exists to keep. Registering an ontology is a
+    deliberate act; a drafting route that also installed it would be the place
+    an ontology arrived without anybody choosing it."""
+    store, call, document_id, _ = api
+    store.execute(
+        "INSERT INTO document_pages (document_id, page_no, text, text_source, "
+        "char_count) VALUES (?, 99, ?, 'native', 60)",
+        (document_id, "Reference: A/1\nOwner: Ada Lovelace\nSubject: Roads\n"))
+    store.conn.commit()
+    call("POST", "/ontology/survey", {"min_support": 1}, who="admin")
+    _, listed = call("GET", "/ontology/candidates", who="admin")
+    for candidate in listed["candidates"]:
+        call("POST",
+             f"/ontology/candidates/{candidate['candidate_id']}/review",
+             {"decision": "accepted"}, who="admin")
+
+    before = bundle_mod.active(store)["bundleId"]
+    status, drafted = call("POST", "/ontology/draft",
+                           {"bundle_id": "matters-core"}, who="admin")
+    assert status == 200
+    assert drafted["bundle"]["bundleId"] == "matters-core"
+    assert bundle_mod.active(store)["bundleId"] == before

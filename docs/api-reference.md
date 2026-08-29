@@ -334,6 +334,37 @@ what staging is for. Promoting is administrator-only because reference data
 every later answer rests on means somebody takes responsibility for what it
 decides. See [the register](entities.md#a-register-when-the-documents-cannot-settle-it).
 
+### The ontology itself
+
+For a corpus that has no bundle yet. See
+[Where an ontology comes from](ontology.md).
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| `POST` | `/ontology/survey` | **administrator** | `engine`, `sample`, `min_support`, `document_ids`, `primary_type`, `chars_per_document`, `tier`, `cloud_opt_in` |
+| `GET` | `/ontology/candidates` | actor | `?status=proposed`, `?kind=object_type\|property\|link_type` |
+| `POST` | `/ontology/candidates/<id>/review` | **administrator** | `decision`, `accepted_as`, `note` |
+| `POST` | `/ontology/draft` | **administrator** | `bundle_id`, `bundle_version`, `name`, `primary_type`, `document_types`, `document_scoped` |
+
+Surveying and reviewing are administrator-only, and not because a survey is
+dangerous. Accepting an object type fixes the shape of every row that will ever
+be filed under it — a decision `schema_ops.py` exists because somebody once
+could not undo.
+
+`accepted_as` renames a candidate and lands it at `amended`. That is the
+ordinary accepting move: a survey notices that something recurs and has no way
+to know what it is called.
+
+`/ontology/draft` returns the bundle; it does not register it. Registering an
+ontology is a deliberate act with a deployment behind it, and a drafting route
+that also installed it would be the one place in this API where an ontology
+arrived without anybody choosing it. Register it with the CLI
+(`orpheus ontology draft --register`) or by loading the returned JSON.
+
+Each candidate carries `n_documents` of `n_sampled` — how many documents show
+it, **counted rather than claimed**. It is not a confidence, and the model is
+never asked for one.
+
 ### The corpus as a network
 
 | Method | Path | Permission | Notes |

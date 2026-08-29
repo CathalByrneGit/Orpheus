@@ -747,6 +747,136 @@ def _anthropic_workspace(store: Store | None) -> str | None:
     return os.environ.get("ANTHROPIC_WORKSPACE_ID")
 
 
+# ---------------------------------------------------------------------------
+# Asking a general question
+# ---------------------------------------------------------------------------
+
+#: The engines that can answer something other than "populate this schema".
+#:
+#: `gliner2` and `langextract` are extractors: they are handed a field list and
+#: return spans for it, and there is no shape of call that asks either of them
+#: an open question. That is not a gap to be worked around -- it is what makes
+#: them cheap and grounded -- so a caller that needs a question answered is told
+#: which engines can answer it rather than being given a broken one.
+GENERAL_ENGINES = ("chat", "anthropic", "llm")
+
+
+def general_engines() -> list[str]:
+    return [name for name in GENERAL_ENGINES if name in _ENGINES]
+
+
+def ask(*, store: Store, system: str, text: str, purpose: str, engine: str,
+        tier: str, opt_in: bool, actor_id: str | None,
+        document_id: str | None = None) -> str:
+    """Put one question to a model and return what it said, verbatim.
+
+    The transport of `chat_extract`, `anthropic_extract` and `llm_extract`
+    without their prompt: same gate before anything is sent, same
+    `record_llm_call` in a `finally` so the audit records the attempt whether or
+    not it succeeded, same characters-not-tokens accounting.
+
+    Deliberately *not* an engine. Every engine takes a bundle and returns a
+    population, and the one caller for this -- surveying a corpus that has no
+    bundle -- has neither. Registering it alongside them would put something in
+    `available_engines()` that cannot extract, and every caller iterating that
+    list would have to know which.
+
+    Returns the raw reply. Parsing it is the caller's job, because what a
+    sensible reply looks like is the caller's question and not this function's.
+    """
+    if engine not in GENERAL_ENGINES:
+        raise OrpheusError(
+            f"{engine!r} extracts against a schema and cannot be asked an open "
+            f"question. Use one of: {', '.join(general_engines())}.")
+    if tier == "cloud":
+        llm.assert_cloud_allowed(store, opt_in=opt_in, actor_id=actor_id)
+    config = llm.model_config(store, tier)
+
+    error, content = None, ""
+    provider, model_id = config.get("provider"), config.get("model_id")
+    # BaseException throughout, for the reason each engine gives: the audit is
+    # the record of what left this deployment, and a native backend can abort
+    # through the interpreter rather than raise.
+    try:
+        if engine == "anthropic":
+            provider, model_id = "anthropic", _anthropic_model_id(
+                store, tier, config)
+            content = _ask_anthropic(store, system, text, model_id, config)
+        elif engine == "llm":
+            model_id = _llm_model_id(store, tier, config)
+            provider = "llm"
+            content = _ask_llm(system, text, model_id, config)
+        else:
+            base_url = config.get("base_url") or _default_base_url(store, tier)
+            content = _post_chat(base_url, config.get("api_key"), {
+                "model": config["model_id"],
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": text}],
+                "temperature": 0,
+            })
+    except BaseException as exc:  # noqa: BLE001
+        error = f"{type(exc).__name__}: {exc}"
+    finally:
+        llm.record_llm_call(
+            store, tier=tier, purpose=purpose,
+            # The system prompt too. It is text this deployment sent, and a
+            # budget that counted only half of every call would be wrong in the
+            # direction that matters.
+            prompt_chars=len(system) + len(text),
+            provider=provider, model=model_id, document_id=document_id,
+            actor_id=actor_id, excerpt_only=False, payload=system + text,
+            error=error)
+    if error:
+        raise OrpheusError(f"{purpose} failed: {error}")
+    return content
+
+
+def _ask_anthropic(store: Store, system: str, text: str, model_id: str,
+                   config: dict) -> str:
+    try:
+        import anthropic as anthropic_sdk
+    except ImportError as exc:
+        raise OrpheusError(
+            "The Anthropic SDK is not installed. `pip install "
+            "'orpheus[anthropic]'`."
+        ) from exc
+    if not config.get("api_key"):
+        raise OrpheusError(
+            "No API key for the cloud tier. Set ORPHEUS_CLOUD_API_KEY or "
+            "ANTHROPIC_API_KEY.")
+    headers = {}
+    workspace = _anthropic_workspace(store)
+    if workspace:
+        headers["anthropic-workspace-id"] = workspace
+    client = anthropic_sdk.Anthropic(api_key=config["api_key"],
+                                     default_headers=headers or None)
+    with client.messages.stream(
+            model=model_id,
+            max_tokens=int(store.setting("anthropic_max_tokens", 16000)
+                           if store else 16000),
+            system=system,
+            messages=[{"role": "user", "content": text}]) as stream:
+        response = stream.get_final_message()
+    if response.stop_reason == "refusal":
+        raise OrpheusError("refusal: the model declined this text")
+    return "".join(block.text for block in response.content
+                   if block.type == "text")
+
+
+def _ask_llm(system: str, text: str, model_id: str, config: dict) -> str:
+    try:
+        import llm as llm_lib
+    except ImportError as exc:
+        raise OrpheusError(
+            "The llm library is not installed. `pip install 'orpheus[chat]'`."
+        ) from exc
+    model = llm_lib.get_model(model_id)
+    kwargs: dict[str, Any] = {"system": system, "stream": False}
+    if config.get("api_key") and isinstance(model, llm_lib.KeyModel):
+        kwargs["key"] = config["api_key"]
+    return model.prompt(text, **kwargs).text()
+
+
 register_engine("gliner2", gliner2_extract)
 register_engine("llm", llm_extract)
 register_engine("langextract", langextract_extract)

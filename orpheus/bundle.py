@@ -490,6 +490,15 @@ def _domain_problems(bundle: dict) -> list[str]:
 
     primary_id = d.get("primaryObjectType")
     primary = object_type(bundle, primary_id) if primary_id else None
+    if not primary_id and bundle.get("objects"):
+        # Required of any bundle that has object types, and only of those. A
+        # bundle with none is the starting state of a corpus nobody has
+        # modelled yet -- there is nothing for a document to be fundamentally
+        # about, and the ontology survey is how that stops being true.
+        problems.append(
+            "extensions.orpheus: a bundle with object types must name a "
+            "primaryObjectType, or the pipeline has to guess which type a "
+            "document is fundamentally about")
     if primary_id and primary is None:
         problems.append(
             f"extensions.orpheus: primaryObjectType '{primary_id}' is not an "

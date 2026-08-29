@@ -113,7 +113,9 @@ _KINDS = {
     "pdf": "pdf",
     "docx": "docx",
     "doc": "unsupported_doc",
-    "txt": "text", "md": "text", "markdown": "text",
+    # reStructuredText is plain text with a convention on top of it, and
+    # the convention costs nothing to read as prose.
+    "txt": "text", "md": "text", "markdown": "text", "rst": "text",
     "png": "image", "jpg": "image", "jpeg": "image",
     "tif": "image", "tiff": "image", "bmp": "image",
 }

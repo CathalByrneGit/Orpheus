@@ -716,6 +716,98 @@ MIGRATIONS: list[dict] = [
             "ON register_rows (identifier)",
         ],
     },
+    {
+        "version": 13,
+        "name": "ontology_candidates",
+        # Where an ontology comes from before there is one.
+        #
+        # Everything else in this store is written against a bundle: a type to
+        # file a row under, a property to put a value in. A corpus from a new
+        # domain has neither, and the honest first question about it is not
+        # "what does this document say" but "what kinds of thing are these
+        # documents about". A survey answers that badly on its own and well
+        # with somebody reading it, so what it produces is a queue rather than
+        # a bundle.
+        #
+        # Kept apart from `schema_amendments` on purpose. An amendment is a
+        # correction to an ontology that is already in force and already has
+        # rows filed under it -- accepting one is a patch bump. A candidate is
+        # a proposal about a corpus with no ontology at all, so there is
+        # nothing to patch and nothing yet filed. Sharing a table would mean
+        # one queue where a reviewer cannot tell which question they are being
+        # asked.
+        "statements": [
+            """
+            CREATE TABLE IF NOT EXISTS ontology_candidates (
+                candidate_id TEXT PRIMARY KEY,
+                -- Which run proposed it. A survey is re-runnable with a
+                -- different engine or a wider sample, and a reviewer needs to
+                -- know whether they are looking at one reading or three.
+                survey_id    TEXT NOT NULL,
+                kind         TEXT NOT NULL,
+                -- The proposed type, or for a property the type it belongs to.
+                type_id      TEXT NOT NULL,
+                property_id  TEXT,
+                to_type_id   TEXT,
+                data_type    TEXT,
+                -- How this type's names normalise, when it is the kind of type
+                -- that has names. The engine has no business knowing that a
+                -- domain calls its people Person, so this travels in the
+                -- bundle -- and a survey that noticed it should say so.
+                name_style   TEXT,
+                display_name TEXT,
+                description  TEXT,
+                rationale    TEXT,
+                -- Support, and what it is out of. A type seen in one document
+                -- of forty is a different proposition from one seen in
+                -- thirty-eight, and a reviewer deciding whether to build a
+                -- table around it needs both numbers, not a ratio.
+                n_documents  INTEGER NOT NULL DEFAULT 0,
+                n_sampled    INTEGER NOT NULL DEFAULT 0,
+                engine       TEXT,
+                source       TEXT,
+                status       TEXT NOT NULL DEFAULT 'proposed',
+                -- What a person renamed it to. The evidence argued for the
+                -- thing, not for the name the machine gave it.
+                accepted_as  TEXT,
+                created_at   TEXT NOT NULL,
+                decided_by   TEXT REFERENCES actors(actor_id),
+                decided_at   TEXT,
+                note         TEXT
+            )
+            """,
+            # One candidate per shape, however many documents show it -- the
+            # same rule `record_schema_amendment` follows, for the same reason:
+            # a queue that repeats itself is a queue nobody finishes reading.
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ontology_candidate_shape
+            ON ontology_candidates (kind, type_id, IFNULL(property_id, ''),
+                                    IFNULL(to_type_id, ''))
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ontology_candidates_status "
+            "ON ontology_candidates (status)",
+            """
+            CREATE TABLE IF NOT EXISTS ontology_evidence (
+                evidence_id  TEXT PRIMARY KEY,
+                candidate_id TEXT NOT NULL REFERENCES
+                             ontology_candidates(candidate_id),
+                document_id  TEXT NOT NULL REFERENCES documents(document_id),
+                page_no      INTEGER,
+                excerpt      TEXT NOT NULL,
+                -- Located by align.py against the document, never taken on
+                -- trust. A proposal whose quotation is nowhere in the corpus
+                -- is the one kind this table must not carry: it is the whole
+                -- of what a reviewer has to go on.
+                char_start   INTEGER,
+                char_end     INTEGER,
+                alignment    TEXT,
+                confidence   REAL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ontology_evidence_candidate "
+            "ON ontology_evidence (candidate_id)",
+        ],
+    },
 ]
 
 

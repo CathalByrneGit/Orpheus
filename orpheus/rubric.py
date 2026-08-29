@@ -70,6 +70,22 @@ SUGGESTION_STATUSES = ("offered", "accepted", "dismissed")
 # rediscover it.
 QUESTION_STATUSES = ("open", "explained", "standing", "dismissed")
 
+#: What a person decided about an object type, property or link the machine
+#: proposed for a corpus that has no ontology yet.
+#:
+#: `amended` is the one that carries the weight. A survey is good at noticing
+#: that the same kind of thing keeps appearing and bad at naming it, so the
+#: ordinary accepting move is "yes, but it is called this" -- and a vocabulary
+#: with only accept and reject would record that as a rejection followed by a
+#: type nobody proposed, losing the evidence that argued for it.
+CANDIDATE_STATUSES = ("proposed", "accepted", "amended", "rejected")
+SETTLED_CANDIDATES = ("accepted", "amended", "rejected")
+
+#: What kinds of thing a survey can propose. Exactly the three shapes a bundle
+#: has, and deliberately no more: anything the machine cannot express in these
+#: is something a person writes into the bundle by hand.
+CANDIDATE_KINDS = ("object_type", "property", "link_type")
+
 #: What somebody can decide about two pages that might be one thing.
 #:
 #: Its own vocabulary rather than a reuse of the one above, because "dismissed"

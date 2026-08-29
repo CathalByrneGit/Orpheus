@@ -1,0 +1,488 @@
+{
+  "specVersion": "0.1.0",
+  "bundleId": "peps-people-core",
+  "bundleVersion": "0.1.0",
+  "metadata": {
+    "name": "PEPs and their people",
+    "description": "Drafted from an ontology survey and reviewed by hand.",
+    "createdAt": "2026-08-29T14:26:10Z"
+  },
+  "objects": [
+    {
+      "id": "Proposal",
+      "display": {
+        "name": "Python Enhancement Proposal",
+        "description": "A formal design document proposing a change, feature, process or informational content for the Python language or ecosystem."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "created",
+          "type": "date",
+          "nullable": true,
+          "display": {
+            "name": "Created date",
+            "description": "The date the proposal was created."
+          },
+          "source": {
+            "column": "created"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Title",
+            "description": "The title of the proposal."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "proposal_type",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "PEP type",
+            "description": "The category of proposal (e.g. Standards Track, Informational, Process)."
+          },
+          "source": {
+            "column": "proposal_type"
+          }
+        },
+        {
+          "id": "pep_status",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "PEP status",
+            "description": "The current lifecycle state of the proposal (e.g. Draft, Final, Rejected, Withdrawn, Deferred, Active, Superseded)."
+          },
+          "source": {
+            "column": "pep_status"
+          }
+        },
+        {
+          "id": "post_history",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Post-history",
+            "description": "Dates on which the proposal was posted or discussed publicly."
+          },
+          "source": {
+            "column": "post_history"
+          }
+        },
+        {
+          "id": "python_version",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Python version",
+            "description": "The Python release the proposal targets."
+          },
+          "source": {
+            "column": "python_version"
+          }
+        },
+        {
+          "id": "topic",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Topic",
+            "description": "An optional subject-area tag grouping related proposals."
+          },
+          "source": {
+            "column": "topic"
+          }
+        },
+        {
+          "id": "pep",
+          "type": "integer",
+          "nullable": true,
+          "display": {
+            "name": "PEP number",
+            "description": "The official sequence number of the proposal."
+          },
+          "source": {
+            "column": "pep"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named",
+        "DocumentScoped"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_Proposal"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true
+        }
+      }
+    },
+    {
+      "id": "Person",
+      "display": {
+        "name": "Person",
+        "description": "An individual associated with a PEP as author, sponsor, or delegate."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Name",
+            "description": "The person's full name."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "email",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Email address",
+            "description": "The person's email address as listed in the document header."
+          },
+          "source": {
+            "column": "email"
+          }
+        },
+        {
+          "id": "proposal_instance_id",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Proposal instance",
+            "description": "The Proposal this belongs to."
+          },
+          "source": {
+            "column": "proposal_instance_id"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_Person"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true,
+          "nameStyle": "personal"
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "authored_by",
+      "from": "Proposal",
+      "to": "Person",
+      "display": {
+        "name": "Authored by",
+        "description": "The person or people who wrote the proposal."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "proposal_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "delegated_to",
+      "from": "Proposal",
+      "to": "Person",
+      "display": {
+        "name": "Delegated to",
+        "description": "The person delegated authority to decide the proposal's fate on behalf of the BDFL or steering council."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "proposal_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "sponsored_by",
+      "from": "Proposal",
+      "to": "Person",
+      "display": {
+        "name": "Sponsored by",
+        "description": "The core developer who sponsors the proposal for consideration."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "proposal_instance_id"
+        ]
+      }
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "Reviewable",
+      "display": {
+        "name": "Reviewable",
+        "description": "Anything a person can confirm, amend or reject. Every extracted instance."
+      },
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string"
+        },
+        {
+          "id": "document_id",
+          "type": "string"
+        },
+        {
+          "id": "source",
+          "type": "string"
+        },
+        {
+          "id": "confidence",
+          "type": "number"
+        },
+        {
+          "id": "status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "id": "Named",
+      "display": {
+        "name": "Named entity",
+        "description": "An instance with a human name that might also appear in another document."
+      },
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string"
+        },
+        {
+          "id": "document_id",
+          "type": "string"
+        },
+        {
+          "id": "name",
+          "type": "string"
+        },
+        {
+          "id": "naive_key",
+          "type": "string"
+        },
+        {
+          "id": "status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "id": "DocumentScoped",
+      "display": {
+        "name": "Document-scoped",
+        "description": "An instance whose identity is the document it was read from."
+      },
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string"
+        },
+        {
+          "id": "document_id",
+          "type": "string"
+        },
+        {
+          "id": "status",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "actions": [],
+  "queries": [],
+  "extensions": {
+    "orpheus": {
+      "primaryObjectType": "Proposal",
+      "documentTypes": [
+        "standards",
+        "informational",
+        "process",
+        "other"
+      ]
+    }
+  }
+}

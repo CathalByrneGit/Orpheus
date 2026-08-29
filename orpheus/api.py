@@ -29,6 +29,7 @@ from . import export_md
 from . import companion as companion_mod
 from . import corroboration as corroboration_mod
 from . import graph as graph_mod
+from . import ontology
 from . import registers as registers_mod
 from . import questions as questions_mod
 from . import lint as lint_mod
@@ -751,6 +752,87 @@ def withdraw_register(store, register_id, actor, body, **_):
     return registers_mod.withdraw(store, register_id,
                                   actor_id=_actor_id(actor),
                                   note=body.get("note"))
+
+
+# ---------------------------------------------------------------------------
+# The ontology itself
+# ---------------------------------------------------------------------------
+
+@route("GET", "/ontology/candidates")
+def get_ontology_candidates(store, actor, body, **_):
+    """What a survey proposed, most-supported first."""
+    return {"candidates": ontology.candidates(
+        store, status=body.get("status", "proposed"),
+        kind=body.get("kind") or None),
+        "reading": ("`n_documents` of `n_sampled` is how many documents show "
+                    "this, counted rather than claimed. It is not a "
+                    "confidence: the model is never asked how sure it is.")}
+
+
+@route("POST", "/ontology/survey")
+def post_ontology_survey(store, actor, body, **_):
+    """Read a sample of the corpus and propose what it seems to be about.
+
+    Administrator-only, and for a different reason from the other admin routes.
+    A survey reads across every document in the sample, including ones this
+    actor may not be allowed to read -- but the decisive reason is what it is
+    *for*: the queue it fills is the input to a decision that shapes every row
+    the store will ever hold.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "A survey reads across the whole corpus and proposes the shape of "
+            "everything that will be stored in it, so it is an administrator "
+            "decision.")
+    return ontology.survey(
+        store, engine=body.get("engine") or ontology.DEFAULT_ENGINE,
+        sample=_int(body, "sample", ontology.DEFAULT_SAMPLE),
+        actor_id=_actor_id(actor), tier=body.get("tier", "local"),
+        opt_in=bool(body.get("cloud_opt_in")),
+        min_support=_int(body, "min_support", ontology.DEFAULT_MIN_SUPPORT),
+        document_ids=body.get("document_ids") or None,
+        primary_type=body.get("primary_type") or ontology.DEFAULT_PRIMARY_TYPE,
+        chars_per_document=_int(body, "chars_per_document",
+                                ontology.DEFAULT_CHARS_PER_DOCUMENT))
+
+
+@route("POST", r"/ontology/candidates/(?P<candidate_id>[^/]+)/review")
+def post_ontology_review(store, candidate_id, actor, body, **_):
+    """Accept, rename or reject one proposal.
+
+    `accepted_as` renames it. That is the ordinary accepting move, not an edge
+    case: a survey notices that something recurs and has no way to know what it
+    is called.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Accepting an object type decides the shape of every row that will "
+            "ever be filed under it, so it is an administrator decision.")
+    return ontology.review_candidate(
+        store, candidate_id, body.get("decision", "rejected"),
+        _actor_id(actor), accepted_as=body.get("accepted_as"),
+        note=body.get("note"))
+
+
+@route("POST", "/ontology/draft")
+def post_ontology_draft(store, actor, body, **_):
+    """Assemble a bundle from what was accepted, and return it.
+
+    Returns the bundle; it does not register it. Registering an ontology is a
+    deliberate act with a deployment behind it, and a drafting route that also
+    installed it would be the one place in this API where an ontology arrived
+    in a store without anybody choosing it.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Drafting a bundle is an administrator decision.")
+    return ontology.draft_bundle(
+        store, body.get("bundle_id") or "drafted-core",
+        bundle_version=body.get("bundle_version") or "0.1.0",
+        name=body.get("name"), description=body.get("description"),
+        primary_type=body.get("primary_type") or None,
+        document_types=body.get("document_types") or None,
+        document_scoped=body.get("document_scoped") or None)
 
 
 @route("GET", "/graph/map")

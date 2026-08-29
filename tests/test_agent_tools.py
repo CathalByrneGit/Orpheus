@@ -135,7 +135,8 @@ def test_every_tool_tells_the_model_not_to_use_raw_sql(served):
     # that act on it -- record, settle -- are not alternatives to a query, and
     # needs_review is a report with no SQL equivalent worth writing.
     acts = ("orpheus_record", "orpheus_settle_suggestion", "orpheus_needs_review",
-            "orpheus_record_comparison", "orpheus_reject_register_row")
+            "orpheus_record_comparison", "orpheus_reject_register_row",
+            "orpheus_decide_ontology_candidate")
     lookups = [t for t in tools
                if t.name.startswith("orpheus_") and t.name not in acts]
     assert lookups

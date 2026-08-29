@@ -110,6 +110,13 @@ or a `value_property` that is not one of its properties, is rejected. A typo
 there would disable a pipeline stage silently — findings would simply stop being
 linked — which is the kind of failure that goes unnoticed for a long time.
 
+`primaryObjectType` is required of any bundle that **has** object types, and of
+no other. A bundle with none is the legitimate starting state of a corpus
+nobody has modelled yet — there is nothing for a document to be fundamentally
+about — and the JSON schema used to call that invalid. `starter-0.1.0.json` is
+that bundle; `orpheus ontology survey` is how it stops being empty. See
+[Where an ontology comes from](ontology.md).
+
 ### Interfaces: asking one question across several types
 
 An interface is a contract several object types share, so a question spans them
@@ -319,6 +326,14 @@ about contracts, so another domain describes its conflicts in the same words.
 | `llm_calls` | Every model call: tier, model, purpose, prompt size, payload digest, and any error |
 | `schema_amendments` | Properties and types seen during population but not in the bundle |
 | `extraction_runs` | One row per extraction attempt, including failures |
+| `ontology_candidates` | Object types, properties and links a survey proposed for a corpus with no bundle |
+| `ontology_evidence` | The quotations behind each candidate, located by `align.py` |
+
+`ontology_candidates` is deliberately not `schema_amendments`. An amendment is a
+correction to an ontology already in force with rows already filed under it, so
+accepting one is a patch bump; a candidate is a proposal about a corpus with no
+ontology at all. One queue holding both would mean a reviewer could not tell
+which question they were being asked.
 
 Both `edit_history` and `llm_calls` carry a `seq INTEGER PRIMARY KEY
 AUTOINCREMENT`. Ordering is by `seq`, never by timestamp: several changes inside
