@@ -60,7 +60,7 @@ looked complete. If ingest fails, check both `pip install -e '.[pdf]'` and
 python3 -m pytest
 ```
 
-464 tests, no skips with the `dev` extra installed.
+820 tests, no skips with the `dev` extra installed.
 
 ### How the tests are built
 
@@ -129,7 +129,7 @@ Validate before committing — the schema half is skipped silently if `jsonschem
 is not installed, so ask for it explicitly:
 
 ```bash
-orpheus bundle --strict orpheus/bundles/contract-core-0.2.0.json
+orpheus bundle --strict orpheus/bundles/contract-core-0.5.0.json
 ```
 
 The bundle is an

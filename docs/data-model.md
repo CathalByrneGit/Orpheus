@@ -14,7 +14,7 @@ carries.
 Instance tables are not hand-written. They are generated from an **ontology
 bundle**: a JSON document listing object types, their properties, link types,
 and seed concept definitions. The shipped bundle is
-`orpheus/bundles/contract-core-0.2.0.json`, and it is replaceable wholesale by
+`orpheus/bundles/contract-core-0.5.0.json`, and it is replaceable wholesale by
 the output of a discovery run over a real corpus.
 
 `bundle.apply_schema()` turns the bundle into DDL: one table per managed

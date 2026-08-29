@@ -13,18 +13,26 @@ the documentation uses throughout. A bundle describing planning applications,
 inspection reports or grant awards runs the same pipeline with no code changes;
 the test suite includes one, to keep that honest rather than aspirational.
 
-Nothing downstream — entity resolution, the relationship graph, conflict-of-interest
-views, the reading companion — is built here, because all of it depends on
-extraction being trustworthy first.
+Entity resolution, the relation graph and the reading companion are built —
+each was deferred once, and each turned out to be the thing that made the layer
+below it honest rather than a layer on top of it. Conflict-of-interest views
+are still out: the store has no notion of ownership, directorships or donations,
+and a graph join is not an accusation. What it offers instead is
+`orpheus questions`, which reports a chain and how much of it anybody has
+checked.
 
 ---
 
 ## What it does
 
 ```
+a corpus nobody has modelled
+  → survey        propose object types, properties and links; a person decides
+  → draft         a bundle out of what was accepted, registered deliberately
+
 document.pdf
   → ingest        hash, page text, OCR fallback for scans
-  → classify      local model: doc type, sector, jurisdiction
+  → classify      doc type, sector, jurisdiction — each from a closed list, or not asked
   → populate      dates and amounts by pattern; entities by model, against the bundle
   → review        confirm / amend / reject, nothing overwritten
   → analyse       versioned rule concepts + optional narrative reading
@@ -96,6 +104,16 @@ Structure that must hold up is deterministic and needs nothing installed.
 `pip install 'orpheus[graph]'` swaps label propagation for Louvain and adds
 betweenness centrality; without it both degrade and say which ran.
 
+`orpheus ontology survey` is the step before all of it, for a corpus nobody has
+modelled. It proposes object types, properties and links — each with a
+quotation `align.py` located and a count of how many documents show it, counted
+rather than claimed — and **writes no bundle**. A person goes through the queue
+at `/-/orpheus/ontology`, and `orpheus ontology draft` assembles a bundle out of
+what they accepted. The machine is good at noticing that something recurs and
+bad at deciding whether two of them are one type with a role; a wrong extraction
+is one row to amend, and a wrong object type is every row that will ever be
+filed under it.
+
 ---
 
 ## Quick start
@@ -137,12 +155,16 @@ Start at **[docs/index.md](docs/index.md)**.
 | [Network and corroboration](docs/network-and-corroboration.md) | The relation graph, counting agreement honestly, and what a budget is denominated in |
 | [Questions the corpus raises](docs/questions.md) | Where the shape is worth asking about, and why none of it is a finding |
 | [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
+| [Where an ontology comes from](docs/ontology.md) | Surveying a corpus with no bundle, and why the machine proposes but never authors |
 | [Extraction engines](docs/extraction-engines.md) | Four ways to run the model pass, and when each is right |
+| [Datasette ecosystem](docs/datasette-ecosystem.md) | Which plugins are worth adopting, and why the agent must not be the writer |
 | [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
 | [Deployment](docs/deployment.md) | Running it, and the WAL trap that catches people |
 | [Developer guide](docs/developer-guide.md) | Setup, tests, troubleshooting |
-| [The corpus run](docs/corpus-run.md) | The one thing Phase 1 is still waiting on, and how to do it |
+| [The corpus run](docs/corpus-run.md) | What real models on real corpora found, and how to run one |
 | [Open decisions](docs/open-decisions.md) | What is still undecided, and what the build corrected |
+| [Prior art](docs/prior-art.md) | Open-source tools that already do parts of this |
+| [OCDS alignment](docs/ocds-alignment.md) | Mapping the contract bundle onto the Open Contracting Data Standard |
 
 An agent working with a store should read `.claude/skills/orpheus/SKILL.md`
 first. Its load-bearing rule is *never assert something the store does not hold,
@@ -181,7 +203,7 @@ top of the page. [Why](docs/conflicts-and-lint.md).
 
 ## Status
 
-574 tests:
+820 tests:
 
 ```bash
 pip install -e '.[dev]'
@@ -196,7 +218,23 @@ it, the lint page, the network page and the markdown export — and checks the s
 
 The core has no third-party dependencies. Every extraction engine, the PDF
 backends and OCR are optional installs, and the code says which one is missing
-when you reach for it. What has **not** been done is the thing Phase 1 exists
-for: no real model has run against a real corpus, so the question of whether
-extraction is good enough remains open. See
+when you reach for it.
+
+**Real models have now run against real corpora**, and almost everything
+worth knowing came from that rather than from the suite:
+
+| Corpus | Documents | What it was for |
+|---|---|---|
+| SEC contract exhibits (CUAD) | 40 | The bundle this ships. Every quotation the model claimed was located in its document |
+| Python Enhancement Proposals | 40 | A second domain, with a documented ontology to score a survey against |
+| Steering Council minutes | 48 | Narrative prose with no structure at all for the pattern pass to read |
+
+See [the corpus run](docs/corpus-run.md) and
+[where an ontology comes from](docs/ontology.md) for what each found — including
+the defects, which is most of the value.
+
+**What is still open is the human half.** Extraction quality is measured by
+comparing what a person decided against what the machine said, and nobody has
+reviewed a corpus yet: `orpheus report` correctly answers
+`insufficient_evidence`. That number needs a reviewer, not a bigger corpus. See
 [open decisions](docs/open-decisions.md).

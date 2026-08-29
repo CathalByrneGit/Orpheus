@@ -113,7 +113,7 @@ so and the four sites read it. See
 Contracts remain the shipped bundle and the example throughout the docs: it is
 the driving use case, and a general platform documented only in the abstract is
 harder to understand than one with a worked example. But
-`orpheus/bundles/contract-core-0.2.0.json` is data, and replacing it replaces the
+`orpheus/bundles/contract-core-0.5.0.json` is data, and replacing it replaces the
 domain.
 
 **Kept honest by a test.** `tests/test_domain_neutrality.py` defines a planning-
@@ -444,9 +444,10 @@ What has not happened, plainly:
 
 | | Status |
 |---|---|
-| A real model has run against a real document | **Yes.** Anthropic, six EX-10 exhibits filed with the SEC, 92,551 characters |
-| A real corpus has been ingested | **Six documents.** Real, and far short of the few hundred this needs |
-| A person has reviewed extractions they did not write | **No.** All 165 were reviewed, but by a machine actor labelled as such. It exercised the review path and found real defects; it is not the human calibration this asks for |
+| A real model has run against a real document | **Yes.** Anthropic, on four corpora — see [the corpus run](corpus-run.md) |
+| A real corpus has been ingested | **128 documents across three domains.** 40 SEC contract exhibits, 40 Python Enhancement Proposals, 48 Steering Council minutes. Still short of the few hundred this needs |
+| A corpus outside the shipped domain has run | **Yes**, on a bundle nobody wrote by hand — see [where an ontology comes from](ontology.md) |
+| A person has reviewed extractions they did not write | **No.** Rows have been reviewed by a machine actor labelled as such. It exercised the review path and found real defects; it is not the human calibration this asks for, and it is why `orpheus report` still answers `insufficient_evidence` |
 | `gliner2` has run | **No.** Its weights could not be downloaded |
 | `docling` has run | **No.** It would not install |
 
@@ -697,6 +698,27 @@ instances each evaluation read, which is what makes `stale` automatic rather
 than something a person has to notice. Worth knowing when reading the
 architecture alongside the code.
 
+### The first bundle was assumed to already exist
+
+"The domain is the bundle" was the load-bearing claim, and it quietly assumed
+somebody had a bundle to swap in. A corpus from a domain nobody has modelled has
+no type to file an answer under, so the first bundle was always written by hand
+— by somebody who had already read enough of the corpus to know what was in it,
+which is the work this project exists to help with.
+
+`orpheus ontology survey` is that step, and the schema had to change to allow
+it: a bundle with no object types was invalid, because `primaryObjectType` was
+required of every bundle. It is now required only of a bundle that *has* object
+types, and `starter-0.1.0.json` is the legitimate starting state of a corpus
+nobody has modelled.
+
+The line the module holds is that the machine proposes and never authors. It is
+not a hedge about capability — the model is genuinely good at noticing what
+recurs, and genuinely bad at deciding whether two proposals are one type with a
+role. It is about cost: a wrong extraction is one row to amend, and a wrong
+object type is every row that will ever be filed under it. `schema_ops.py`
+exists because that turned out to be permanent once.
+
 ### A model failure must not cost the deterministic findings
 
 Not in the specification at all, and it only shows up once one transaction
@@ -721,8 +743,11 @@ against.
 **Three things that were on this list are now in.** Entity resolution and alias
 merging arrived with [the wiki](entities.md); the cross-document relation graph
 arrived with [the network](network-and-corroboration.md); the reading companion
-arrived with [reading a passage at a time](reading-companion.md), though what it
-still lacks is context across passages rather than the interaction itself.
+arrived with [reading a passage at a time](reading-companion.md). Context
+across passages, which that entry named as the remaining gap, is built and
+turned off by default — measured on a real filing it did not improve the read
+(11 → 11, 10 → 2, 9 → 12 offers across three wordings), and a badly worded
+instruction suppressed findings.
 Neither of the first two was pulled
 forward for its own sake. The wiki needed resolution to have pages at all, and
 the graph turned out to be the only way to say something the store could not

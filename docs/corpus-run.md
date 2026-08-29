@@ -3,9 +3,18 @@
 The one thing Phase 1 has been waiting on. Everything in this store is built to
 answer a single question — **is extraction good enough to build on?**
 
-**The run has now happened**, against Anthropic's API, on six real contracts
-filed with the SEC. What it found is in [What the first run found](#what-the-first-run-found)
-below. The runbook that follows is still the way to do it again.
+**Four runs have now happened**, all against Anthropic's API on real documents.
+The runbook below is still the way to do another.
+
+| Corpus | Documents | Section |
+|---|---|---|
+| SEC contract exhibits (CUAD) | 6 | [What the first run found](#what-the-first-run-found) |
+| SEC contract exhibits (CUAD) | 40 | [What the larger runs found](#what-the-larger-runs-found) |
+| Python Enhancement Proposals | 40 | [Where an ontology comes from](ontology.md#the-second-domain-measured) |
+| Steering Council minutes | 48 | [Where an ontology comes from](ontology.md#a-third-domain-prose-with-no-structure-at-all) |
+
+The last two are a different question — whether a corpus nobody has modelled can
+be modelled at all — and live in their own page.
 
 ---
 
@@ -72,17 +81,54 @@ and moves both by one. The test was green *because* the extra was missing.
 
 ---
 
+## What the larger runs found
+
+The six-document run was widened to forty of the same kind, and then to two
+corpora that share nothing with contracts. Every defect below was found by
+running documents, and none of them could have been found by the suite.
+
+- **Keying a document-scoped type on the document alone merged an amendment
+  into the agreement it amends.** One SEC filing carries both "AMENDMENT NO. 1"
+  and the "Wireless Content License Agreement" it changes. Identity is now
+  (document, naive key).
+- **Whole-document context did not improve the reading companion**, measured
+  across three promptings on a real 29-page filing: 11 → 11, 10 → 2, 9 → 12
+  offers. A badly worded instruction *suppressed* findings. It is off by
+  default and the measurement is why.
+- **The graph does not help entity resolution.** Two companies sharing a
+  document and a neighbour turned out to be different companies. Shared
+  structure is not shared identity, and a merge candidate needs evidence of a
+  different kind.
+- **A shared attribute is worth only what its rarity says.** `acting_for`
+  appeared on 3 pages of 74 and `entity_kind` on 64; treating them as equal
+  evidence produced three false merge candidates out of seven. Weighting by
+  rarity removed all three.
+- **`propose_entities` grouped on a null key column and merged a whole type.**
+  174 meetings became one page. A false merge is strictly worse than a false
+  split, so the key is derived when the column is empty.
+- **Classification had never succeeded outside contracts.** It carried its own
+  transport, chose a provider by which library imported, and failed on 88 of 88
+  documents across both new corpora with the failure caught per document and
+  reported quietly. `documentTypes` — the one field only the classifier reads —
+  had never been exercised.
+- **`sector` was an open question and fragmented.** Forty-eight documents
+  produced thirteen spellings of one answer. It now comes from a closed list or
+  is not asked, like `doc_type` always was.
+
 ## What is already true
 
 - Every surface works end to end, driven through a browser against a live
   Datasette: ingest, extract, review, the wiki, tensions, the network,
   corroboration, the reading companion, questions, the markdown export.
-- Six real defects have now been found by running real documents rather than
-  tests — `edges` unreachable because no engine emitted relationships, `propose`
-  fragmenting every page on a second run, and the four above. All are fixed.
-  Expect any further corpus to find more of that class; that is what it is for.
-- `orpheus report` has something to compute over, and 154 located quotations to
-  compute it from.
+- Real defects keep being found by running real documents rather than tests —
+  the six from the first run, and the seven above. All are fixed. Expect any
+  further corpus to find more of that class; that is what it is for.
+- `orpheus report` has something to compute over.
+
+**What no run has produced is the number Phase 1 turns on.** Accuracy compares
+what a person decided against what the machine said, and nobody has reviewed a
+corpus: `orpheus report` correctly answers `insufficient_evidence`. That needs a
+reviewer, not a bigger corpus, and it is the honest state of this project.
 
 ## What the run has to produce
 

@@ -22,9 +22,12 @@ governance minutes — and the whole pipeline ran on the bundles it produced wit
 no code changes. `/-/orpheus/ontology` is where the queue is reviewed. See
 [Where an ontology comes from](ontology.md) for what held and what did not.
 
-This documentation covers **Phase 1**: ingest and extraction quality.
-Conflict-of-interest views and the live reading-companion UI remain out of
-scope — see [Open decisions](open-decisions.md) for what is deferred and why.
+This documentation covers **Phase 1**: ingest and extraction quality. The
+reading companion was deferred once and is built — `/-/orpheus/read`, and the
+same read as a batch job through `datasette-enrichments`. Conflict-of-interest
+views are still out, and deliberately: the store has no notion of ownership,
+directorships or donations, so a graph join would be an accusation drawn from a
+join. See [Open decisions](open-decisions.md) for what is deferred and why.
 
 Three things Phase 1 carries beyond extraction quality, each because leaving it
 out would have made the wiki misleading rather than merely incomplete:
@@ -64,7 +67,7 @@ out would have made the wiki misleading rather than merely incomplete:
 | [API reference](api-reference.md) | Every route, its permissions, and its response shape |
 | [Deployment](deployment.md) | Running it, and the WAL trap that catches people |
 | [Developer guide](developer-guide.md) | Setup, tests, troubleshooting, project structure |
-| [The corpus run](corpus-run.md) | The one thing Phase 1 is still waiting on, and how to do it |
+| [The corpus run](corpus-run.md) | What real models on real corpora found, and how to run one |
 | [Open decisions](open-decisions.md) | What Phase 1 deliberately did not decide, and what the build corrected |
 | [Prior art](prior-art.md) | Open-source tools that already do parts of this, and what that means |
 | [Extraction engines](extraction-engines.md) | Choosing between a local encoder, LangExtract and a general LLM — and why the choice does not change what the data means |
