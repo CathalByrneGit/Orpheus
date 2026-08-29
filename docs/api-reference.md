@@ -361,6 +361,11 @@ that also installed it would be the one place in this API where an ontology
 arrived without anybody choosing it. Register it with the CLI
 (`orpheus ontology draft --register`) or by loading the returned JSON.
 
+The Datasette page `/-/orpheus/ontology` is the same four calls with the
+evidence rendered: every candidate's quotations, its support, and accept /
+rename / reject in one form. The rename box sits beside Accept rather than
+behind a second screen, because renaming is the ordinary accepting move.
+
 Each candidate carries `n_documents` of `n_sampled` — how many documents show
 it, **counted rather than claimed**. It is not a confidence, and the model is
 never asked for one.

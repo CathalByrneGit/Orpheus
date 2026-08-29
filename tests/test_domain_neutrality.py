@@ -284,7 +284,8 @@ def test_the_drafted_bundles_are_valid_and_are_not_about_contracts(store):
     invalid bundles would otherwise show up only the next time somebody
     surveyed a new corpus.
     """
-    for name in ("peps-core-0.1.0.json", "peps-people-core-0.1.0.json"):
+    for name in ("peps-core-0.1.0.json", "peps-people-core-0.1.0.json",
+                 "council-core-0.2.0.json"):
         bundle = bundle_mod.load(bundle_mod.BUNDLE_DIR / name)
         bundle_mod.validate(bundle)
         bundle_mod.register(store, bundle, actor_id=None, activate=True)
@@ -309,3 +310,21 @@ def test_the_richer_of_the_two_carries_what_makes_a_graph(store):
     # Named, so the same author on six proposals is one page rather than six.
     assert "Named" in person["implements"]
     assert "naive_key" in bundle_mod.property_ids(person)
+
+
+def test_the_council_bundle_came_out_of_prose_with_no_structure_at_all(store):
+    """Forty-eight documents of narrative governance minutes: no `Key: Value`
+    anywhere, so the pattern pass proposed nothing and the model did all of it.
+    Eight types and eight link types, reviewed by hand — see docs/ontology.md.
+    """
+    council = bundle_mod.load(
+        bundle_mod.BUNDLE_DIR / "council-core-0.2.0.json")
+    bundle_mod.validate(council)
+    assert len(council["objects"]) == 8 and len(council["links"]) == 8
+    # Every type that a link touches carries a name, so its edges can reach the
+    # graph. Getting that wrong once cost 625 of 794 relations.
+    named = {o["id"] for o in council["objects"]
+             if "name" in bundle_mod.property_ids(o)}
+    touched = {end for link in council["links"]
+               for end in (link["from"], link["to"])}
+    assert touched - named == {"SteeringCouncil"}

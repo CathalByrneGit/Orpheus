@@ -315,6 +315,7 @@ orpheus/
 │   ├── bundles/             # contract-core-*.json, and starter-0.1.0.json
 │   └── schemas/             # the two JSON Schemas a bundle is checked against
 ├── plugins/orpheus_datasette.py   # the UI, and the API mounted in-process
+│                                # (/-/orpheus/ontology is the survey queue)
 ├── frontend/                # the map's front end: Svelte + Vite + d3-force
 │   └── src/lib/             # Map.svelte, and the pure rules its tests pin
 ├── templates/               # the two pages

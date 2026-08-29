@@ -814,6 +814,20 @@ def post_ontology_review(store, candidate_id, actor, body, **_):
         note=body.get("note"))
 
 
+@route("POST", r"/ontology/candidates/(?P<candidate_id>[^/]+)/reopen")
+def post_ontology_reopen(store, candidate_id, actor, body, **_):
+    """Put a decided candidate back in the queue.
+
+    Some consequences of a decision only show up after the extraction has run,
+    and a warning about one is only worth having if it can be acted on.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Reopening an ontology decision is an administrator decision.")
+    return ontology.reopen_candidate(store, candidate_id, _actor_id(actor),
+                                     note=body.get("note"))
+
+
 @route("POST", "/ontology/draft")
 def post_ontology_draft(store, actor, body, **_):
     """Assemble a bundle from what was accepted, and return it.

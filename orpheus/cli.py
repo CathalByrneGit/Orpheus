@@ -1169,6 +1169,11 @@ def cmd_ontology(args) -> int:
         elif args.action == "candidates":
             result = {"candidates": ontology.candidates(
                 store, status=args.status, kind=args.kind)}
+        elif args.action == "reopen":
+            if not args.candidate_id:
+                raise OrpheusError("Give a candidate id to reopen.")
+            result = ontology.reopen_candidate(store, args.candidate_id,
+                                               args.actor_id, note=args.note)
         elif args.action == "review":
             if not args.candidate_id:
                 raise OrpheusError("Give a candidate id to review.")
@@ -1337,8 +1342,10 @@ def build_parser() -> argparse.ArgumentParser:
     onto = add("ontology", cmd_ontology,
                "propose an ontology for a corpus that has none")
     onto.add_argument("action",
-                      choices=("survey", "candidates", "review", "draft"))
-    onto.add_argument("candidate_id", nargs="?", help="for `review`")
+                      choices=("survey", "candidates", "review", "reopen",
+                               "draft"))
+    onto.add_argument("candidate_id", nargs="?",
+                      help="for `review` and `reopen`")
     onto.add_argument("--actor-id")
     onto.add_argument("--engine",
                       help="deterministic (default), or a general model")

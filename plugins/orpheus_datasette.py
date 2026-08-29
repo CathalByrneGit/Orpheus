@@ -824,11 +824,30 @@ async def ontology_act(datasette, request):
                    f"{result['n_properties']} propert(ies) and "
                    f"{len(result['links'])} link(s). Register it with "
                    f"`orpheus ontology draft --register`.")
+        # Warnings, not problems: a type with no name is a legitimate thing to
+        # want. It is also invisible until somebody looks at graph coverage
+        # after the extraction has run, so it is said here.
+        for warning in (result.get("warnings") or []):
+            summary += " " + warning
         return _redirect(datasette, "/-/orpheus/ontology",
                          error="; ".join(problems) if problems else None,
                          note=summary)
 
     candidate_id = form.get("candidate_id") or ""
+    if action == "reopen":
+        status, result = await _call(
+            datasette, request, "POST",
+            f"/ontology/candidates/{candidate_id}/reopen",
+            {"note": form.get("note") or None})
+        if status != 200:
+            return _redirect(datasette, "/-/orpheus/ontology",
+                             error=result["error"]["message"])
+        return _redirect(datasette, "/-/orpheus/ontology",
+                         note=f"{result['type_id']}"
+                              + (f".{result['property_id']}"
+                                 if result.get("property_id") else "")
+                              + " is back in the queue.")
+
     status, result = await _call(
         datasette, request, "POST",
         f"/ontology/candidates/{candidate_id}/review",

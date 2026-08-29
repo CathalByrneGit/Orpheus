@@ -310,6 +310,18 @@ orpheus --db store.sqlite ontology survey --actor-id act_...     # propose
 orpheus --db store.sqlite ontology candidates                    # the queue
 ```
 
+The pattern pass reads `Key: Value` header blocks and **finds nothing in
+prose**. That is the correct answer, not a failure: forty-eight documents of
+narrative minutes returned zero candidates and zero held back. Say so, and
+offer a model, rather than reporting it as an empty corpus.
+
+Two readings by the same model differ. On those minutes, one run proposed a
+`Person` type whose only property was `role` — no `name` at all, which would
+have produced a wiki of people who can never be the same person as anybody —
+and a second run found `name` in 36 of 48. If a type looks thin, re-surveying
+with a lower `--min-support` is a real move, and so is saying that the reading
+you are looking at is one reading.
+
 Each candidate carries quotations located in the documents they came from, and
 `n_documents` of `n_sampled`: how many documents show it, **counted rather than
 claimed**. That is not a confidence and the model was never asked for one, so do

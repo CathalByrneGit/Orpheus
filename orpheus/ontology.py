@@ -870,6 +870,52 @@ def review_candidate(store: Store, candidate_id: str, decision: str,
     return get_candidate(store, candidate_id)
 
 
+def reopen_candidate(store: Store, candidate_id: str, actor_id: str,
+                     note: str | None = None) -> dict:
+    """Put a decided candidate back in the queue.
+
+    Some consequences of a decision are only visible after the extraction has
+    run. Accepting `Meeting.date` rather than accepting it as `name` is a
+    reasonable call that reads as obviously right until the graph comes back at
+    8% coverage, because a type with no `name` gets no wiki page and every edge
+    through it has nowhere to land. `draft_bundle` warns about that now, and a
+    warning is only worth having if the decision it warns about can be changed.
+
+    The evidence stays attached and the change is recorded, so the queue shows
+    a candidate somebody thought about twice rather than one nobody decided.
+    Reopening is not undoing: what it restores is the question, not the state
+    before it was asked.
+
+    It does *not* touch a bundle already registered from the old decision. A
+    drafted bundle is a file somebody chose to install, and rewriting an
+    ontology under rows already filed against it is `schema_ops.py`'s job, on
+    purpose.
+    """
+    store.assert_writable()
+    require_string(actor_id, "actor_id")
+    candidate = store.one(
+        "SELECT * FROM ontology_candidates WHERE candidate_id = ?",
+        (candidate_id,))
+    if candidate is None:
+        raise NotFound(f"No ontology candidate {candidate_id!r}.")
+    if candidate["status"] == "proposed":
+        raise OrpheusError(
+            f"Candidate {candidate_id} is already in the queue.")
+
+    was = candidate["status"]
+    with store.transaction():
+        store.execute(
+            "UPDATE ontology_candidates SET status = 'proposed', "
+            "accepted_as = NULL, decided_by = NULL, decided_at = NULL, "
+            "note = ? WHERE candidate_id = ?", (note, candidate_id))
+        record_edit(store, "ontology_candidates", candidate_id, None,
+                    "ontology_candidate_reopened",
+                    previous={"status": was,
+                              "accepted_as": candidate["accepted_as"]},
+                    new={"status": "proposed"}, actor_id=actor_id, note=note)
+    return get_candidate(store, candidate_id)
+
+
 # ---------------------------------------------------------------------------
 # Turning what was accepted into a bundle
 # ---------------------------------------------------------------------------
@@ -937,6 +983,45 @@ _INTERFACES = {
         ],
     },
 }
+
+
+def _nameless_type_warnings(objects: list[dict], links: list[dict]) -> list[str]:
+    """Types that will hold rows and never appear anywhere.
+
+    The wiki is built from types implementing `Named`, which needs a `name`
+    property, and the graph is a projection over wiki pages. So a type without
+    one produces instances, produces no page, and every edge touching it is
+    recorded as *structural* and never reaches the graph.
+
+    That is a legitimate thing to want -- not everything is an entity -- so it
+    is a warning and not a problem. But it is invisible until somebody looks at
+    graph coverage and finds 8%, and by then the extraction has run. Measured
+    on the council minutes: `Meeting` and `SteeringCouncil` were accepted
+    without a name, and 625 of 794 extracted edges had nowhere to land.
+    """
+    warnings: list[str] = []
+    named = {o["id"] for o in objects
+             if any(p["id"] == "name" for p in o["properties"])}
+    touched: dict[str, int] = defaultdict(int)
+    for link in links:
+        touched[link["from"]] += 1
+        touched[link["to"]] += 1
+
+    for obj in objects:
+        if obj["id"] in named:
+            continue
+        if touched.get(obj["id"]):
+            warnings.append(
+                f"'{obj['id']}' has no `name` property, so it gets no wiki "
+                f"page -- and every edge through the "
+                f"{touched[obj['id']]} link type(s) that touch it will be "
+                "recorded as structural and never reach the graph. Accept a "
+                "property as `name`, or expect graph coverage to be low.")
+        else:
+            warnings.append(
+                f"'{obj['id']}' has no `name` property, so it will hold rows "
+                "and never appear in the wiki.")
+    return warnings
 
 
 def draft_bundle(store: Store, bundle_id: str, bundle_version: str = "0.1.0",
@@ -1143,6 +1228,7 @@ def draft_bundle(store: Store, bundle_id: str, bundle_version: str = "0.1.0",
 
     return {
         "bundle": drafted,
+        "warnings": _nameless_type_warnings(ordered, links),
         "bundle_id": bundle_id,
         "bundle_version": bundle_version,
         "object_types": [o["id"] for o in ordered],

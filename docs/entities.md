@@ -62,6 +62,14 @@ has checked it.
 | `similar` | Names close but not equal after normalising | `inferred` |
 | `search` | A full-text hit | `inferred` |
 
+A `naive_key` grouping derives the key when the column is empty rather than
+reading it as it stands. A bundle that has just gained `naive_key` has it null
+on every row written before, and grouping on the column as read gave every one
+of those mentions the same key — which on a real corpus put 174 meetings on one
+page. A name that still reduces to nothing gets a page of its own, because a
+false split is what to fail towards: it leaves two pages a reviewer can merge,
+where a false merge puts two things on one page and nobody can see the join.
+
 These are different **kinds** of claim, not points on one scale, and collapsing
 them would lose the distinction permanently. An exact company number is better
 evidence than any spelling, however close — so `propose_entities()` groups on

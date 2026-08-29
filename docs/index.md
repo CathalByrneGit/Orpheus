@@ -16,9 +16,10 @@ from a domain nobody has modelled has no type to file an answer under, and the
 first bundle was always written by hand. `orpheus ontology survey` is that
 missing step: it reads a sample of the corpus and proposes object types,
 properties and links as a queue of candidates with located quotations, and a
-person decides. It has been run on forty Python Enhancement Proposals — a
-corpus sharing nothing with contracts — and the whole pipeline ran on the
-bundle it produced with no code changes. See
+person decides. It has been run on two corpora sharing nothing with contracts
+— forty Python Enhancement Proposals, and forty-eight Steering Council
+governance minutes — and the whole pipeline ran on the bundles it produced with
+no code changes. `/-/orpheus/ontology` is where the queue is reviewed. See
 [Where an ontology comes from](ontology.md) for what held and what did not.
 
 This documentation covers **Phase 1**: ingest and extraction quality.

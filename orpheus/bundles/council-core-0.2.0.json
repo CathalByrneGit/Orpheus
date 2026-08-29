@@ -1,0 +1,1266 @@
+{
+  "specVersion": "0.1.0",
+  "bundleId": "council-core",
+  "bundleVersion": "0.2.0",
+  "metadata": {
+    "name": "Steering Council minutes",
+    "description": "Drafted from an ontology survey and reviewed by hand.",
+    "createdAt": "2026-08-29T15:54:48Z"
+  },
+  "objects": [
+    {
+      "id": "Person",
+      "display": {
+        "name": "Person",
+        "description": "An individual named in connection with Steering Council activity, such as a member, developer-in-residence, or other contributor."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Name",
+            "description": "The person's name."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_Person"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true,
+          "nameStyle": "personal"
+        }
+      }
+    },
+    {
+      "id": "Event",
+      "display": {
+        "name": "Event",
+        "description": "A conference, sprint, or other gathering relevant to Steering Council activity."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Name",
+            "description": "The name of the event."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "location",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Location",
+            "description": "Where the event takes place."
+          },
+          "source": {
+            "column": "location"
+          }
+        },
+        {
+          "id": "steeringcouncil_instance_id",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "SteeringCouncil instance",
+            "description": "The SteeringCouncil this belongs to."
+          },
+          "source": {
+            "column": "steeringcouncil_instance_id"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_Event"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true,
+          "nameStyle": "organisation"
+        }
+      }
+    },
+    {
+      "id": "PEP",
+      "display": {
+        "name": "Python Enhancement Proposal (PEP)",
+        "description": "A formal proposal document for a change to Python, tracked and decided on by the Steering Council."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "number",
+          "type": "integer",
+          "nullable": true,
+          "display": {
+            "name": "PEP number",
+            "description": "The numeric identifier of the PEP."
+          },
+          "source": {
+            "column": "number"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Title",
+            "description": "The title of the PEP."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "status_text",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Status",
+            "description": "The decision or lifecycle stage of the PEP (accepted, rejected, deferred, postponed, withdrawn, final, etc.)."
+          },
+          "source": {
+            "column": "status_text"
+          }
+        },
+        {
+          "id": "meeting_instance_id",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Meeting instance",
+            "description": "The Meeting this belongs to."
+          },
+          "source": {
+            "column": "meeting_instance_id"
+          }
+        },
+        {
+          "id": "person_instance_id",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Person instance",
+            "description": "The Person this belongs to."
+          },
+          "source": {
+            "column": "person_instance_id"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_PEP"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true
+        }
+      }
+    },
+    {
+      "id": "Organisation",
+      "display": {
+        "name": "Organisation",
+        "description": "An external body or company that the Steering Council interacts with, such as the PSF or a sponsor company."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Name",
+            "description": "The name of the organisation."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "steeringcouncil_instance_id",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "SteeringCouncil instance",
+            "description": "The SteeringCouncil this belongs to."
+          },
+          "source": {
+            "column": "steeringcouncil_instance_id"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_Organisation"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true,
+          "nameStyle": "organisation"
+        }
+      }
+    },
+    {
+      "id": "Meeting",
+      "display": {
+        "name": "Meeting",
+        "description": "A dated Steering Council meeting or check-in at which topics were discussed and decisions made."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "summary",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Summary",
+            "description": "Narrative description of what was discussed or decided at the meeting."
+          },
+          "source": {
+            "column": "summary"
+          }
+        },
+        {
+          "id": "held",
+          "type": "boolean",
+          "nullable": true,
+          "display": {
+            "name": "Held",
+            "description": "Whether the meeting actually took place (as opposed to being cancelled)."
+          },
+          "source": {
+            "column": "held"
+          }
+        },
+        {
+          "id": "attendees",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Attendees",
+            "description": "Description of which Steering Council members or guests were present."
+          },
+          "source": {
+            "column": "attendees"
+          }
+        },
+        {
+          "id": "no_meeting_reason",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "No Meeting Reason",
+            "description": "Reason given when a scheduled meeting did not occur."
+          },
+          "source": {
+            "column": "no_meeting_reason"
+          }
+        },
+        {
+          "id": "name",
+          "type": "date",
+          "nullable": true,
+          "display": {
+            "name": "Meeting date",
+            "description": "The date the meeting took place or was scheduled for."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "steeringcouncil_instance_id",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "SteeringCouncil instance",
+            "description": "The SteeringCouncil this belongs to."
+          },
+          "source": {
+            "column": "steeringcouncil_instance_id"
+          }
+        },
+        {
+          "id": "person_instance_id",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Person instance",
+            "description": "The Person this belongs to."
+          },
+          "source": {
+            "column": "person_instance_id"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_Meeting"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true
+        }
+      }
+    },
+    {
+      "id": "Position",
+      "display": {
+        "name": "Position/Role",
+        "description": "A paid or elected role within the Python project that the Steering Council hires, appoints, or elects people to fill."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Title",
+            "description": "The name of the position."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "person_instance_id",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Person instance",
+            "description": "The Person this belongs to."
+          },
+          "source": {
+            "column": "person_instance_id"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_Position"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true,
+          "nameStyle": "organisation"
+        }
+      }
+    },
+    {
+      "id": "SteeringCouncil",
+      "display": {
+        "name": "Steering Council",
+        "description": "The elected body of Python core developers that governs the CPython project for a given term."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "term_year",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Term year",
+            "description": "The year or term the council composition corresponds to."
+          },
+          "source": {
+            "column": "term_year"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_SteeringCouncil"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true,
+          "nameStyle": "organisation"
+        }
+      }
+    },
+    {
+      "id": "WorkingGroup",
+      "display": {
+        "name": "Working Group",
+        "description": "A subcommittee or group formed to focus on a particular area of Python governance or development."
+      },
+      "properties": [
+        {
+          "id": "instance_id",
+          "type": "string",
+          "nullable": false,
+          "source": {
+            "column": "instance_id"
+          }
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Name",
+            "description": "The name of the working group."
+          },
+          "source": {
+            "column": "name"
+          }
+        },
+        {
+          "id": "steeringcouncil_instance_id",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "SteeringCouncil instance",
+            "description": "The SteeringCouncil this belongs to."
+          },
+          "source": {
+            "column": "steeringcouncil_instance_id"
+          }
+        },
+        {
+          "id": "naive_key",
+          "type": "string",
+          "nullable": true,
+          "display": {
+            "name": "Naive key",
+            "description": "Normalised name, for naive matching only."
+          },
+          "source": {
+            "column": "naive_key"
+          }
+        },
+        {
+          "id": "document_id",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "document_id"
+          }
+        },
+        {
+          "id": "source",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "source"
+          }
+        },
+        {
+          "id": "confidence",
+          "type": "number",
+          "nullable": true,
+          "source": {
+            "column": "confidence"
+          }
+        },
+        {
+          "id": "status",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "status"
+          }
+        },
+        {
+          "id": "amended_by",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_by"
+          }
+        },
+        {
+          "id": "amended_at",
+          "type": "string",
+          "nullable": true,
+          "source": {
+            "column": "amended_at"
+          }
+        }
+      ],
+      "primaryKey": {
+        "properties": [
+          "instance_id"
+        ],
+        "strategy": "surrogate"
+      },
+      "implements": [
+        "Reviewable",
+        "Named"
+      ],
+      "source": {
+        "kind": "table",
+        "table": "instances_WorkingGroup"
+      },
+      "extensions": {
+        "orpheus": {
+          "managed": true,
+          "nameStyle": "organisation"
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "council_holds_meeting",
+      "from": "SteeringCouncil",
+      "to": "Meeting",
+      "display": {
+        "name": "Council holds meeting",
+        "description": "The Steering Council convenes a given meeting."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "steeringcouncil_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "person_attends_meeting",
+      "from": "Person",
+      "to": "Meeting",
+      "display": {
+        "name": "Person Attends Meeting",
+        "description": "A person is recorded as attending or joining a particular meeting."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "person_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "person_holds_position",
+      "from": "Person",
+      "to": "Position",
+      "display": {
+        "name": "Person Holds Position",
+        "description": "A person is appointed to or holds a named position."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "person_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "meeting_covers_pep",
+      "from": "Meeting",
+      "to": "PEP",
+      "display": {
+        "name": "Meeting Covers PEP",
+        "description": "A specific dated meeting includes discussion of a PEP."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "meeting_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "person_appointed_bdfl_delegate",
+      "from": "Person",
+      "to": "PEP",
+      "display": {
+        "name": "Person Appointed BDFL-Delegate",
+        "description": "A person is appointed as BDFL-Delegate for a specific PEP."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "person_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "council_meets_organisation",
+      "from": "SteeringCouncil",
+      "to": "Organisation",
+      "display": {
+        "name": "Council Meets Organisation",
+        "description": "The Steering Council meets or coordinates with an external organisation."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "steeringcouncil_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "council_attends_event",
+      "from": "SteeringCouncil",
+      "to": "Event",
+      "display": {
+        "name": "Council Attends/Plans Event",
+        "description": "The Steering Council attends, organizes, or discusses logistics for an event."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "steeringcouncil_instance_id"
+        ]
+      }
+    },
+    {
+      "id": "council_delegates_to_workinggroup",
+      "from": "SteeringCouncil",
+      "to": "WorkingGroup",
+      "display": {
+        "name": "Council Delegates to Working Group",
+        "description": "The Steering Council forms, approves, or delegates authority to a working group."
+      },
+      "cardinality": "one-to-many",
+      "join": {
+        "fromKeys": [
+          "instance_id"
+        ],
+        "toKeys": [
+          "steeringcouncil_instance_id"
+        ]
+      }
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "Reviewable",
+      "display": {
+        "name": "Reviewable",
+        "description": "Anything a person can confirm, amend or reject. Every extracted instance."
+      },
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string"
+        },
+        {
+          "id": "document_id",
+          "type": "string"
+        },
+        {
+          "id": "source",
+          "type": "string"
+        },
+        {
+          "id": "confidence",
+          "type": "number"
+        },
+        {
+          "id": "status",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "id": "Named",
+      "display": {
+        "name": "Named entity",
+        "description": "An instance with a human name that might also appear in another document."
+      },
+      "requiredProperties": [
+        {
+          "id": "instance_id",
+          "type": "string"
+        },
+        {
+          "id": "document_id",
+          "type": "string"
+        },
+        {
+          "id": "name",
+          "type": "string"
+        },
+        {
+          "id": "naive_key",
+          "type": "string"
+        },
+        {
+          "id": "status",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "actions": [],
+  "queries": [],
+  "extensions": {
+    "orpheus": {
+      "primaryObjectType": "Meeting",
+      "documentTypes": [
+        "monthly-update",
+        "other"
+      ]
+    }
+  }
+}

@@ -1204,6 +1204,12 @@ def propose_entities(store: Store, type_id: str | None = None,
     # Group by identifier where there is one, else by name key -- except for a
     # document-scoped type, where the document *is* the identity and a shared
     # title is not evidence of anything.
+    #
+    # Resolved once, and it has to be resolved at all: both branches below fall
+    # back to deriving a key when the column is empty, and both named it
+    # without it being in scope. The scoped branch never raised only because
+    # the `or` short-circuits whenever the column is populated.
+    bundle = bundle_mod.active(store)
     scoped = _document_scoped(store)
     groups: dict[tuple, list[dict]] = {}
     for found in pending:
@@ -1224,7 +1230,22 @@ def propose_entities(store: Store, type_id: str | None = None,
         elif identifier:
             key = (found["type_id"], f"id:{identifier}")
         else:
-            key = (found["type_id"], f"key:{found['naive_key']}")
+            # Derived when the column is empty, for the same reason the scoped
+            # branch derives it: a bundle that has just gained `naive_key` has
+            # it null on every row written before, and reading it raw made
+            # *every* such mention share one key. On the council corpus that
+            # merged 174 meetings into a single page called "April through
+            # June 19, 2024" -- a false merge at the scale of a whole type,
+            # which is the worst outcome this store has a rule about.
+            #
+            # A name that still reduces to nothing keys on the instance, so it
+            # gets a page of its own. That is a false split, and a false split
+            # is what to fail towards.
+            naive = found["naive_key"] or _key(
+                store, found["type_id"], found["name"], bundle)
+            key = (found["type_id"],
+                   f"key:{naive}" if naive
+                   else f"unkeyed:{found['instance_id']}")
         groups.setdefault(key, []).append({**found, "identifier": identifier})
 
     proposed, attached, linked, entities = 0, 0, 0, []

@@ -122,6 +122,21 @@
       <code>{{ candidate.accepted_as }}</code>{% endif %}
     {%- if candidate.note %}<br><span style="color:#444">{{ candidate.note }}</span>{% endif %}
   </p>
+  {% if is_admin %}
+  {# Some consequences only show up after the extraction has run: a type
+     accepted without a `name` gets no wiki page, and every edge through it has
+     nowhere to land. Changing your mind has to be possible for that warning to
+     be worth anything. #}
+  <form action="{{ urls.path('/-/orpheus/ontology/act') }}" method="post"
+        style="margin-top:.4em">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+    <input type="hidden" name="action" value="reopen">
+    <input type="hidden" name="candidate_id" value="{{ candidate.candidate_id }}">
+    <input type="text" name="note" placeholder="why you are reconsidering"
+           style="width:20em">
+    <button type="submit">Think again</button>
+  </form>
+  {% endif %}
   {% elif is_admin %}
   {# Renaming is the ordinary accepting move, so the box sits beside Accept
      rather than behind a second screen. #}

@@ -273,6 +273,129 @@ question `Author`/`Sponsor` raises, and the same one that made
 
 ---
 
+## A third domain: prose with no structure at all
+
+PEPs have a header block, so the pattern pass had something to read. The
+harder case is a corpus that states nothing about itself, and the one this was
+run on next is **forty-eight Python Steering Council monthly updates**
+(`python/steering-council`, `updates/*.md`) — governance minutes, 181,000
+characters of narrative bullets with no `Key: Value` anywhere.
+
+**The pattern pass found nothing.** Not a low-confidence something: zero
+candidates, and zero held back by the support threshold. That is the correct
+answer for prose, and it is the property worth having — a survey that
+manufactures a schema out of a corpus that has none is worse than one that
+says so.
+
+```
+$ orpheus ontology survey --sample 48
+{"engine": "deterministic", "n_documents_read": 48,
+ "n_candidates": 0, "n_below_support": 0}
+```
+
+**The model did all the work, and did it differently each time.** Three
+readings of the same forty-eight documents:
+
+| | run A | run B (`--min-support 1`) | run C (fresh store) |
+|---|---|---|---|
+| object types | Meeting, PEP, Person, SteeringCouncil, WorkingGroup | + Position, Event, Organisation | Organisation, Pep, Person, PythonRelease, WorkingGroup, SteeringCouncilMeeting |
+| `Person.name` | **not proposed** | 36/48 | 12/48 |
+| candidates | 14 | 35 | 17 |
+
+That instability is the single strongest argument in this whole feature for
+where the line is drawn. Run A proposed a `Person` type with `role` as its only
+property and no `name` at all — a bundle drafted from it would have produced a
+wiki whose people could never be the same person as anybody. Run C found
+`PythonRelease`, which neither of the others saw, and called the meeting type
+`SteeringCouncilMeeting` rather than `Meeting`. None of those readings is
+wrong. They are readings, and choosing between them is not something a second
+model call settles.
+
+**Support is quotation support here, and it sits low.** With no header block to
+corroborate against, the numbers mean "the model quoted this from N documents,
+and those quotations were found there". Run C's best-supported type was
+`Organisation` at 44 of 48; several real link types sat at 2 of 48. One
+candidate — `Pep → Meeting`, "discussed in" — came back at **0 of 48**: its
+quotation was located in no document at all, so it counted nothing and the
+threshold dropped it. Grounding computed rather than trusted, doing exactly
+what it is for.
+
+### The three decisions a person made that the machine could not
+
+Driven through `/-/orpheus/ontology`, one form submit at a time:
+
+- **A role is a thing, not a string.** The survey proposed `Person.role` *and*
+  a `Position` type with a title, from the same documents. Only one of them can
+  say when the holder changed. `Person.role` rejected.
+- **A property that is really a relation.** `PEP.bdfl_delegate` alongside a
+  `person_appointed_bdfl_delegate` link. Keeping both would file the same fact
+  in two places and let them disagree. Property rejected, link kept.
+- **The same relation under two names.** `council_discusses_pep` and
+  `meeting_covers_pep`. Rejected the one that duplicates the other a level up.
+
+Thirty-nine candidates decided, four of them renamed — `PEP.title` and
+`Position.title` both to `name`, so the wiki can merge a proposal or a post
+across the documents that mention it, and `Meeting.meeting_date` to `date`.
+The drafted bundle: 8 object types, 85 properties, 8 link types, no problems.
+
+### And then the graph came back at 8%
+
+Forty-eight documents extracted, 794 relations found — and 62 of them reached
+the graph.
+
+`Meeting` and `SteeringCouncil` had been accepted with no property called
+`name`. The wiki is built from types implementing `Named`; the graph is a
+projection over wiki pages. So those two types held rows, got no pages, and
+**625 of the 794 edges had nowhere to land** — every `meeting_covers_pep`,
+every `person_attends_meeting`, every `council_holds_meeting`.
+
+Nothing was wrong. `coverage` said exactly what had happened, in the sentence
+it leads every structural view with. But it said it after forty-eight model
+calls, and the decision that caused it looked obviously right at the time: a
+meeting is identified by its date, so `Meeting.meeting_date` → `date`.
+
+Three things came out of that:
+
+1. **`draft_bundle` now warns before the extraction.** A type with no `name`
+   gets a warning naming it and counting the link types that touch it. It is a
+   warning and not a problem — not everything is an entity — but it is said
+   while it is still cheap.
+2. **`reopen_candidate` exists**, because a warning is only worth having if the
+   decision it warns about can be changed. Reopening restores the question, not
+   the state before it was asked: the evidence stays attached and
+   `edit_history` shows `accepted → reopened → amended`.
+3. **The correction cost no model calls at all.**
+   `orpheus property rename Meeting date --to name` moved the column and the
+   bundle property together, keeping all 174 values; re-drafting at 0.2.0 added
+   `naive_key` and `Named`; `wiki propose` and the graph did the rest.
+
+| | before | after |
+|---|---|---|
+| relations reaching the graph | 62 (7.8%) | **513 (64.6%)** |
+| canonical edges | 44 | 481 |
+| connected pages | 64 | 330 |
+| components | 20 | 13 |
+| documents re-read | — | **none** |
+
+### One more thing the run found
+
+The first `wiki propose` after that correction produced a single `Meeting` page
+called *"April through June 19, 2024"* carrying **174 mentions** — every meeting
+in the corpus, merged into one.
+
+`propose_entities` grouped on the `naive_key` **column as read**, and a bundle
+that has just gained that column has it null on every row written before. Every
+such mention therefore shared the key `None`. The document-scoped branch
+already derived the key rather than reading it, for exactly this reason, in a
+comment that says so; the named branch did not.
+
+A false merge at the scale of a whole type is the worst outcome this store has
+a rule about, so the fix is the one the rule implies: derive the key when the
+column is empty, and give a name that still reduces to nothing a page of its
+own. A false split is what to fail towards. 1 page became 169, and the same
+change removed a latent `NameError` in the scoped branch that had never fired
+only because its `or` short-circuits whenever the column is populated.
+
 ## What this does not do
 
 - **It does not propose concepts, scores, actions or queries.** Those are

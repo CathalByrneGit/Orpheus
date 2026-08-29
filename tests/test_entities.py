@@ -1198,3 +1198,52 @@ def test_a_page_is_not_a_pair_with_itself(two_people):
     with pytest.raises(OrpheusError):
         review_resolution(store, pages["Ada Nolan"], pages["Ada Nolan"],
                           "same", rationale="obviously", actor_id="act_a")
+
+
+def _unkeyed(store, instance_id, name):
+    """A row written before the bundle had `naive_key`: the column is null."""
+    store.execute(
+        "INSERT INTO instances_Company (instance_id, document_id, name, "
+        " naive_key, source, confidence, status, created_at) "
+        " VALUES (?, 'doc_1', ?, NULL, 'ai_local', 0.9, 'unconfirmed',"
+        " datetime('now'))", (instance_id, name))
+    store.execute(
+        "INSERT INTO instance_index (instance_id, type_id, table_name,"
+        " document_id, created_at) VALUES (?,'Company','instances_Company',"
+        " 'doc_1', datetime('now'))", (instance_id,))
+
+
+def test_an_empty_key_column_does_not_merge_a_whole_type(corpus):
+    """A bundle that has just gained `naive_key` has it null on every row
+    written before it, and grouping on the column as read made every one of
+    those mentions share the key `None`. On the council corpus that merged 174
+    meetings into a single page. A false merge at the scale of a whole type is
+    the worst outcome this store has a rule about; a page each is the right way
+    to fail."""
+    for index, name in enumerate(("Ardmore Digital Limited",
+                                  "Kestrel Medical Group PLC",
+                                  "Halloran Instruments, Inc.")):
+        _unkeyed(corpus, f"ins_null_{index}", name)
+    corpus.conn.commit()
+
+    result = propose_entities(corpus, type_id="Company", actor_id="act_a")
+    # Ardmore is new; the other two share a key with mentions already in the
+    # fixture and attach to those pages, which is the behaviour that was always
+    # right and is what the null column was destroying.
+    landed = {e["canonical_name"]: e["n_mentions"] for e in result["entities"]}
+    assert "Ardmore Digital Limited" in landed
+    assert landed["Ardmore Digital Limited"] == 1
+    assert corpus.scalar(
+        "SELECT COUNT(*) FROM entities WHERE type_id = 'Company'") >= 3
+
+
+def test_a_name_that_reduces_to_no_key_gets_its_own_page(corpus):
+    # A page each is a false split, and a false split is what to fail towards.
+    for index, name in enumerate(("...", "---")):
+        _unkeyed(corpus, f"ins_blank_{index}", name)
+    corpus.conn.commit()
+    result = propose_entities(corpus, type_id="Company", actor_id="act_a")
+    unkeyed = [e for e in result["entities"]
+               if e["canonical_name"] in ("...", "---")]
+    assert len(unkeyed) == 2
+    assert all(e["n_mentions"] == 1 for e in unkeyed)

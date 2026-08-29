@@ -19,7 +19,8 @@ import pytest
 import orpheus.bundle as bundle_mod
 from orpheus.ontology import (DEFAULT_PRIMARY_TYPE, candidates, draft_bundle,
                               get_candidate, header_fields, infer_data_type,
-                              property_id_for, review_candidate, survey)
+                              property_id_for, reopen_candidate,
+                              review_candidate, survey)
 from orpheus.utils import NotFound, OrpheusError
 
 # Deliberately not contracts, and deliberately a real convention: a run of
@@ -630,3 +631,64 @@ def test_a_second_survey_adds_evidence_rather_than_repeating_it(corpus, model):
         quotations = [(e["document_id"], e["excerpt"])
                       for e in candidate["evidence"]]
         assert len(quotations) == len(set(quotations)), candidate["type_id"]
+
+
+def test_a_type_that_will_never_get_a_page_is_said_so_at_draft_time(corpus):
+    """The wiki is built from types implementing `Named`, and the graph is a
+    projection over wiki pages. A type without a `name` holds rows, gets no
+    page, and orphans every edge through it -- invisible until somebody reads
+    graph coverage, by which time the extraction has run. On the council
+    minutes that was 625 of 794 edges."""
+    _accept_all(corpus)
+    drafted = draft_bundle(corpus, "proposals-core")
+    assert drafted["problems"] == []
+    # No accepted property is called `name` here, so the one type has none.
+    assert any("no `name` property" in w for w in drafted["warnings"])
+    assert any("never appear in the wiki" in w for w in drafted["warnings"])
+
+
+def test_a_named_type_draws_no_warning(corpus):
+    survey(corpus, actor_id="act_a")
+    for candidate in candidates(corpus):
+        rename = ("Proposal" if candidate["kind"] == "object_type"
+                  else "name" if candidate["property_id"] == "title" else None)
+        review_candidate(corpus, candidate["candidate_id"], "accepted", "act_a",
+                         accepted_as=rename)
+    assert draft_bundle(corpus, "proposals-core")["warnings"] == []
+
+
+def test_a_decision_can_be_reconsidered(corpus):
+    """A warning is only worth having if the decision it warns about can be
+    changed, and the warning that matters most -- a type with no `name` gets no
+    page -- only becomes visible after the extraction has run."""
+    survey(corpus, actor_id="act_a")
+    title = _by_property(candidates(corpus), "title")
+    review_candidate(corpus, title["candidate_id"], "accepted", "act_a")
+    assert _by_property(candidates(corpus), "title") is None
+
+    reopened = reopen_candidate(corpus, title["candidate_id"], "act_a",
+                                note="it should have been the name")
+    assert reopened["status"] == "proposed"
+    assert reopened["accepted_as"] is None
+    # The evidence stays attached: what is restored is the question, not the
+    # state before it was asked.
+    assert len(reopened["evidence"]) == len(title["evidence"]) >= 1
+    assert _by_property(candidates(corpus), "title") is not None
+
+    again = review_candidate(corpus, title["candidate_id"], "accepted",
+                             "act_a", accepted_as="name")
+    assert (again["status"], again["accepted_as"]) == ("amended", "name")
+    actions = [r["action"] for r in corpus.query(
+        "SELECT action FROM edit_history WHERE row_id = ? ORDER BY seq",
+        (title["candidate_id"],))]
+    assert actions == ["ontology_candidate_accepted",
+                       "ontology_candidate_reopened",
+                       "ontology_candidate_amended"]
+
+
+def test_something_nobody_decided_cannot_be_reconsidered(corpus):
+    survey(corpus, actor_id="act_a")
+    title = _by_property(candidates(corpus), "title")
+    with pytest.raises(OrpheusError) as already:
+        reopen_candidate(corpus, title["candidate_id"], "act_a")
+    assert "already in the queue" in str(already.value)
