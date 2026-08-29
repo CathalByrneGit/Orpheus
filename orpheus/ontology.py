@@ -272,11 +272,21 @@ def survey(store: Store, engine: str = DEFAULT_ENGINE,
                                actor_id, chars_per_document)
 
     n_sampled = len(documents)
-    kept, held_back = [], 0
+    kept: list[str] = []
+    held_back: list[dict] = []
     with store.transaction():
         for shape, proposal in found.items():
             if len(proposal["documents"]) < max(1, int(min_support)):
-                held_back += 1
+                # Named, not merely counted. On a corpus with no header block
+                # to corroborate against, support is quotation support and
+                # everything sits low -- so "5 were held back" tells a reviewer
+                # a threshold is doing work and not what it did. These are the
+                # shapes they would see by lowering it.
+                held_back.append({
+                    "kind": shape[0], "type_id": shape[1],
+                    "property_id": shape[2], "to_type_id": shape[3],
+                    "n_documents": len(proposal["documents"]),
+                })
                 continue
             candidate_id = _record(store, survey_id, shape, proposal,
                                    n_sampled, engine, tier, actor_id)
@@ -292,7 +302,8 @@ def survey(store: Store, engine: str = DEFAULT_ENGINE,
         # Reported rather than hidden. A survey that proposed forty shapes and
         # kept four is telling a reviewer that the threshold is doing the work,
         # and that lowering it is a choice available to them.
-        "n_below_support": held_back,
+        "n_below_support": len(held_back),
+        "below_support": sorted(held_back, key=lambda h: -h["n_documents"]),
         "min_support": min_support,
         "candidates": [get_candidate(store, c) for c in kept],
     }
@@ -354,10 +365,20 @@ def _record(store: Store, survey_id: str, shape: tuple, proposal: dict,
             "note": None,
         })
 
-    held = store.scalar(
-        "SELECT COUNT(*) FROM ontology_evidence WHERE candidate_id = ?",
-        (candidate_id,)) or 0
-    for item in proposal["evidence"][:max(0, MAX_EVIDENCE - held)]:
+    # Already-held quotations, so a second survey adds what it found rather
+    # than repeating what the first one did. Two runs quoting the same line of
+    # the same document is one piece of evidence, and showing it twice makes a
+    # candidate look better supported than it is.
+    held = {(row["document_id"], row["excerpt"]) for row in store.query(
+        "SELECT document_id, excerpt FROM ontology_evidence "
+        "WHERE candidate_id = ?", (candidate_id,))}
+    for item in proposal["evidence"]:
+        if len(held) >= MAX_EVIDENCE:
+            break
+        key = (item["document_id"], item["excerpt"])
+        if key in held:
+            continue
+        held.add(key)
         store.insert("ontology_evidence", {
             "evidence_id": new_id("evd"),
             "candidate_id": candidate_id,

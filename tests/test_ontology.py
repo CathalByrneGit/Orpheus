@@ -607,3 +607,26 @@ def test_the_call_goes_through_the_ordinary_gate(corpus, model):
     # these documents" is not answerable from one of them, and asking it twenty
     # times produces twenty ontologies to reconcile.
     assert model["text"].count("--- Document ") == 3
+
+
+def test_what_was_held_back_is_named_and_not_merely_counted(corpus):
+    """On a corpus with no header block to corroborate against, everything sits
+    low and "5 were held back" says a threshold did work without saying what it
+    did. These are the shapes lowering it would surface."""
+    result = survey(corpus, actor_id="act_a")
+    held = result["below_support"]
+    assert len(held) == result["n_below_support"] >= 1
+    assert any(h["property_id"] == "odd_field" for h in held)
+    assert all(h["n_documents"] < result["min_support"] for h in held)
+
+
+def test_a_second_survey_adds_evidence_rather_than_repeating_it(corpus, model):
+    """Two runs quoting the same line of the same document is one piece of
+    evidence. Showing it twice makes a candidate look better supported than it
+    is, on the surface where support is the whole point."""
+    survey(corpus, engine="chat", actor_id="act_a", min_support=1)
+    survey(corpus, engine="chat", actor_id="act_a", min_support=1)
+    for candidate in candidates(corpus):
+        quotations = [(e["document_id"], e["excerpt"])
+                      for e in candidate["evidence"]]
+        assert len(quotations) == len(set(quotations)), candidate["type_id"]

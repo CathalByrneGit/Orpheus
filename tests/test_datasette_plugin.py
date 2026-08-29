@@ -301,3 +301,53 @@ def test_a_manifest_without_the_entry_point_is_not_a_bundle(bundle, monkeypatch)
     assert plugin._bundle() is None
     (bundle / "manifest.json").write_text("{ not json")
     assert plugin._bundle() is None
+
+
+# -- what the ontology page is allowed to draw -------------------------------
+
+def test_the_decide_buttons_follow_the_orpheus_row_not_datasette(store):
+    """A `--root` sign-in carries no `is_admin` key at all, so reading the flag
+    off `request.actor` hid the decide buttons from the one person allowed to
+    press them. The `actors` row is the authority everywhere else and is here
+    too."""
+    database = FakeDatabase(store)
+
+    class OnePage:
+        """Just enough Datasette for `_is_admin`: config, and the database."""
+
+        def __init__(self, **config):
+            self._config = config
+
+        def plugin_config(self, name):
+            return self._config
+
+        def get_database(self, name=None):
+            return database
+
+    def is_admin(actor, **config):
+        return asyncio.run(
+            plugin._is_admin(OnePage(**config), FakeRequest(actor)))
+
+    assert is_admin(None) is False
+    assert is_admin({"id": "root"}) is True
+    # A provider with no opinion does not make somebody an administrator, and
+    # a promotion inside Orpheus survives their next sign-in.
+    assert is_admin({"id": "u1"}) is False
+    promoted = resolve(database, identity_for({"id": "u2"}))
+    store.execute("UPDATE actors SET is_admin = 1 WHERE actor_id = ?",
+                  (promoted["actor_id"],))
+    store.conn.commit()
+    assert is_admin({"id": "u2"}) is True
+
+
+def test_the_ontology_pages_are_routed():
+    routes = [pattern for pattern, _ in plugin.register_routes()]
+    assert r"^/-/orpheus/ontology$" in routes
+    assert r"^/-/orpheus/ontology/act$" in routes
+    class WithUrls(FakeDatasette):
+        urls = type("Urls", (), {"path": staticmethod(lambda p: p)})()
+
+    labels = [link["label"] for link in
+              plugin.menu_links(WithUrls(), {"id": "root"})]
+    assert "Ontology" in labels
+    assert plugin.menu_links(WithUrls(), None) == []

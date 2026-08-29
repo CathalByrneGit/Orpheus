@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Ontology{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus') }}">&larr; Orpheus</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/wiki') }}">Wiki</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/network') }}">Network</a></p>
+
+<h1>What are these documents about?</h1>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+{% if note %}<p class="message-info">{{ note }}</p>{% endif %}
+
+<p class="message-info" style="border-left:3px solid #1d4ed8">
+  <strong>The machine proposes; you decide.</strong> A survey is good at
+  noticing that the same kind of thing keeps appearing and that it keeps
+  carrying the same handful of attributes. It is bad at what follows &mdash;
+  whether two of these are one type with a role, whether a property should have
+  been a type of its own. Those are the commitments that make an ontology
+  yours, and accepting an object type fixes the shape of every row that will
+  ever be filed under it.
+</p>
+
+{% if reading %}<p style="color:#666">{{ reading }}</p>{% endif %}
+
+{# Surveying. The pattern pass leads because it sends nothing anywhere and
+   cannot propose a field the documents do not contain. #}
+<details style="margin:1em 0;padding:.6em .9em;background:#fafafa;border:1px solid #ddd">
+  <summary style="cursor:pointer"><strong>Read the corpus again</strong></summary>
+  <form action="{{ urls.path('/-/orpheus/ontology/act') }}" method="post"
+        style="margin-top:.7em">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+    <input type="hidden" name="action" value="survey">
+    <p style="margin:.3em 0">
+      <label>Read with
+        <select name="engine">
+          <option value="deterministic">patterns only &mdash; instant, local, sends nothing</option>
+          <option value="anthropic">a model</option>
+          <option value="chat">a model (OpenAI-compatible endpoint)</option>
+        </select>
+      </label>
+      <label style="margin-left:1em">documents
+        <input type="number" name="sample" value="20" min="1" style="width:5em"></label>
+      <label style="margin-left:1em">seen in at least
+        <input type="number" name="min_support" value="2" min="1" style="width:4em">
+        document(s)</label>
+    </p>
+    <p style="margin:.3em 0;color:#666">
+      <label><input type="checkbox" name="cloud_opt_in" value="1">
+        send these documents to a cloud model</label>
+      <input type="hidden" name="tier" value="cloud">
+      &mdash; only a model tier uses it; the pattern pass sends nothing.
+    </p>
+    <p style="margin:.4em 0 0"><button type="submit">Survey</button></p>
+  </form>
+</details>
+
+<p style="color:#666">
+  Showing <strong>{{ showing }}</strong> &middot;
+  <a href="{{ urls.path('/-/orpheus/ontology') }}?status=proposed">proposed</a> &middot;
+  <a href="{{ urls.path('/-/orpheus/ontology') }}?status=accepted">accepted</a> &middot;
+  <a href="{{ urls.path('/-/orpheus/ontology') }}?status=amended">renamed</a> &middot;
+  <a href="{{ urls.path('/-/orpheus/ontology') }}?status=rejected">rejected</a>
+</p>
+
+{% if not candidates %}
+<p style="color:#666">Nothing {{ showing }}. A corpus of prose has no header
+  block to read, and the pattern pass will honestly find nothing in it &mdash;
+  that is the correct answer, not a failure. Try a model.</p>
+{% endif %}
+
+{% for candidate in candidates %}
+{% set support = (candidate.n_documents / candidate.n_sampled) if candidate.n_sampled else 0 %}
+<div style="border-left:3px solid {% if support >= 0.5 %}#166534{% elif support >= 0.2 %}#b45309{% else %}#999{% endif %};padding:.8em 1em;margin-bottom:.8em;background:#fafafa">
+  <p style="margin:0">
+    <strong style="font-size:1.05em">
+      {%- if candidate.kind == 'object_type' -%}
+        {{ candidate.type_id }}
+      {%- elif candidate.kind == 'link_type' -%}
+        {{ candidate.type_id }} &rarr; {{ candidate.to_type_id }}
+      {%- else -%}
+        {{ candidate.type_id }}.{{ candidate.property_id }}
+      {%- endif -%}
+    </strong>
+    <span style="color:#666">&middot; {{ candidate.kind|replace('_', ' ') }}
+      {%- if candidate.data_type %} &middot; {{ candidate.data_type }}{% endif %}
+      {%- if candidate.name_style %} &middot; names normalise as
+        {{ candidate.name_style }}{% endif %}
+      &middot; {{ candidate.engine }}</span>
+  </p>
+
+  {# Support, never a confidence. The model is not asked how sure it is, and a
+     number between 0 and 1 beside a machine's proposal reads as one. #}
+  <p style="margin:.35em 0;color:#444">
+    <strong>seen in {{ candidate.n_documents }} of
+      {{ candidate.n_sampled }}</strong> document(s) read
+    <span style="color:#888">&mdash; counted, not claimed</span>
+  </p>
+
+  {% if candidate.description %}
+  <p style="margin:.3em 0;color:#444">{{ candidate.description }}</p>{% endif %}
+  {% if candidate.rationale %}
+  <p style="margin:.3em 0;color:#666"><em>{{ candidate.rationale }}</em></p>{% endif %}
+
+  {# The evidence is the whole of what there is to check a type against. #}
+  {% if candidate.evidence %}
+  <ul style="margin:.5em 0;color:#444;font-size:.95em">
+    {% for item in candidate.evidence %}
+    <li><code>{{ item.excerpt }}</code>
+      <span style="color:#888">&mdash;
+        <a href="{{ urls.path('/-/orpheus/document/' + item.document_id) }}">{{ item.filename }}</a>
+        {%- if item.page_no %}, page {{ item.page_no }}{% endif %}
+        {%- if item.alignment %} &middot; {{ item.alignment|replace('match_', '') }}{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if candidate.status != 'proposed' %}
+  <p style="margin:.5em 0 0;padding:.5em .8em;background:#fff;border:1px solid #ddd">
+    <strong>{{ candidate.status }}</strong>
+    {%- if candidate.accepted_as %} as
+      <code>{{ candidate.accepted_as }}</code>{% endif %}
+    {%- if candidate.note %}<br><span style="color:#444">{{ candidate.note }}</span>{% endif %}
+  </p>
+  {% elif is_admin %}
+  {# Renaming is the ordinary accepting move, so the box sits beside Accept
+     rather than behind a second screen. #}
+  <form action="{{ urls.path('/-/orpheus/ontology/act') }}" method="post"
+        style="margin-top:.6em">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+    <input type="hidden" name="candidate_id" value="{{ candidate.candidate_id }}">
+    <label>call it
+      <input type="text" name="accepted_as"
+             placeholder="{{ candidate.accepted_as or candidate.property_id or candidate.type_id }}"
+             style="width:14em"></label>
+    <button type="submit" name="decision" value="accepted">Accept</button>
+    <button type="submit" name="decision" value="rejected">Not a thing</button>
+    <input type="text" name="note" placeholder="why (optional)"
+           style="width:18em;margin-left:.5em">
+  </form>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% if is_admin and accepted %}
+<h2>Draft a bundle from what you accepted</h2>
+<p style="color:#666">
+  {{ accepted|length }} accepted so far.
+  {% if not has_types %}
+  <strong>None of them is an object type</strong>, so there is nothing for the
+  accepted properties to be properties of &mdash; accept a type first.
+  {% endif %}
+  Drafting returns the bundle and does <em>not</em> install it: registering an
+  ontology is a deliberate act, and a button that did both would be the one
+  place an ontology arrived without anybody choosing it.
+</p>
+<form action="{{ urls.path('/-/orpheus/ontology/act') }}" method="post">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <input type="hidden" name="action" value="draft">
+  <p>
+    <label>bundle id <input type="text" name="bundle_id" value="drafted-core"></label>
+    <label style="margin-left:1em">name <input type="text" name="name"></label>
+  </p>
+  <p>
+    <label>document types the classifier may use
+      <input type="text" name="document_types" value="other" style="width:24em"
+             placeholder="comma separated"></label>
+  </p>
+  <p><button type="submit" {% if not has_types %}disabled{% endif %}>Draft it</button></p>
+</form>
+{% endif %}
+{% endblock %}

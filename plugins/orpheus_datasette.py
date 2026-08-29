@@ -252,6 +252,8 @@ def register_routes():
         (r"^/-/orpheus/network$", network_page),
         (r"^/-/orpheus/map$", map_page),
         (r"^/-/orpheus/static/(?P<path>.*)$", static_asset),
+        (r"^/-/orpheus/ontology$", ontology_page),
+        (r"^/-/orpheus/ontology/act$", ontology_act),
         (r"^/-/orpheus/questions$", questions_page),
         (r"^/-/orpheus/questions/act$", questions_act),
         (r"^/-/orpheus/wiki$", wiki_index),
@@ -267,7 +269,9 @@ def menu_links(datasette, actor):
     if not actor:
         return []
     return [{"href": datasette.urls.path("/-/orpheus"), "label": "Documents"},
-            {"href": datasette.urls.path("/-/orpheus/wiki"), "label": "Wiki"}]
+            {"href": datasette.urls.path("/-/orpheus/wiki"), "label": "Wiki"},
+            {"href": datasette.urls.path("/-/orpheus/ontology"),
+             "label": "Ontology"}]
 
 
 @hookimpl
@@ -711,6 +715,136 @@ async def network_page(datasette, request):
         "path_to": path_to,
         "error": request.args.get("error") or path_error,
     })
+
+
+async def _is_admin(datasette, request) -> bool:
+    """Whether this signed-in person is an Orpheus administrator.
+
+    The Orpheus row is the authority, not Datasette's actor: a `--root` sign-in
+    carries no `is_admin` key at all, so reading it off the request hid the
+    decide buttons from the one person allowed to press them. Every route that
+    *acts* on the answer re-checks it in `api.py`; this only decides what to
+    draw.
+    """
+    identity = _datasette_identity(datasette, request)
+    if not identity:
+        return False
+    actor = await _resolve_actor(_database(datasette), identity)
+    return bool((actor or {}).get("is_admin"))
+
+
+async def ontology_page(datasette, request):
+    """The ontology queue: what a survey proposed, and where somebody decides.
+
+    Without this the loop is CLI-only, and the decision it asks for is the one
+    that most needs a person's eyes on the evidence -- an object type shapes
+    every row that will ever be filed under it. A queue nobody can see is a
+    queue nobody reads.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    status, listed = await _call(datasette, request, "GET",
+                                 "/ontology/candidates",
+                                 {"status": request.args.get("status")
+                                  or "proposed"})
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus",
+                         error=listed["error"]["message"])
+    _, decided = await _call(datasette, request, "GET",
+                             "/ontology/candidates", {"status": "accepted"})
+    _, amended = await _call(datasette, request, "GET",
+                             "/ontology/candidates", {"status": "amended"})
+    accepted = ((decided or {}).get("candidates", [])
+                + (amended or {}).get("candidates", []))
+    return await _render(datasette, request, "orpheus_ontology.html", {
+        "candidates": listed.get("candidates", []),
+        "reading": listed.get("reading"),
+        "accepted": accepted,
+        # A bundle can only be drafted once something has been accepted, and
+        # only from types -- a queue of accepted properties with no type is the
+        # half-made decision the drafter refuses.
+        "has_types": any(c["kind"] == "object_type" for c in accepted),
+        "showing": request.args.get("status") or "proposed",
+        "is_admin": await _is_admin(datasette, request),
+        "error": request.args.get("error"),
+        "note": request.args.get("note"),
+    })
+
+
+async def ontology_act(datasette, request):
+    """Survey, decide, draft. Three writes, one handler."""
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    if request.method != "POST":
+        return _redirect(datasette, "/-/orpheus/ontology")
+
+    form = await request.post_vars()
+    action = form.get("action")
+
+    if action == "survey":
+        status, result = await _call(datasette, request, "POST",
+                                     "/ontology/survey", {
+                                         "engine": form.get("engine") or None,
+                                         "min_support": form.get("min_support"),
+                                         "sample": form.get("sample"),
+                                         "tier": form.get("tier") or "local",
+                                         "cloud_opt_in": bool(
+                                             form.get("cloud_opt_in")),
+                                     })
+        if status != 200:
+            return _redirect(datasette, "/-/orpheus/ontology",
+                             error=result["error"]["message"])
+        held = result.get("n_below_support") or 0
+        return _redirect(
+            datasette, "/-/orpheus/ontology",
+            note=(f"Read {result['n_documents_read']} document(s): "
+                  f"{result['n_candidates']} candidate(s)"
+                  + (f", {held} below the support threshold." if held
+                     else ".")))
+
+    if action == "draft":
+        status, result = await _call(datasette, request, "POST",
+                                     "/ontology/draft", {
+                                         "bundle_id": form.get("bundle_id"),
+                                         "name": form.get("name"),
+                                         "document_types": [
+                                             t.strip() for t in
+                                             (form.get("document_types") or ""
+                                              ).split(",") if t.strip()],
+                                     })
+        if status != 200:
+            return _redirect(datasette, "/-/orpheus/ontology",
+                             error=result["error"]["message"])
+        problems = result.get("problems") or []
+        # Drafted, never registered. Installing an ontology from a button is
+        # the one place it could arrive in a store without anybody choosing it,
+        # so the page says what it would be and the CLI installs it.
+        summary = (f"Drafted {result['bundle_id']}: "
+                   f"{', '.join(result['object_types'])} with "
+                   f"{result['n_properties']} propert(ies) and "
+                   f"{len(result['links'])} link(s). Register it with "
+                   f"`orpheus ontology draft --register`.")
+        return _redirect(datasette, "/-/orpheus/ontology",
+                         error="; ".join(problems) if problems else None,
+                         note=summary)
+
+    candidate_id = form.get("candidate_id") or ""
+    status, result = await _call(
+        datasette, request, "POST",
+        f"/ontology/candidates/{candidate_id}/review",
+        {"decision": form.get("decision"),
+         "accepted_as": (form.get("accepted_as") or "").strip() or None,
+         "note": form.get("note") or None})
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus/ontology",
+                         error=result["error"]["message"])
+    return _redirect(datasette, "/-/orpheus/ontology",
+                     note=f"{result['type_id']}"
+                          + (f".{result['property_id']}"
+                             if result.get("property_id") else "")
+                          + f" \u2014 {result['status']}"
+                          + (f" as {result['accepted_as']}"
+                             if result.get("accepted_as") else "") + ".")
 
 
 async def wiki_queue(datasette, request):
