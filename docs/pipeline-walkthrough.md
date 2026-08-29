@@ -95,16 +95,42 @@ tool that speaks it registers here without translation.
 
 ## 3 — Classify
 
-`classify(store, document_id, actor_id, tier, max_chars)`
+`classify(store, document_id, actor_id, tier, max_chars, engine)`
 
-Always the **local** tier. Classification reads the whole document, so routing it
-to the cloud would mean sending every ingested document off-site to learn what it
-is — the opposite of an opt-in.
+Defaults to the **local** tier, and the cloud tier goes through the same gate as
+everything else: classification reads the first 12,000 characters of the
+document, so routing it off-site is a decision somebody makes, not a default.
+The call is recorded with `excerpt_only` set when it truncated, because "the
+first 12,000 characters left the building" is a different answer from "all of
+it".
 
-Sets `doc_type` (`contract`, `amendment`, `tender`, `correspondence`, `other`),
-`sector` and `jurisdiction`, with `classification_status = 'unconfirmed'`. The
-prompt instructs the model to return `null` rather than guess a sector or
-jurisdiction the text does not support.
+`engine` names which model to ask, and defaults to whatever the deployment
+configured for extraction when that engine can answer a question at all —
+otherwise `chat`, which needs nothing installed. It used to reach for the `llm`
+library whenever it imported and resolve the tier's model id, which for the
+cloud tier names a Gemini model; on a deployment with `llm` and without
+`llm-gemini` that failed on every document. It did: two whole corpora, 88 of 88,
+with `doc_type` null throughout and nobody looking, because a classification
+failure is caught and reported per document so that one missing model cannot
+stop an ingest.
+
+Sets `doc_type`, `sector` and `jurisdiction`, with
+`classification_status = 'unconfirmed'`.
+
+**Every one of the three comes from a closed list, or is not asked about.** The
+vocabularies live in `extensions.orpheus`: `documentTypes` (required),
+`sectors` and `jurisdictions` (optional). A field with no list is left out of
+the prompt entirely and recorded as null, and an answer outside a list is
+dropped — the same way an unknown `doc_type` becomes `other`.
+
+That is not caution for its own sake. `sector` was an open question until
+measured: on forty-eight documents of one corpus it produced *thirteen*
+spellings of a single answer — `software/open-source governance`,
+`open-source software governance`, `open source software governance`,
+`software/open-source (Python language governance)` and nine more — which is
+precisely the harm `documentTypes` is a closed list to prevent, one field over.
+Asked about `jurisdiction`, the same corpus answered "Python Software
+Foundation", which is an organisation.
 
 ## 4 — Population, local
 

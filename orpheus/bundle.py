@@ -27,7 +27,7 @@ from .utils import NAME_STYLES, OrpheusError, from_json, naive_key
 
 SCHEMA_DIR = Path(__file__).parent / "schemas"
 BUNDLE_DIR = Path(__file__).parent / "bundles"
-DEFAULT_BUNDLE = BUNDLE_DIR / "contract-core-0.4.0.json"
+DEFAULT_BUNDLE = BUNDLE_DIR / "contract-core-0.5.0.json"
 
 SPEC_SCHEMA = SCHEMA_DIR / "ontologySpecR.bundle.schema.json"
 ORPHEUS_SCHEMA = SCHEMA_DIR / "orpheus.bundle.schema.json"
@@ -536,6 +536,28 @@ def domain(bundle: dict) -> dict:
 
 def document_types(bundle: dict) -> list[str]:
     return list(domain(bundle).get("documentTypes") or [])
+
+
+def sectors(bundle: dict) -> list[str]:
+    """The vocabulary the classifier may use for `sector`, or nothing.
+
+    Optional on purpose, and empty means *do not ask*. `sector` was free text
+    and on one forty-eight document corpus produced thirteen spellings of one
+    answer -- "software/open-source governance", "open-source software
+    governance", "open source software governance" -- which is precisely the
+    harm `documentTypes` is a closed list to prevent, one field over.
+    """
+    return list(domain(bundle).get("sectors") or [])
+
+
+def jurisdictions(bundle: dict) -> list[str]:
+    """The vocabulary for `jurisdiction`, on the same terms as `sectors`.
+
+    A domain with no jurisdictions worth naming should not be invited to invent
+    them: asked openly about a corpus of software governance minutes, a model
+    answered "Python Software Foundation", which is an organisation.
+    """
+    return list(domain(bundle).get("jurisdictions") or [])
 
 
 def flag_object_type(bundle: dict) -> dict | None:

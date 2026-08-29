@@ -58,6 +58,22 @@
      },
      "description": "The vocabulary the classifier is given. A closed list, because an open one produces a new doc_type per document."
     },
+    "sectors": {
+     "type": "array",
+     "minItems": 1,
+     "items": {
+      "type": "string"
+     },
+     "description": "The vocabulary the classifier may use for `sector`. Optional, and when it is absent the classifier does not ask: an open list produced thirteen spellings of one answer across forty-eight documents, which is exactly what documentTypes is a closed list to prevent."
+    },
+    "jurisdictions": {
+     "type": "array",
+     "minItems": 1,
+     "items": {
+      "type": "string"
+     },
+     "description": "The vocabulary the classifier may use for `jurisdiction`. Optional, on the same terms as `sectors`: a domain with no jurisdictions worth naming should not be invited to invent them."
+    },
     "scores": {
      "type": "array",
      "items": {

@@ -38,23 +38,20 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def model_server(monkeypatch):
-    # The `llm` library would otherwise be preferred; this test is about what
-    # classify() does with a reply, so the transport is pinned to the plain one.
-    import orpheus.classify as classify_mod
+def model_server(store):
+    """A real HTTP model on a real socket, reached the way a deployment does.
+
+    Nothing is monkeypatched: `chat` is configured as the engine and the local
+    tier's base URL points here, so the request goes through `engines.ask()`
+    exactly as it would in production. The old fixture stubbed out the
+    transport, which is why the transport was where the bug lived.
+    """
     server = HTTPServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-
-    real_call = classify_mod._call_model
-
-    def plain(store, tier, config, system, text):
-        from orpheus.engines import _post_chat
-        return _post_chat(f"http://127.0.0.1:{server.server_port}/v1",
-                          None, {"model": "stub", "messages": [
-                              {"role": "system", "content": system},
-                              {"role": "user", "content": text}]})
-
-    monkeypatch.setattr(classify_mod, "_call_model", plain)
+    store.set_setting("extraction_engine", "chat", None)
+    store.set_setting("local_base_url",
+                      f"http://127.0.0.1:{server.server_port}/v1", None)
+    store.conn.commit()
     try:
         yield
     finally:
@@ -187,3 +184,95 @@ def test_correcting_the_classification_takes_responsibility_for_it(ingested, mod
     assert row["classification_status"] == "amended"
     assert row["classification_source"] == "human"
     assert row["classification_confidence"] == 1.0
+
+
+# -- which model actually gets asked -----------------------------------------
+
+def test_the_engine_the_deployment_configured_is_the_one_asked(store):
+    """The bug this replaced: classification reached for the `llm` library
+    whenever it imported, resolved the tier's model id -- which for the cloud
+    tier names a Gemini model -- and failed on every document of a deployment
+    that had `llm` and not `llm-gemini`. Two whole corpora, 88 of 88."""
+    from orpheus.engines import general_engine_for
+
+    store.set_setting("extraction_engine", "anthropic", None)
+    assert general_engine_for(store) == "anthropic"
+
+    # An extractor cannot answer an open question, so it is not silently used
+    # and not silently guessed around either: the fallback is the one transport
+    # that needs nothing installed.
+    store.set_setting("extraction_engine", "gliner2", None)
+    assert general_engine_for(store) == "chat"
+
+    store.set_setting("extraction_engine", "auto", None)
+    assert general_engine_for(store) == "chat"
+
+
+def test_naming_an_extractor_is_refused_rather_than_worked_around(store):
+    from orpheus.engines import general_engine_for
+
+    with pytest.raises(OrpheusError) as refused:
+        general_engine_for(store, "langextract")
+    assert "cannot be asked an open question" in str(refused.value)
+
+
+def test_a_truncated_document_is_recorded_as_an_excerpt(ingested, model_server):
+    """`excerpt_only` answers "did all of this document leave the building".
+    The transport this now shares defaulted it to False, and classification is
+    the one caller that truncates."""
+    store, document_id = ingested
+    _Handler.reply = '{"doc_type": "contract", "confidence": 1.0}'
+    classify(store, document_id, actor_id="act_test", max_chars=200)
+    call = store.one("SELECT * FROM llm_calls WHERE purpose = 'classify' "
+                     "ORDER BY seq DESC")
+    assert call["excerpt_only"] == 1
+    assert call["error"] is None
+    # The system prompt counts too: it is text this deployment sent, and a
+    # budget that counted half of every call would be wrong the wrong way.
+    assert call["prompt_chars"] > 200
+
+
+# -- a field with no vocabulary is not asked about ---------------------------
+
+def test_an_open_field_is_the_one_thing_a_closed_list_exists_to_stop():
+    """`sector` was free text, and on forty-eight documents of one corpus it
+    came back as thirteen spellings of a single answer — "software/open-source
+    governance", "open-source software governance", "open source software
+    governance" and ten more. That is exactly the harm `documentTypes` is a
+    closed list to prevent, one field over."""
+    bare = classify_prompt(["a", "b"])
+    assert "sector" not in bare and "jurisdiction" not in bare
+    listed = classify_prompt(["a"], ["health", "transport"], ["Ireland"])
+    assert "sector        one of: health, transport, or null" in listed
+    assert "jurisdiction  one of: Ireland, or null" in listed
+
+
+def test_a_value_outside_the_list_is_dropped(ingested, model_server):
+    store, document_id = ingested
+    _Handler.reply = ('{"doc_type": "contract", "sector": "software/open '
+                      'source governance", "jurisdiction": "Python Software '
+                      'Foundation", "confidence": 0.9}')
+    result = classify(store, document_id, actor_id="act_test")
+    # Both are outside the shipped vocabularies. A model answering a different
+    # question than the one asked lands as null, the same way an unknown
+    # doc_type lands as `other`.
+    assert result["sector"] is None
+    assert result["jurisdiction"] is None
+
+
+def test_a_value_on_the_list_is_kept_however_it_is_cased(ingested, model_server):
+    store, document_id = ingested
+    _Handler.reply = ('{"doc_type": "contract", "sector": "Health", '
+                      '"jurisdiction": "ireland", "confidence": 0.9}')
+    result = classify(store, document_id, actor_id="act_test")
+    assert (result["sector"], result["jurisdiction"]) == ("health", "Ireland")
+
+
+def test_a_bundle_with_no_vocabulary_records_nothing_rather_than_guesses(
+        store, tmp_path):
+    """A domain with no jurisdictions worth naming should not be invited to
+    invent them: asked openly about software governance minutes, a model
+    answered "Python Software Foundation", which is an organisation."""
+    starter = bundle_mod.load(bundle_mod.BUNDLE_DIR / "starter-0.1.0.json")
+    assert bundle_mod.sectors(starter) == []
+    assert bundle_mod.jurisdictions(starter) == []

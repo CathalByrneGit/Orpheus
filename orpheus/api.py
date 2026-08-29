@@ -228,7 +228,8 @@ def get_text(store, document_id, **_):
 def post_classify(store, document_id, actor, body, **_):
     return classify.classify(store, document_id, actor_id=_actor_id(actor),
                              tier=body.get("tier", "local"),
-                             opt_in=bool(body.get("cloud_opt_in")))
+                             opt_in=bool(body.get("cloud_opt_in")),
+                             engine=body.get("engine") or None)
 
 
 @route("POST", r"/documents/(?P<document_id>[^/]+)/extract", permission="edit")
@@ -846,7 +847,9 @@ def post_ontology_draft(store, actor, body, **_):
         name=body.get("name"), description=body.get("description"),
         primary_type=body.get("primary_type") or None,
         document_types=body.get("document_types") or None,
-        document_scoped=body.get("document_scoped") or None)
+        document_scoped=body.get("document_scoped") or None,
+        sectors=body.get("sectors") or None,
+        jurisdictions=body.get("jurisdictions") or None)
 
 
 @route("GET", "/graph/map")

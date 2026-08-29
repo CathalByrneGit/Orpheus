@@ -109,7 +109,7 @@ curl -X POST localhost:8001/-/orpheus/api/documents \
 
 | Method | Path | Permission | Body |
 |---|---|---|---|
-| `POST` | `/documents/<id>/classify` | edit | — |
+| `POST` | `/documents/<id>/classify` | edit | `tier`, `cloud_opt_in`, `engine` |
 | `POST` | `/documents/<id>/extract` | edit | `tier`, `engine`, `cloud_opt_in`, `deterministic`, `force` |
 | `POST` | `/documents/<id>/concepts/evaluate` | edit | — |
 | `POST` | `/documents/<id>/corpus-analysis` | edit | `narrate`, `tier`, `cloud_opt_in` |
@@ -344,7 +344,7 @@ For a corpus that has no bundle yet. See
 | `POST` | `/ontology/survey` | **administrator** | `engine`, `sample`, `min_support`, `document_ids`, `primary_type`, `chars_per_document`, `tier`, `cloud_opt_in` |
 | `GET` | `/ontology/candidates` | actor | `?status=proposed`, `?kind=object_type\|property\|link_type` |
 | `POST` | `/ontology/candidates/<id>/review` | **administrator** | `decision`, `accepted_as`, `note` |
-| `POST` | `/ontology/draft` | **administrator** | `bundle_id`, `bundle_version`, `name`, `primary_type`, `document_types`, `document_scoped` |
+| `POST` | `/ontology/draft` | **administrator** | `bundle_id`, `bundle_version`, `name`, `primary_type`, `document_types`, `document_scoped`, `sectors`, `jurisdictions` |
 
 Surveying and reviewing are administrator-only, and not because a survey is
 dangerous. Accepting an object type fixes the shape of every row that will ever

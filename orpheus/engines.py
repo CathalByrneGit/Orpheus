@@ -765,9 +765,40 @@ def general_engines() -> list[str]:
     return [name for name in GENERAL_ENGINES if name in _ENGINES]
 
 
+def general_engine_for(store: Store | None,
+                       requested: str | None = None) -> str:
+    """A general engine, for a caller that needs a question answered.
+
+    Honours what the deployment configured for extraction when that engine can
+    answer questions, and otherwise falls back to the best installed one that
+    can. Without this, asking a question meant reaching for whichever transport
+    happened to import -- which is how classification came to resolve a Gemini
+    model id on every deployment that had the `llm` library and not
+    `llm-gemini`, and to fail on every document of two whole corpora.
+    """
+    if requested:
+        if requested not in GENERAL_ENGINES:
+            raise OrpheusError(
+                f"{requested!r} extracts against a schema and cannot be asked "
+                f"an open question. Use one of: {', '.join(general_engines())}.")
+        return requested
+    configured = (store.setting("extraction_engine", "auto")
+                  if store is not None else "auto")
+    if configured in GENERAL_ENGINES:
+        return configured
+    # Otherwise `chat`, and deliberately not "the best installed". Picking by
+    # what happens to import is the bug this function exists to stop: `llm`
+    # imports on any deployment that installed it for one provider, and then
+    # resolves the tier's model id, which may name a provider whose plugin
+    # nobody installed. `chat` needs nothing installed at all -- it is a POST
+    # to a base URL both tiers already configure -- so it is the one fallback
+    # that cannot be wrong about what is available.
+    return "chat"
+
+
 def ask(*, store: Store, system: str, text: str, purpose: str, engine: str,
         tier: str, opt_in: bool, actor_id: str | None,
-        document_id: str | None = None) -> str:
+        document_id: str | None = None, excerpt_only: bool = False) -> str:
     """Put one question to a model and return what it said, verbatim.
 
     The transport of `chat_extract`, `anthropic_extract` and `llm_extract`
@@ -824,7 +855,11 @@ def ask(*, store: Store, system: str, text: str, purpose: str, engine: str,
             # direction that matters.
             prompt_chars=len(system) + len(text),
             provider=provider, model=model_id, document_id=document_id,
-            actor_id=actor_id, excerpt_only=False, payload=system + text,
+            # Whether only part of the document left the building. A caller
+            # that truncates has to say so: the audit answers "what was sent",
+            # and "all of it" is a different answer from "the first 12,000
+            # characters".
+            actor_id=actor_id, excerpt_only=excerpt_only, payload=system + text,
             error=error)
     if error:
         raise OrpheusError(f"{purpose} failed: {error}")

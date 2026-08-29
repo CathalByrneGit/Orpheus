@@ -177,10 +177,16 @@ def cmd_ingest(args) -> int:
                 # model configured could not ingest anything at all, when the
                 # deterministic pass would have worked perfectly well. The
                 # plugin makes the same call, so both surfaces agree.
+                #
+                # Same tier and engine as the extraction beside it. Pinning it
+                # to the local tier meant a run configured for a cloud model
+                # classified against whatever the local tier happened to name,
+                # which on both new corpora was nothing that existed.
                 try:
                     entry["classification"] = classify.classify(
                         store, document["document_id"], actor_id=args.actor_id,
-                        tier="local")
+                        tier=args.tier, opt_in=args.cloud_opt_in,
+                        engine=args.engine)
                 except OrpheusError as exc:
                     entry["classification_error"] = str(exc)
                 entry["extraction"] = extract_mod.extract(
@@ -1188,7 +1194,9 @@ def cmd_ontology(args) -> int:
                 store, args.bundle_id, bundle_version=args.bundle_version,
                 name=args.name, primary_type=args.type_id or None,
                 document_types=args.document_type or None,
-                document_scoped=args.document_scoped or None)
+                document_scoped=args.document_scoped or None,
+                sectors=args.sector or None,
+                jurisdictions=args.jurisdiction or None)
             if args.out:
                 Path(args.out).write_text(
                     json.dumps(result["bundle"], indent=2) + "\n")
@@ -1374,6 +1382,12 @@ def build_parser() -> argparse.ArgumentParser:
                       help="the classifier's vocabulary; repeatable")
     onto.add_argument("--document-scoped", action="append", default=[],
                       help="types whose identity is the document; repeatable")
+    onto.add_argument("--sector", action="append", default=[],
+                      help="the classifier's sector vocabulary; repeatable. "
+                           "Omit it and the classifier does not ask")
+    onto.add_argument("--jurisdiction", action="append", default=[],
+                      help="the classifier's jurisdiction vocabulary; "
+                           "repeatable")
     onto.add_argument("--out", help="write the drafted bundle here")
     onto.add_argument("--register", action="store_true",
                       help="register and apply the draft, if it has no problems")

@@ -692,3 +692,21 @@ def test_something_nobody_decided_cannot_be_reconsidered(corpus):
     with pytest.raises(OrpheusError) as already:
         reopen_candidate(corpus, title["candidate_id"], "act_a")
     assert "already in the queue" in str(already.value)
+
+
+def test_a_sector_vocabulary_is_supplied_and_never_proposed(corpus):
+    """A survey reads what the documents are about; which sectors a deployment
+    cares to group by is a decision about the deployment. Omitted means the
+    classifier does not ask, which is the point — as an open question `sector`
+    produced thirteen spellings of one answer across forty-eight documents."""
+    _accept_all(corpus)
+    bare = draft_bundle(corpus, "proposals-core")["bundle"]
+    assert "sectors" not in bare["extensions"]["orpheus"]
+
+    listed = draft_bundle(corpus, "proposals-core",
+                          sectors=["governance", "release"],
+                          jurisdictions=["upstream"])["bundle"]
+    assert listed["extensions"]["orpheus"]["sectors"] == ["governance",
+                                                          "release"]
+    assert listed["extensions"]["orpheus"]["jurisdictions"] == ["upstream"]
+    bundle_mod.validate(listed)

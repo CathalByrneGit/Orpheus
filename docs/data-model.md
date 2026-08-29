@@ -99,6 +99,7 @@ tool the first time it needed to attach a date to something.
 | `containerProperty` | The property on child types pointing back at that instance |
 | `valueProperty`, `currencyProperty` | The corpus value comparison. Omit both and it reports itself unavailable |
 | `documentTypes` | The classifier's vocabulary |
+| `sectors`, `jurisdictions` | The classifier's vocabulary for those two fields. **Optional, and absent means the classifier does not ask.** Both were open questions until measured: `sector` produced thirteen spellings of one answer across forty-eight documents, and `jurisdiction` answered with an organisation |
 | `flagObjectType` | Where a rule finding is written. Optional — a domain with no flag type still evaluates its concepts and records them, it just has nowhere to raise an instance |
 
 It lives under `extensions` because that is where the spec puts vendor

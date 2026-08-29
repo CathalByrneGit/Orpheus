@@ -12,10 +12,7 @@ column stops being worth grouping by.
 
 from __future__ import annotations
 
-import json
-
 from . import bundle as bundle_mod
-from . import llm
 from .audit import record_edit
 from .ingest import document_text, get_document, has_text
 from .rubric import snap_confidence
@@ -25,30 +22,58 @@ from .utils import OrpheusError, from_json
 MAX_CHARS = 12000
 
 
-def classify_prompt(document_types: list[str]) -> str:
+def classify_prompt(document_types: list[str],
+                    sectors: list[str] | None = None,
+                    jurisdictions: list[str] | None = None) -> str:
+    """What the model is asked, given the vocabularies the bundle declares.
+
+    A field with no vocabulary is **not asked about**. `sector` and
+    `jurisdiction` used to be open questions, and on forty-eight documents of
+    one corpus `sector` came back as thirteen spellings of a single answer --
+    "software/open-source governance", "open-source software governance",
+    "open source software governance", and ten more. That is exactly the harm
+    `documentTypes` is a closed list to prevent, one field over: a column with
+    a value per document is not worth grouping by, and a column of nulls is at
+    least honest about knowing nothing.
+    """
+    fields = [f"  doc_type      one of: {', '.join(document_types)}"]
+    if sectors:
+        fields.append(f"  sector        one of: {', '.join(sectors)}, or null")
+    if jurisdictions:
+        fields.append("  jurisdiction  one of: "
+                      f"{', '.join(jurisdictions)}, or null")
+    fields += ["  confidence    one of 1.0, 0.9, 0.7, 0.5, 0.2",
+               "  rationale     one short sentence"]
+    closing = (
+        "Return null rather than guessing a value that is not supported by "
+        "the text, and never a value outside the list it is offered from."
+    )
     return (
         "Classify this document. Return JSON only, with these fields:\n"
-        f"  doc_type      one of: {', '.join(document_types)}\n"
-        "  sector        the public-sector domain if evident, or null\n"
-        "  jurisdiction  the governing jurisdiction if stated or clearly "
-        "inferable, or null\n"
-        "  confidence    one of 1.0, 0.9, 0.7, 0.5, 0.2\n"
-        "  rationale     one short sentence\n\n"
+        + "\n".join(fields) + "\n\n"
         "Use the confidence rubric strictly:\n"
         "  1.0 stated explicitly in the document\n"
         "  0.9 clearly identifiable from headings and structure\n"
         "  0.7 implied by the content\n"
         "  0.5 inferred from context\n"
         "  0.2 speculative\n"
-        "Return null rather than guessing a sector or jurisdiction that is not "
-        "supported by the text."
+        + closing
     )
 
 
 def classify(store: Store, document_id: str, actor_id: str | None = None,
              max_chars: int = MAX_CHARS, tier: str = "local",
-             opt_in: bool = False) -> dict:
-    """Ask a model what this document is, and record the answer as a proposal."""
+             opt_in: bool = False, engine: str | None = None) -> dict:
+    """Ask a model what this document is, and record the answer as a proposal.
+
+    `engine` names which one to ask, and defaults to whatever the deployment
+    configured for extraction when that engine can answer a question at all.
+    It used to reach for the `llm` library whenever it imported, resolve the
+    tier's model id -- which for the cloud tier names a Gemini model -- and
+    fail on every document of a deployment that had `llm` and not `llm-gemini`.
+    That is exactly what happened to both new corpora: 88 documents, 88 failed
+    classifications, and `doc_type` null throughout.
+    """
     store.assert_writable()
     document = get_document(store, document_id)
     if document is None:
@@ -66,10 +91,13 @@ def classify(store: Store, document_id: str, actor_id: str | None = None,
 
     bundle = bundle_mod.active(store) or bundle_mod.load()
     document_types = bundle_mod.document_types(bundle) or ["other"]
+    sectors = bundle_mod.sectors(bundle)
+    jurisdictions = bundle_mod.jurisdictions(bundle)
 
-    reply = _ask(store, tier, classify_prompt(document_types), text,
+    reply = _ask(store, tier,
+                 classify_prompt(document_types, sectors, jurisdictions), text,
                  document_id=document_id, actor_id=actor_id,
-                 excerpt_only=truncated, opt_in=opt_in)
+                 excerpt_only=truncated, opt_in=opt_in, engine=engine)
 
     doc_type = reply.get("doc_type") or "other"
     if doc_type not in document_types:
@@ -81,8 +109,14 @@ def classify(store: Store, document_id: str, actor_id: str | None = None,
 
     previous = {"doc_type": document["doc_type"], "sector": document["sector"],
                 "jurisdiction": document["jurisdiction"]}
-    updated = {"doc_type": doc_type, "sector": reply.get("sector"),
-               "jurisdiction": reply.get("jurisdiction")}
+    updated = {"doc_type": doc_type,
+               # Null unless the bundle declared a vocabulary and the answer is
+               # in it. A model asked nothing may answer anyway, and a value
+               # outside the list is the same "answering a different question"
+               # that sends an unknown doc_type to `other`.
+               "sector": _in_vocabulary(reply.get("sector"), sectors),
+               "jurisdiction": _in_vocabulary(reply.get("jurisdiction"),
+                                              jurisdictions)}
 
     with store.transaction():
         store.execute(
@@ -98,6 +132,17 @@ def classify(store: Store, document_id: str, actor_id: str | None = None,
     return {"document_id": document_id, **updated, "confidence": confidence,
             "rationale": reply.get("rationale"), "status": "unconfirmed",
             "excerpt_only": truncated}
+
+
+def _in_vocabulary(value, allowed: list[str]) -> str | None:
+    """The value, if the bundle declared a list and this is on it."""
+    if not allowed or value is None:
+        return None
+    text = str(value).strip()
+    for candidate in allowed:
+        if text.casefold() == candidate.casefold():
+            return candidate
+    return None
 
 
 def confirm_classification(store: Store, document_id: str, actor_id: str,
@@ -139,30 +184,23 @@ def confirm_classification(store: Store, document_id: str, actor_id: str,
 
 
 def _ask(store: Store, tier: str, system: str, text: str, document_id: str,
-         actor_id: str | None, excerpt_only: bool, opt_in: bool) -> dict:
+         actor_id: str | None, excerpt_only: bool, opt_in: bool,
+         engine: str | None = None) -> dict:
     """One JSON-returning model call, through the gate and into the audit log.
 
-    Uses the `llm` library when it is installed and falls back to the plain
-    HTTP path otherwise — the same two routes the extraction engines use, for
-    the same reason.
+    The transport is `engines.ask()` -- the same one the ontology survey uses,
+    and the same gate, audit and characters-not-tokens accounting every engine
+    uses. This file used to carry its own copy, which chose a provider by which
+    library happened to import rather than by what the deployment configured.
+    Two transports meant two behaviours, and the one nobody looked at was the
+    one that broke.
     """
-    if tier == "cloud":
-        llm.assert_cloud_allowed(store, opt_in=opt_in, actor_id=actor_id)
-    config = llm.model_config(store, tier)
+    from .engines import ask, general_engine_for
 
-    error, content = None, ""
-    try:
-        content = _call_model(store, tier, config, system, text)
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
-    finally:
-        llm.record_llm_call(
-            store, tier=tier, purpose="classify", prompt_chars=len(text),
-            provider=config["provider"], model=config["model_id"],
-            document_id=document_id, actor_id=actor_id,
-            excerpt_only=excerpt_only, payload=text, error=error)
-    if error:
-        raise OrpheusError(f"Classification failed: {error}")
+    content = ask(store=store, system=system, text=text, purpose="classify",
+                  engine=general_engine_for(store, engine), tier=tier,
+                  opt_in=opt_in, actor_id=actor_id, document_id=document_id,
+                  excerpt_only=excerpt_only)
 
     parsed = _parse_json(content)
     if parsed is None:
@@ -171,28 +209,6 @@ def _ask(store: Store, tier: str, system: str, text: str, document_id: str,
             f"It began: {content[:120]!r}"
         )
     return parsed
-
-
-def _call_model(store: Store, tier: str, config: dict, system: str, text: str) -> str:
-    from .engines import _default_base_url, _post_chat, _llm_model_id
-
-    try:
-        import llm as llm_lib
-    except ImportError:
-        llm_lib = None
-
-    if llm_lib is not None:
-        model = llm_lib.get_model(_llm_model_id(store, tier, config))
-        kwargs = {"system": system, "stream": False}
-        if config.get("api_key") and isinstance(model, llm_lib.KeyModel):
-            kwargs["key"] = config["api_key"]
-        return model.prompt(text, **kwargs).text()
-
-    return _post_chat(
-        _default_base_url(store, tier), config.get("api_key"),
-        {"model": config["model_id"], "temperature": 0,
-         "messages": [{"role": "system", "content": system},
-                      {"role": "user", "content": text}]})
 
 
 def _parse_json(content: str) -> dict | None:

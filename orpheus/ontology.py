@@ -1028,7 +1028,9 @@ def draft_bundle(store: Store, bundle_id: str, bundle_version: str = "0.1.0",
                  name: str | None = None, description: str | None = None,
                  primary_type: str | None = None,
                  document_types: list[str] | None = None,
-                 document_scoped: list[str] | None = None) -> dict:
+                 document_scoped: list[str] | None = None,
+                 sectors: list[str] | None = None,
+                 jurisdictions: list[str] | None = None) -> dict:
     """Assemble a bundle from the candidates a person accepted.
 
     Nothing here decides anything. Every type, property and link in the result
@@ -1218,6 +1220,14 @@ def draft_bundle(store: Store, bundle_id: str, bundle_version: str = "0.1.0",
         "extensions": {"orpheus": {
             "primaryObjectType": primary,
             "documentTypes": list(document_types or ["other"]),
+            # Supplied by the drafter, never proposed. A survey reads what the
+            # documents are *about*; which sectors and jurisdictions a
+            # deployment cares to group by is a decision about the deployment.
+            # Omitted when empty, and omitted means the classifier does not ask
+            # -- which is the point: `sector` as an open question produced
+            # thirteen spellings of one answer across forty-eight documents.
+            **({"sectors": list(sectors)} if sectors else {}),
+            **({"jurisdictions": list(jurisdictions)} if jurisdictions else {}),
         }},
     })
 
