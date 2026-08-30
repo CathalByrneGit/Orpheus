@@ -35,7 +35,7 @@ exactly that reason.
 | Variable | Default | Purpose |
 |---|---|---|
 | `ORPHEUS_DB` | `data/orpheus.sqlite` | Store path |
-| `ORPHEUS_STORAGE` | `storage` | Originals and page images |
+| `ORPHEUS_STORAGE` | `storage` | Originals and page images. `documents/<first two of the hash>/<hash>.<ext>` for originals, `pages/<document_id>/` for the images OCR was run on |
 | `ORPHEUS_LOCAL_MODEL` | `llama3.1:8b` | Ollama model |
 | `ORPHEUS_OLLAMA_HOST` | `http://localhost:11434` | Ollama endpoint |
 | `ORPHEUS_CLOUD_MODEL` | — | Cloud model, when one is enabled |
@@ -247,7 +247,22 @@ a bare 400 page. `tests/e2e/browser_loop.sh` posts a 60 MB file at the default
 50 MB ceiling and asserts the redirect carries the rejection.
 
 The uploaded bytes are written to a temp file before ingest, because ingest
-hashes and content-addresses the original and needs a file to do it.
+hashes and content-addresses the original and needs a file to do it. Two things
+about that handover are load-bearing, and both were wrong until they were
+tested:
+
+**The uploaded filename is never used as a path.** Datasette's multipart parser
+stores it verbatim and does no sanitisation, so `Path(tmpdir) / "/etc/passwd"`
+is `/etc/passwd` — an absolute name discards the directory it was joined to, and
+`../..` walks out of it. The file on disk is called `upload`; the real name
+travels separately as `filename`, which is what `ingest` reads the kind and the
+extension from and what lands in `documents.filename`.
+
+**The handover is removed down every path out of the route**, including the
+failures, which are the ones that leaked in practice. Leaving it put a second,
+unrecorded copy of every uploaded document in the system temp directory, at
+default permissions, outside whatever the deployment locked down on
+`storage/` — and it survived the document's own `visibility`.
 
 ### What it is not yet
 
@@ -296,7 +311,12 @@ sqlite3 /srv/orpheus/data/orpheus.sqlite ".backup '/backup/orpheus-$(date +%F).s
 ```
 
 `storage/` must be backed up too — it holds the originals every extraction is
-derived from.
+derived from, and **nothing in Orpheus ever deletes from it**. There is no
+delete path in the codebase: no `DELETE FROM documents`, no unlink of a stored
+original. `delete` exists in the `ACTIONS` vocabulary and in `auth.py`, and
+nothing consumes it. Storage only grows, which is the right default for an
+audit trail and is not a retention policy — a deployment that needs one has to
+build it.
 
 ---
 

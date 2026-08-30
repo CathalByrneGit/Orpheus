@@ -368,3 +368,100 @@ def test_the_columns_route_is_not_shadowed_by_a_register_id():
              if method == "GET" and "/registers" in pattern.pattern]
     assert paths.index("^/registers/columns$") < \
         paths.index("^/registers/(?P<register_id>[^/]+)$")
+
+
+# -- the upload handover -----------------------------------------------------
+#
+# `ingest` content-addresses the original, so it needs a file rather than the
+# bytes. The three lines that write that file had two defects, and both are the
+# kind a test suite over the core could never have found: they live entirely in
+# the plugin, on the path only a browser takes.
+
+class _Uploaded:
+    """Datasette's uploaded-file object, minus the multipart parser."""
+
+    def __init__(self, filename, data=b"%PDF-1.4 fake"):
+        self.filename = filename
+        self._data = data
+
+    async def read(self):
+        return self._data
+
+    async def close(self):
+        pass
+
+
+class _UploadRequest:
+    method = "POST"
+    actor = {"id": "root"}
+    url_vars: dict = {}
+    args: dict = {}
+
+    def __init__(self, uploaded):
+        self._uploaded = uploaded
+
+    async def form(self, **kwargs):
+        return {"file": self._uploaded}
+
+
+def _drive_upload(monkeypatch, filename, ingest_status=200):
+    """Run the upload route as far as ingest, and report what it was handed."""
+    seen = {}
+
+    async def call(datasette, request, method, path, body=None):
+        if path == "/documents":
+            seen["path"] = body["path"]
+            seen["filename"] = body["filename"]
+            seen["existed_during_ingest"] = pathlib.Path(body["path"]).exists()
+            if ingest_status != 200:
+                return ingest_status, {"error": {"message": "refused"}}
+            return 200, {"document_id": "doc_1"}
+        return 200, {}
+
+    monkeypatch.setattr(plugin, "_call", call)
+    monkeypatch.setattr(plugin, "_config",
+                        lambda d: {"storage_root": "storage",
+                                   "max_file_size": 10 ** 7})
+    monkeypatch.setattr(plugin, "_redirect", lambda d, p, **kw: (p, kw))
+    asyncio.run(plugin.upload(None, _UploadRequest(_Uploaded(filename))))
+    return seen
+
+
+def test_an_uploaded_filename_is_never_used_as_a_path(monkeypatch, tmp_path):
+    """Datasette's multipart parser stores the filename verbatim -- it does no
+    path sanitisation at all -- so `Path(tmpdir) / "/etc/passwd"` is
+    `/etc/passwd`: an absolute name discards the directory it was joined to.
+    Writing the body there was an arbitrary file write as the server's user."""
+    target = tmp_path / "OWNED.txt"
+    seen = _drive_upload(monkeypatch, str(target))
+
+    assert not target.exists(), "an absolute filename escaped the handover"
+    assert pathlib.Path(seen["path"]).name == "upload"
+    # The real name still travels, because `ingest` reads the kind and the
+    # extension from it and it lands in `documents.filename`.
+    assert seen["filename"] == str(target)
+
+
+def test_walking_up_out_of_the_handover_directory_does_not_work(monkeypatch,
+                                                                tmp_path):
+    seen = _drive_upload(monkeypatch, "../../../" + str(tmp_path / "UP.txt"))
+    assert not (tmp_path / "UP.txt").exists()
+    assert pathlib.Path(seen["path"]).name == "upload"
+
+
+def test_the_handover_file_exists_while_ingest_runs_and_not_after(monkeypatch):
+    """It has to be there for `ingest` to hash and copy, and gone afterwards:
+    leaving it put a second, unrecorded copy of every uploaded document in the
+    system temp directory, at default permissions, outside whatever the
+    deployment locked down -- surviving the document's own `visibility`."""
+    seen = _drive_upload(monkeypatch, "report.pdf")
+    assert seen["existed_during_ingest"] is True
+    assert not pathlib.Path(seen["path"]).exists()
+    assert not pathlib.Path(seen["path"]).parent.exists()
+
+
+def test_it_is_cleaned_up_when_ingest_fails_too(monkeypatch):
+    # The failure path is the one that leaks in practice: a refused upload is
+    # the common case, and it returned before any cleanup could run.
+    seen = _drive_upload(monkeypatch, "report.pdf", ingest_status=400)
+    assert not pathlib.Path(seen["path"]).parent.exists()

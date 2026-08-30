@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import tempfile
 import urllib.parse
 from pathlib import Path
 
@@ -1173,47 +1174,69 @@ async def upload(datasette, request):
         return _redirect(datasette, "/-/orpheus",
                          error="Choose a file, or give a path already on the server.")
 
-    if has_file:
-        # Written to the store's own storage root rather than kept in memory:
-        # ingest hashes and content-addresses the original, and it needs a file.
-        import tempfile
-        from pathlib import Path
-        data = await uploaded.read()
-        await uploaded.close()
-        tmp = Path(tempfile.mkdtemp()) / uploaded.filename
-        tmp.write_bytes(data)
-        payload = {"path": str(tmp), "filename": uploaded.filename}
-    else:
-        # Still supported: a watched drop-directory hands over a path rather
-        # than pushing bytes through a browser.
-        payload = {"path": path}
+    # Held here so `finally` can remove it down every path out of this
+    # function, including the failures.
+    handover: tempfile.TemporaryDirectory | None = None
+    try:
+        if has_file:
+            # `ingest` hashes and content-addresses the original, so it needs a
+            # file rather than the bytes. This is the handover, and it is
+            # deliberately not named after what the browser called it.
+            #
+            # **The uploaded filename is attacker input and is never a path.**
+            # Datasette stores it verbatim -- its multipart parser does no path
+            # sanitisation at all -- and `Path(tmpdir) / "/etc/passwd"` is
+            # `/etc/passwd`: an absolute name discards the directory it was
+            # joined to, and `../..` walks out of it. Writing there was an
+            # arbitrary file write as whoever the server runs as. The real name
+            # travels as `filename`, which is what `ingest` reads the kind and
+            # the extension from and what lands in `documents.filename`; the
+            # file on disk is called `upload` and nothing depends on that.
+            handover = tempfile.TemporaryDirectory(prefix="orpheus-upload-")
+            tmp = Path(handover.name) / "upload"
+            tmp.write_bytes(await uploaded.read())
+            await uploaded.close()
+            payload = {"path": str(tmp), "filename": uploaded.filename}
+        else:
+            # Still supported: a watched drop-directory hands over a path rather
+            # than pushing bytes through a browser.
+            payload = {"path": path}
 
-    payload["storage_root"] = _config(datasette).get("storage_root", "storage")
-    status, document = await _call(datasette, request, "POST", "/documents", payload)
-    if status != 200:
-        return _redirect(datasette, "/-/orpheus",
-                         error="Ingest failed: " + document["error"]["message"])
+        payload["storage_root"] = _config(datasette).get("storage_root", "storage")
+        status, document = await _call(datasette, request, "POST", "/documents",
+                                       payload)
+        if status != 200:
+            return _redirect(datasette, "/-/orpheus",
+                             error="Ingest failed: " + document["error"]["message"])
 
-    document_id = document["document_id"]
-    target = f"/-/orpheus/document/{document_id}"
-    if document.get("duplicate"):
-        return _redirect(datasette, target,
-                         note="That content was already ingested; showing the "
-                              "existing document.")
+        document_id = document["document_id"]
+        target = f"/-/orpheus/document/{document_id}"
+        if document.get("duplicate"):
+            return _redirect(datasette, target,
+                             note="That content was already ingested; showing "
+                                  "the existing document.")
 
-    # Classification is a convenience; losing it should not stop the person
-    # reaching a document that ingested successfully.
-    await _call(datasette, request, "POST", f"/documents/{document_id}/classify",
-                {"tier": "local"})
+        # Classification is a convenience; losing it should not stop the person
+        # reaching a document that ingested successfully.
+        await _call(datasette, request, "POST",
+                    f"/documents/{document_id}/classify", {"tier": "local"})
 
-    status, extracted = await _call(
-        datasette, request, "POST", f"/documents/{document_id}/extract",
-        {"tier": tier, "engine": engine, "cloud_opt_in": cloud_opt_in})
-    if status != 200:
-        return _redirect(datasette, target,
-                         error="Ingested, but extraction failed: "
-                               + extracted["error"]["message"])
-    return _redirect(datasette, target, uploaded="1")
+        status, extracted = await _call(
+            datasette, request, "POST", f"/documents/{document_id}/extract",
+            {"tier": tier, "engine": engine, "cloud_opt_in": cloud_opt_in})
+        if status != 200:
+            return _redirect(datasette, target,
+                             error="Ingested, but extraction failed: "
+                                   + extracted["error"]["message"])
+        return _redirect(datasette, target, uploaded="1")
+    finally:
+        # By here `ingest` has copied the bytes into the storage root, which is
+        # the copy the store knows about. Leaving this one behind put a second,
+        # unrecorded copy of every uploaded document in the system temp
+        # directory, at default permissions, outside whatever the deployment
+        # locked down -- and it survived the document's own `visibility`.
+        if handover is not None:
+            handover.cleanup()
 
 
 async def document_page(datasette, request):
