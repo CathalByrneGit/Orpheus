@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Registers{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus') }}">&larr; Orpheus</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/wiki') }}">Wiki</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/ontology') }}">Ontology</a></p>
+
+<h1>Reference data</h1>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+{% if note %}<p class="message-info">{{ note }}</p>{% endif %}
+
+<p class="message-info" style="border-left:3px solid #1d4ed8">
+  <strong>A register is not a document and its rows never become facts.</strong>
+  Everything else here was read out of a document and carries a page and an
+  excerpt; a row in a companies register has neither. These rows feed one
+  thing: the evidence somebody weighs when deciding whether two pages are the
+  same organisation. {{ reading }}
+</p>
+
+<table style="width:100%;border-collapse:collapse">
+  <tr style="text-align:left;border-bottom:1px solid #ddd">
+    <th>Register</th><th>State</th><th>Rows</th><th></th></tr>
+  {% for r in registers %}
+  <tr style="border-bottom:1px solid #eee">
+    <td><a href="{{ urls.path('/-/orpheus/registers') }}?register_id={{ r.register_id }}">{{ r.name }}</a>
+        {% if r.origin %}<br><span style="color:#888;font-size:.9em">{{ r.origin }}</span>{% endif %}</td>
+    <td>{% if r.status == 'active' %}<strong style="color:#166534">active</strong>
+        {% else %}<span style="color:#b45309">{{ r.status }}</span>{% endif %}</td>
+    <td>{{ r.n_rows }}{% if r.n_rejected %} &middot; {{ r.n_rejected }} rejected{% endif %}</td>
+    <td>{% if r.status != 'active' %}<span style="color:#888">not evidence yet</span>{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" style="color:#666;padding:.6em 0">
+    No registers. <code>orpheus register --add file.csv</code>.</td></tr>
+  {% endfor %}
+</table>
+
+{# The column control. `load_csv` lifts three fields into real columns and
+   leaves the rest in values_json, where no query reaches them. #}
+<h2>Which columns can be queried</h2>
+
+<p style="color:#666">{{ columns_reading }}</p>
+
+<table style="border-collapse:collapse;margin-bottom:.8em">
+  <tbody>
+  <tr style="text-align:left;border-bottom:1px solid #ddd">
+    <th style="padding-right:2em">Column</th>
+    <th style="padding-right:2em">From key</th>
+    <th style="padding-right:2em">Carried by</th><th></th></tr>
+  <tr style="border-bottom:1px solid #eee">
+    <td style="padding-right:2em"><code>name</code></td>
+    <td style="padding-right:2em;color:#888">the name column</td>
+    <td colspan="2" style="color:#888">lifted at load; matching reads it</td></tr>
+  <tr style="border-bottom:1px solid #eee">
+    <td style="padding-right:2em"><code>identifier</code></td>
+    <td style="padding-right:2em;color:#888">the identifier column</td>
+    <td colspan="2" style="color:#888">lifted at load; the reason a register is worth having</td></tr>
+  {% for c in exposed %}
+  <tr style="border-bottom:1px solid #eee">
+    <td style="padding-right:2em"><code>{{ c.column }}</code></td>
+    <td style="padding-right:2em"><code>{{ c.key }}</code></td>
+    <td style="padding-right:2em">{{ c.n_rows }} of {{ n_rows }} row(s)</td>
+    <td>{% if is_admin %}
+      <form action="{{ urls.path('/-/orpheus/registers/act') }}" method="post"
+            style="display:inline">
+        <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+        <input type="hidden" name="action" value="hide">
+        <input type="hidden" name="column" value="{{ c.column }}">
+        {% if register %}<input type="hidden" name="register_id" value="{{ register.register_id }}">{% endif %}
+        <button type="submit">Hide</button>
+      </form>
+    {% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if is_admin %}
+<form action="{{ urls.path('/-/orpheus/registers/act') }}" method="post">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <input type="hidden" name="action" value="expose">
+  {% if register %}<input type="hidden" name="register_id" value="{{ register.register_id }}">{% endif %}
+  <label>expose the key <input type="text" name="key" placeholder="county"
+         style="width:12em" required></label>
+  <label style="margin-left:.6em">as <input type="text" name="as_column"
+         placeholder="(the same, lowercased)" style="width:12em"></label>
+  <button type="submit">Expose</button>
+  <input type="text" name="note" placeholder="why (optional)" style="width:16em">
+</form>
+<p style="color:#666;margin-top:.4em">
+  The column is computed from <code>values_json</code> when it is read, so
+  nothing is copied and hiding one loses nothing. Case-sensitive: it must match
+  the register's own column name. Give it another name with <em>as</em> when the
+  key is called something <code>register_rows</code> already uses &mdash;
+  <code>status</code> is the common one, because that is the row's review state.
+</p>
+{% endif %}
+
+{% if register %}
+<hr>
+<h2>{{ register.name }} <span style="color:#888;font-weight:normal">&mdash; {{ register.status }}</span></h2>
+
+{% if register.status != 'active' %}
+<p class="message-info" style="border-left:3px solid #b45309">
+  Staged means present, readable and <strong>not evidence</strong>. Look for
+  rows that would match the wrong thing &mdash; a blank or boilerplate name, an
+  identifier in the name column, a header read as data &mdash; and reject them
+  before promoting.
+</p>
+{% endif %}
+
+{% if exposed %}
+<form method="get" action="{{ urls.path('/-/orpheus/registers') }}"
+      style="margin:.6em 0">
+  <input type="hidden" name="register_id" value="{{ register.register_id }}">
+  <label>where
+    <select name="column">
+      <option value="">(no filter)</option>
+      {% for c in exposed %}
+      <option value="{{ c.column }}"
+        {% if filtered and filtered[0] == c.column %}selected{% endif %}>{{ c.column }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  = <input type="text" name="value"
+           value="{{ filtered[1] if filtered else '' }}" style="width:12em">
+  <button type="submit">Filter</button>
+  {% if filtered %}
+  <a href="{{ urls.path('/-/orpheus/registers') }}?register_id={{ register.register_id }}"
+     style="margin-left:.6em">clear</a>
+  {% endif %}
+</form>
+{% endif %}
+
+<table style="width:100%;border-collapse:collapse">
+  <tr style="text-align:left;border-bottom:1px solid #ddd">
+    <th>#</th><th>Name</th><th>Identifier</th>
+    {% for c in exposed %}<th>{{ c.column }}</th>{% endfor %}
+    <th>State</th>{% if is_admin %}<th></th>{% endif %}</tr>
+  {% for row in rows %}
+  <tr style="border-bottom:1px solid #eee{% if row.status == 'rejected' %};color:#999;text-decoration:line-through{% endif %}">
+    <td>{{ row.row_no }}</td>
+    <td>{{ row.name or '' }}</td>
+    <td><code>{{ row.identifier or '' }}</code></td>
+    {% for c in exposed %}<td>{{ row[c.column] if row[c.column] is not none else '' }}</td>{% endfor %}
+    <td>{{ row.status }}</td>
+    {% if is_admin %}
+    <td>{% if row.status != 'rejected' %}
+      <form action="{{ urls.path('/-/orpheus/registers/act') }}" method="post"
+            style="display:inline">
+        <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+        <input type="hidden" name="action" value="reject_row">
+        <input type="hidden" name="register_id" value="{{ register.register_id }}">
+        <input type="hidden" name="row_no" value="{{ row.row_no }}">
+        <button type="submit">Do not use</button>
+      </form>
+    {% endif %}</td>
+    {% endif %}
+  </tr>
+  {% else %}
+  <tr><td colspan="9" style="color:#666;padding:.6em 0">
+    {% if filtered %}No row where <code>{{ filtered[0] }}</code> =
+      <code>{{ filtered[1] }}</code>.{% else %}No rows.{% endif %}</td></tr>
+  {% endfor %}
+</table>
+
+{% if is_admin %}
+<form action="{{ urls.path('/-/orpheus/registers/act') }}" method="post"
+      style="margin-top:.8em">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <input type="hidden" name="register_id" value="{{ register.register_id }}">
+  <input type="text" name="note" placeholder="why (optional)" style="width:20em">
+  {% if register.status == 'active' %}
+  <button type="submit" name="action" value="withdraw">Stop it counting</button>
+  {% else %}
+  <button type="submit" name="action" value="promote">Vouch for it</button>
+  {% endif %}
+</form>
+{% endif %}
+{% endif %}
+{% endblock %}

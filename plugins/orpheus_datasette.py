@@ -252,6 +252,8 @@ def register_routes():
         (r"^/-/orpheus/network$", network_page),
         (r"^/-/orpheus/map$", map_page),
         (r"^/-/orpheus/static/(?P<path>.*)$", static_asset),
+        (r"^/-/orpheus/registers$", registers_page),
+        (r"^/-/orpheus/registers/act$", registers_act),
         (r"^/-/orpheus/ontology$", ontology_page),
         (r"^/-/orpheus/ontology/act$", ontology_act),
         (r"^/-/orpheus/questions$", questions_page),
@@ -271,7 +273,9 @@ def menu_links(datasette, actor):
     return [{"href": datasette.urls.path("/-/orpheus"), "label": "Documents"},
             {"href": datasette.urls.path("/-/orpheus/wiki"), "label": "Wiki"},
             {"href": datasette.urls.path("/-/orpheus/ontology"),
-             "label": "Ontology"}]
+             "label": "Ontology"},
+            {"href": datasette.urls.path("/-/orpheus/registers"),
+             "label": "Registers"}]
 
 
 @hookimpl
@@ -715,6 +719,95 @@ async def network_page(datasette, request):
         "path_to": path_to,
         "error": request.args.get("error") or path_error,
     })
+
+
+async def registers_page(datasette, request):
+    """Reference data, and which of its columns anybody can query.
+
+    Registers had no page at all: they were CLI, API and agent tools only,
+    which is a strange place for the one thing in the store a person is asked
+    to vouch for. This is that page, and the column control lives on it because
+    "I want to filter by county" is a thing you discover while looking at rows.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    register_id = request.args.get("register_id") or ""
+    status, listed = await _call(datasette, request, "GET", "/registers")
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus",
+                         error=listed["error"]["message"])
+    _, columns = await _call(datasette, request, "GET", "/registers/columns")
+
+    register, rows, filtered = None, [], None
+    if register_id:
+        body = {"limit": "50"}
+        if request.args.get("column"):
+            body["column"] = request.args.get("column")
+            body["value"] = request.args.get("value") or ""
+            filtered = (body["column"], body["value"])
+        status, one = await _call(
+            datasette, request, "GET", f"/registers/{register_id}", body)
+        if status != 200:
+            return _redirect(datasette, "/-/orpheus/registers",
+                             error=one["error"]["message"])
+        register, rows = one["register"], one["rows"]
+
+    return await _render(datasette, request, "orpheus_registers.html", {
+        "registers": listed.get("registers", []),
+        "reading": listed.get("reading"),
+        "exposed": (columns or {}).get("exposed", []),
+        "n_rows": (columns or {}).get("n_rows", 0),
+        "columns_reading": (columns or {}).get("reading"),
+        "register": register, "rows": rows, "filtered": filtered,
+        "is_admin": await _is_admin(datasette, request),
+        "error": request.args.get("error"),
+        "note": request.args.get("note"),
+    })
+
+
+async def registers_act(datasette, request):
+    """Expose a column, hide one, promote a register, reject a row."""
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    if request.method != "POST":
+        return _redirect(datasette, "/-/orpheus/registers")
+
+    form = await request.post_vars()
+    action = form.get("action")
+    register_id = form.get("register_id") or ""
+    back = (f"/-/orpheus/registers?register_id={register_id}"
+            if register_id else "/-/orpheus/registers")
+
+    routes = {
+        "expose": ("/registers/columns/expose",
+                   {"key": form.get("key"),
+                    "as_column": form.get("as_column") or None,
+                    "note": form.get("note") or None}),
+        "hide": ("/registers/columns/hide",
+                 {"column": form.get("column"), "note": form.get("note") or None}),
+        "promote": (f"/registers/{register_id}/promote",
+                    {"note": form.get("note") or None}),
+        "withdraw": (f"/registers/{register_id}/withdraw",
+                     {"note": form.get("note") or None}),
+        "reject_row": (f"/registers/{register_id}/rows/{form.get('row_no')}/reject",
+                       {"note": form.get("note") or None}),
+    }
+    if action not in routes:
+        return _redirect(datasette, back, error=f"Unknown action {action!r}.")
+    path, body = routes[action]
+    status, result = await _call(datasette, request, "POST", path, body)
+    if status != 200:
+        return _redirect(datasette, back, error=result["error"]["message"])
+
+    notes = {
+        "expose": lambda r: f"{r['column']} <- {r['key']!r}. {r['reading']}",
+        "hide": lambda r: f"{r['column']} is gone. {r['reading']}",
+        "promote": lambda r: (f"{r['rows_accepted']} row(s) accepted. It counts "
+                              "as evidence now."),
+        "withdraw": lambda r: "Withdrawn. It stops counting and stays readable.",
+        "reject_row": lambda r: f"Row {r['row_no']} is {r['status']}.",
+    }
+    return _redirect(datasette, back, note=notes[action](result))
 
 
 async def _is_admin(datasette, request) -> bool:

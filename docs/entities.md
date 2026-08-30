@@ -284,6 +284,69 @@ row stays readable and stops counting; a withdrawn register stops counting and
 stays readable, because one somebody relied on is part of how a decision was
 reached.
 
+#### Only three of its columns can be queried, until you say otherwise
+
+`load_csv` lifts `name`, `naive_key` and `identifier` into real indexed columns,
+because matching reads them. Everything else in the CSV goes into `values_json`,
+where it is readable and **unqueryable** — a companies register with a county, a
+SIC code or a status column cannot be filtered on any of them, and "show me the
+dissolved rows" is a question nobody can ask.
+
+A [generated column](https://sqlite.org/gencol.html) is the way out, and it is
+the whole of why SQLite can hold documents like this:
+
+```bash
+orpheus register --columns                       # what is queryable now
+orpheus register --expose county                 # lift one key out
+orpheus register --expose status --as company_status
+orpheus register reg_... --where county --equals Mayo
+```
+
+or the control on `/-/orpheus/registers`, which is where the wish usually
+arrives — you notice you want to filter by county while looking at rows.
+
+**Nothing is copied.** The column is computed from `values_json` on read, so
+the rows stay exactly the bytes that were loaded — which matters more here than
+elsewhere, because a register is only worth what its provenance is worth. It
+follows that hiding one loses nothing and can be undone, unlike
+[dropping a property](provenance-and-amendment.md), which discards values.
+
+**What it is worth tracks selectivity, not table size.** Measured on a real
+20,000-row register:
+
+| | scan + `json_extract` | exposed + index | |
+|---|---|---|---|
+| `count(*)` on the column | 8.9 ms | 0.15 ms | **58×** |
+| fetching 1/6 of the table | 10.2 ms | 2.3 ms | 4.4× |
+| exposed **and** un-exposed predicate | 10.1 ms | 2.8 ms | 3.6× |
+
+The first is the honest headline for an aggregate or a rare value. The other two
+are what most filtering looks like: once rows have to be fetched, retrieval
+dominates and the index saves the predicate rather than the work. The third row
+is the one to design around — SQLite searches the index for the exposed half and
+then extracts JSON from every row it returns, so a pair of predicates is worth a
+pair of exposed columns.
+
+Three things the implementation had to settle, each found by running it:
+
+- **A key whose name the table already owns needs an alias.** `register_rows`
+  has a `status` — the row's review state — and a companies register with its
+  own `status` column is the ordinary case, not the exotic one. Hence `--as`.
+- **A key containing a double quote is refused.** `$."k"` cannot address it, and
+  the failure is silent: the path parses and extracts NULL from every row.
+- **Exposing a key no register carries says so.** The column exists and every
+  value in it is null, which looks identical to a filter that matches nothing.
+
+There is no table recording which columns are exposed — the column either exists
+or it does not, and `exposed_columns()` reads it back out of the schema. A second
+copy of that fact is a second thing that can be wrong.
+
+**Generated columns arrived in SQLite 3.31.0 (2020-01-22)**, so this is checked
+where it is used rather than when a store is opened: a deployment that never
+exposes a column works without it. Worth knowing before you do: a store with an
+exposed column cannot be opened by an older SQLite at all, because it cannot
+parse the schema.
+
 **And it can argue against.** Everything else in the dossier can only argue
 *for* a merge or fail to. A register giving two pages different registered
 numbers is the first thing in this store that says *no* with something better

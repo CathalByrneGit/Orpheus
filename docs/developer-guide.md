@@ -306,6 +306,7 @@ orpheus/
 │   ├── analysis.py          # step 9, corpus escalation
 │   ├── ontology.py          # surveying a corpus that has no bundle yet
 │   ├── registers.py         # reference data, held apart from the corpus
+│   │                        # (expose_column: a JSON key -> indexed column)
 │   ├── quality.py           # the report Phase 1 exists to produce
 │   ├── benchmark.py         # CUAD scoring
 │   ├── auth.py              # actors, tokens, permissions

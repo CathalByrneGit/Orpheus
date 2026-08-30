@@ -307,6 +307,28 @@ async def review_register(datasette, actor, register_id: str = "",
     return json.dumps(await _read(datasette, run), default=str)
 
 
+async def register_columns(datasette, actor):
+    """Which register keys are queryable, and which are only readable."""
+    def run(store):
+        exposed = registers_mod.exposed_columns(store)
+        return {
+            "exposed": exposed,
+            "n_rows": store.scalar("SELECT COUNT(*) FROM register_rows") or 0,
+            "reading": (
+                "`name`, `naive_key` and `identifier` are lifted out of every "
+                "register when it loads, because matching needs them. "
+                "Everything else sits in `values_json`, readable and "
+                "unqueryable, until somebody exposes it.\n"
+                "So a filter on an un-exposed key is not slow, it is "
+                "impossible -- say that rather than offering to scan. "
+                "Exposing one is a person's decision (it alters the table for "
+                "every register in the store) and you have no tool for it: "
+                "`orpheus register --expose <key>`, or the control on "
+                "/-/orpheus/registers."),
+        }
+    return json.dumps(await _read(datasette, run), default=str)
+
+
 async def reject_register_row(datasette, actor, register_id: str, row_no: int,
                               note: str):
     """Mark one register row as not to be used, with a reason."""
@@ -726,6 +748,16 @@ def _tools():
                 "limit": {"type": "integer"}},
                 "required": []},
             fn=review_register,
+        ),
+        AgentTool(
+            name="orpheus_register_columns",
+            description=_PREFER + "Which columns of a register can actually be "
+                        "filtered on. Everything except name and identifier is "
+                        "inside a JSON blob no query reaches until somebody "
+                        "exposes it — so check here before offering to filter "
+                        "a register by anything else.",
+            input_schema={"type": "object", "properties": {}, "required": []},
+            fn=register_columns,
         ),
         AgentTool(
             name="orpheus_reject_register_row",

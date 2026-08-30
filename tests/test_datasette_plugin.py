@@ -351,3 +351,20 @@ def test_the_ontology_pages_are_routed():
               plugin.menu_links(WithUrls(), {"id": "root"})]
     assert "Ontology" in labels
     assert plugin.menu_links(WithUrls(), None) == []
+
+
+def test_the_registers_page_is_routed():
+    routes = [pattern for pattern, _ in plugin.register_routes()]
+    assert r"^/-/orpheus/registers$" in routes
+    assert r"^/-/orpheus/registers/act$" in routes
+
+
+def test_the_columns_route_is_not_shadowed_by_a_register_id():
+    """`/registers/columns` and `/registers/<register_id>` both match the same
+    path. First match wins, so the specific one has to be declared first --
+    it 404'd as a register nobody created until it was."""
+    from orpheus import api
+    paths = [pattern.pattern for method, pattern, _fn, _perm in api._ROUTES
+             if method == "GET" and "/registers" in pattern.pattern]
+    assert paths.index("^/registers/columns$") < \
+        paths.index("^/registers/(?P<register_id>[^/]+)$")

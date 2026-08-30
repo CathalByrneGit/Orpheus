@@ -707,12 +707,55 @@ def list_registers(store, actor, body, **_):
                         "Only an `active` one bears on a merge.")}
 
 
+# Declared before `/registers/<register_id>`, which would otherwise
+# match "columns" as a register id and 404. First match wins.
+@route("GET", "/registers/columns")
+def get_register_columns(store, actor, body, **_):
+    """Which register keys are queryable, and how many rows carry each."""
+    return {"exposed": registers_mod.exposed_columns(store),
+            "n_rows": store.scalar("SELECT COUNT(*) FROM register_rows") or 0,
+            "reading": ("Everything except name, naive_key and identifier "
+                        "lives in values_json, where no query reaches it. An "
+                        "exposed column is computed from that JSON on read -- "
+                        "nothing is copied, and hiding one loses nothing.")}
+
+
+@route("POST", "/registers/columns/expose")
+def post_expose_column(store, actor, body, **_):
+    """Lift one key out of values_json into an indexed column.
+
+    Administrator-only for the same reason promoting a register is: this
+    changes the shape of the table every later answer is read from.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Exposing a column alters `register_rows` for every register in "
+            "the store, so it is an administrator decision.")
+    return registers_mod.expose_column(
+        store, body.get("key") or "", actor_id=_actor_id(actor),
+        note=body.get("note"), as_column=body.get("as_column") or None)
+
+
+@route("POST", "/registers/columns/hide")
+def post_hide_column(store, actor, body, **_):
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Exposing a column alters `register_rows` for every register in "
+            "the store, so it is an administrator decision.")
+    return registers_mod.hide_column(
+        store, body.get("column") or "", actor_id=_actor_id(actor),
+        note=body.get("note"))
+
+
 @route("GET", r"/registers/(?P<register_id>[^/]+)")
 def get_register(store, register_id, actor, body, **_):
     return {"register": registers_mod.get_register(store, register_id),
             "rows": registers_mod.rows(store, register_id,
                                        status=body.get("status"),
-                                       limit=_int(body, "limit", 100))}
+                                       limit=_int(body, "limit", 100),
+                                       column=body.get("column") or None,
+                                       value=body.get("value")),
+            "exposed": registers_mod.exposed_columns(store)}
 
 
 @route("POST", r"/registers/(?P<register_id>[^/]+)/rows/(?P<row_no>\d+)/reject")

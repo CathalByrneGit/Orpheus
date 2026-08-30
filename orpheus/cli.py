@@ -816,9 +816,40 @@ def cmd_register(args) -> int:
                   f"{row['status']:10} {row['n_rows']} row(s){rejected}")
         return 0
 
+    if args.columns:
+        store = open_store(args, mode="read")
+        try:
+            found = registers_mod.exposed_columns(store)
+            total = store.scalar("SELECT COUNT(*) FROM register_rows") or 0
+        finally:
+            store.close()
+        if args.json:
+            emit({"exposed": found, "n_rows": total}, True)
+            return 0
+        if not found:
+            print("No exposed columns. Everything except name, naive_key and "
+                  "identifier is inside values_json, where no query reaches "
+                  "it.\n  `orpheus register --expose county` to change that.")
+            return 0
+        for column in found:
+            print(f"  {column['column']:24} <- {column['key']!r:24} "
+                  f"{column['n_rows']} of {total} row(s)")
+        return 0
+
     store = open_store(args, mode="write")
     try:
-        if args.add:
+        if args.expose:
+            result = registers_mod.expose_column(store, args.expose,
+                                                 actor_id=args.actor_id,
+                                                 note=args.note,
+                                                 as_column=args.as_column)
+            store.conn.commit()
+        elif args.hide:
+            result = registers_mod.hide_column(store, args.hide,
+                                               actor_id=args.actor_id,
+                                               note=args.note)
+            store.conn.commit()
+        elif args.add:
             register_id = registers_mod.create_register(
                 store, args.name or Path(args.add).stem,
                 description=args.description, origin=args.origin or args.add,
@@ -847,8 +878,9 @@ def cmd_register(args) -> int:
         else:
             result = {"register": registers_mod.get_register(
                           store, args.register_id),
-                      "rows": registers_mod.rows(store, args.register_id,
-                                                 limit=args.limit)}
+                      "rows": registers_mod.rows(
+                          store, args.register_id, limit=args.limit,
+                          column=args.where, value=args.equals)}
     finally:
         store.close()
 
@@ -856,7 +888,13 @@ def cmd_register(args) -> int:
         emit(result, True)
         return 0
 
-    if args.add:
+    if args.expose:
+        print(f"{result['column']} <- {result['key']!r}. {result['reading']}")
+        print("  Computed from values_json on read, so nothing was copied and "
+              "the rows are the bytes that were loaded.")
+    elif args.hide:
+        print(f"{result['column']} is gone. {result['reading']}")
+    elif args.add:
         print(f"{result['n_rows']} row(s) staged as {result['register_id']}.")
         print(f"  {result['caveat']}")
         print("  Staged means readable and not yet evidence. Look it over, "
@@ -1509,6 +1547,21 @@ def build_parser() -> argparse.ArgumentParser:
                           help="vouch for it, and let it count as evidence")
     register.add_argument("--withdraw", action="store_true",
                           help="stop it counting, without deleting it")
+    register.add_argument("--columns", action="store_true",
+                          help="which register keys are queryable")
+    register.add_argument("--expose", metavar="KEY",
+                          help="lift one key out of values_json into an "
+                               "indexed column, so rows can be filtered on it")
+    register.add_argument("--as", dest="as_column", metavar="COLUMN",
+                          help="expose it under this name instead, for a key "
+                               "whose own name a register_rows column has")
+    register.add_argument("--hide", metavar="COLUMN",
+                          help="drop an exposed column; the values stay in "
+                               "values_json and nothing is lost")
+    register.add_argument("--where", metavar="COLUMN",
+                          help="filter rows on an exposed column")
+    register.add_argument("--equals", metavar="VALUE",
+                          help="the value --where must match")
     register.add_argument("--limit", type=int, default=20)
     register.add_argument("--note")
     register.add_argument("--actor-id")

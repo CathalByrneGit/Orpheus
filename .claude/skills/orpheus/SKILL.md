@@ -287,6 +287,15 @@ orpheus --db store.sqlite register reg_...            # look it over
 A `staged` register is readable and **is not evidence**. Say so when you report
 one — "the register says X" is wrong until somebody has promoted it.
 
+**Only three of its columns can be filtered on**: `name`, `naive_key` and
+`identifier`, lifted out when it loaded. Everything else sits in `values_json`,
+readable and unqueryable. So "filter the register by county" is not slow, it is
+*impossible* until somebody exposes that key — check
+`orpheus_register_columns` before offering, and say which it is. Exposing one
+alters the table for every register in the store, so it is a person's decision
+and you have no tool for it: `orpheus register --expose county`, or the control
+on `/-/orpheus/registers`.
+
 Helping review one is a good use of you: look for rows that would match the
 wrong thing — a blank or boilerplate name, an identifier sitting in the name
 column, a header row read as data — and say which row numbers look wrong and

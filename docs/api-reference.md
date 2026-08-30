@@ -324,10 +324,21 @@ See [Reading with the machine](reading-companion.md).
 | Method | Path | Permission | Notes |
 |---|---|---|---|
 | `GET` | `/registers` | actor | Every register and whether anybody vouched for it |
-| `GET` | `/registers/<id>` | actor | The register and its rows |
+| `GET` | `/registers/<id>` | actor | The register and its rows; `?column=`&`?value=` filter on an exposed column |
+| `GET` | `/registers/columns` | actor | Which register keys are queryable |
+| `POST` | `/registers/columns/expose` | **administrator** | `key`, `as_column`, `note` |
+| `POST` | `/registers/columns/hide` | **administrator** | `column`, `note` |
 | `POST` | `/registers/<id>/rows/<n>/reject` | **administrator** | `note` |
 | `POST` | `/registers/<id>/promote` | **administrator** | Makes it evidence |
 | `POST` | `/registers/<id>/withdraw` | **administrator** | Stops it counting; keeps it readable |
+
+`/registers/columns` is declared before `/registers/<register_id>`: both match
+the same path and first match wins, so the specific one has to come first.
+
+Exposing a column is administrator-only because it alters `register_rows` for
+every register in the store — not because the values are sensitive. It copies
+nothing: the column is computed from `values_json` on read, so hiding one loses
+nothing.
 
 Reading a staged register is deliberately not restricted — being looked at is
 what staging is for. Promoting is administrator-only because reference data

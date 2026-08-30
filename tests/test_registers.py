@@ -18,7 +18,8 @@ import pytest
 
 import orpheus.bundle as bundle_mod
 from orpheus.entities import create_entity, resolution_evidence
-from orpheus.registers import (bearing_on, create_register, get_register,
+from orpheus.registers import (bearing_on, create_register, expose_column,
+                               exposed_columns, get_register, hide_column,
                                list_registers, load_csv, matches_for, promote,
                                review_row, rows, withdraw)
 from orpheus.utils import NotFound, OrpheusError
@@ -348,3 +349,188 @@ def test_the_api_says_a_staged_register_is_not_evidence(store_with_bundle):
     _, payload = handle(store, "GET", "/registers", {},
                         actor={"actor_id": "act_a", "is_admin": 1})
     assert "is not evidence" in payload["reading"]
+
+
+# ---------------------------------------------------------------------------
+# Exposing a column
+# ---------------------------------------------------------------------------
+#
+# `load_csv` lifts three fields into real columns and leaves the rest in
+# `values_json`, readable and unqueryable. These defend the way out of that, and
+# the two properties that make it safe to offer: the values are never copied,
+# and a column nobody exposed cannot be filtered on.
+
+WIDE_CSV = """name,company_number,county,status
+Ardmore Digital Ltd,482991,Mayo,Normal
+Kestrel Medical Group,551200,Dublin,Normal
+Halloran Instruments,771020,Mayo,Dissolved
+"""
+
+
+@pytest.fixture
+def wide(store_with_bundle):
+    store = store_with_bundle
+    register_id = create_register(store, "Companies Register", actor_id="act_a")
+    load_csv(store, register_id, WIDE_CSV, type_id="Company", actor_id="act_a")
+    store.conn.commit()
+    return store, register_id
+
+
+def test_a_key_in_the_json_is_not_queryable_until_it_is_exposed(wide):
+    store, register_id = wide
+    assert exposed_columns(store) == []
+    with pytest.raises(OrpheusError) as refused:
+        rows(store, register_id, column="county", value="Mayo")
+    assert "not an exposed column" in str(refused.value)
+
+
+def test_exposing_a_key_makes_it_filterable(wide):
+    store, register_id = wide
+    result = expose_column(store, "county", actor_id="act_a")
+    assert (result["column"], result["n_rows"], result["n_total"]) == \
+        ("county", 3, 3)
+
+    found = rows(store, register_id, column="county", value="Mayo")
+    assert len(found) == 2
+    assert all(r["values"]["county"] == "Mayo" for r in found)
+    # It reads through on the row too, so anything doing dict(row) sees it.
+    assert found[0]["county"] == "Mayo"
+
+
+def test_the_index_is_used_rather_than_a_scan(wide):
+    """The whole point. Measured on register-shaped rows the gap is 82x at
+    5,000 rows and 96x at 200,000 -- but what makes it a different kind of
+    query rather than a faster one is the plan."""
+    store, _ = wide
+    expose_column(store, "county", actor_id="act_a")
+    plan = " ".join(str(r["detail"]) for r in store.query(
+        'EXPLAIN QUERY PLAN SELECT * FROM register_rows WHERE "county" = ?',
+        ("Mayo",)))
+    assert "USING INDEX" in plan and "SCAN" not in plan
+
+
+def test_nothing_is_copied_and_nothing_is_lost(wide):
+    """An exposed column holds no data of its own, which is why hiding one is
+    safe in a way `schema_ops.drop_property` is not."""
+    store, register_id = wide
+    before = [r["values_json"] for r in store.query(
+        "SELECT values_json FROM register_rows ORDER BY row_no")]
+
+    expose_column(store, "county", actor_id="act_a")
+    assert hide_column(store, "county", actor_id="act_a")["key"] == "county"
+
+    after = [r["values_json"] for r in store.query(
+        "SELECT values_json FROM register_rows ORDER BY row_no")]
+    assert after == before
+    assert exposed_columns(store) == []
+    # And it can be exposed again, which is what makes it undoable.
+    expose_column(store, "county", actor_id="act_a")
+    assert len(rows(store, register_id, column="county", value="Mayo")) == 2
+
+
+def test_a_key_no_register_carries_says_so_rather_than_looking_fine(wide):
+    store, _ = wide
+    result = expose_column(store, "Sic Code", actor_id="act_a")
+    # The column exists and every value in it is null. Saying so beats letting
+    # somebody discover it by filtering and getting nothing back.
+    assert (result["column"], result["n_rows"]) == ("sic_code", 0)
+    assert "No row carries" in result["reading"]
+
+
+def test_a_column_the_table_owns_cannot_be_shadowed(wide):
+    store, _ = wide
+    for key in ("name", "identifier", "values_json", "Status"):
+        with pytest.raises(OrpheusError) as refused:
+            expose_column(store, key, actor_id="act_a")
+        assert "already owns" in str(refused.value)
+
+
+def test_a_key_a_json_path_cannot_address_is_refused(wide):
+    """`$."k"` cannot express a key containing a quote, and the failure is
+    silent: the path parses and extracts NULL from every row."""
+    store, _ = wide
+    with pytest.raises(OrpheusError) as refused:
+        expose_column(store, 'we"ird', actor_id="act_a")
+    assert "double quote" in str(refused.value)
+
+
+def test_exposing_twice_is_refused_with_the_key_it_came_from(wide):
+    store, _ = wide
+    expose_column(store, "county", actor_id="act_a")
+    with pytest.raises(OrpheusError) as refused:
+        expose_column(store, "County", actor_id="act_a")
+    assert "already exposed" in str(refused.value)
+
+
+def test_what_is_exposed_is_read_from_the_schema_not_a_second_table(wide):
+    """No table records this. The column either exists or it does not, and a
+    second copy of that fact is a second thing that can be wrong."""
+    store, _ = wide
+    expose_column(store, "county", actor_id="act_a")
+    found = exposed_columns(store)
+    assert [(c["column"], c["key"], c["n_rows"]) for c in found] == \
+        [("county", "county", 3)]
+    # Prove it: drop the column behind the module's back and it stops being
+    # reported, because the schema is the only place this is written down.
+    # The index has to go first -- SQLite refuses to leave one dangling, which
+    # is why `hide_column` drops them in that order.
+    store.execute("DROP INDEX idx_register_rows_county")
+    store.execute('ALTER TABLE register_rows DROP COLUMN "county"')
+    assert exposed_columns(store) == []
+
+
+def test_the_decision_is_recorded_like_every_other(wide):
+    store, _ = wide
+    expose_column(store, "county", actor_id="act_a",
+                  note="reviewers keep asking for it")
+    edit = store.one("SELECT * FROM edit_history WHERE action = 'expose_column'")
+    assert edit["note"] == "reviewers keep asking for it"
+    assert edit["edited_by"] == "act_a"
+
+
+def test_hiding_something_that_is_not_exposed(wide):
+    store, _ = wide
+    with pytest.raises(NotFound):
+        hide_column(store, "county", actor_id="act_a")
+
+
+def test_a_key_whose_name_the_table_owns_can_be_exposed_under_another(wide):
+    """`register_rows` has a `status` -- the review state of the row -- and a
+    companies register with its own `status` column is the ordinary case, not
+    the exotic one. Found by loading a real 20,000-row register."""
+    store, register_id = wide
+    result = expose_column(store, "status", as_column="company_status",
+                           actor_id="act_a")
+    assert (result["column"], result["key"]) == ("company_status", "status")
+    found = rows(store, register_id, column="company_status", value="Dissolved")
+    assert len(found) == 1
+    assert found[0]["values"]["status"] == "Dissolved"
+    # The row's own review state is untouched, which is the collision this
+    # avoided.
+    assert found[0]["status"] == "staged"
+
+
+def test_the_index_only_covers_the_half_that_was_exposed(wide):
+    """Worth knowing before designing around this: SQLite uses the index for
+    the exposed predicate and then extracts JSON for every row it returns. On a
+    real register that made a two-predicate filter 3.6x rather than 58x. A pair
+    of predicates is worth a pair of exposed columns."""
+    store, register_id = wide
+    expose_column(store, "county", actor_id="act_a")
+    mixed = store.query(
+        'EXPLAIN QUERY PLAN SELECT row_no FROM register_rows '
+        'WHERE "county" = ? AND json_extract(values_json, \'$.status\') = ?',
+        ("Mayo", "Dissolved"))
+    plan = " ".join(str(r["detail"]) for r in mixed)
+    assert "USING INDEX" in plan          # the exposed half is a search...
+    assert store.query(
+        "SELECT row_no FROM register_rows WHERE \"county\" = ? "
+        "AND json_extract(values_json, '$.status') = ?",
+        ("Mayo", "Dissolved"))            # ...and the other half still works
+
+    # Exposing the second one is what makes both predicates indexed.
+    expose_column(store, "status", as_column="company_status", actor_id="act_a")
+    both = " ".join(str(r["detail"]) for r in store.query(
+        'EXPLAIN QUERY PLAN SELECT row_no FROM register_rows '
+        'WHERE "county" = ? AND "company_status" = ?', ("Mayo", "Dissolved")))
+    assert "USING INDEX" in both and "SCAN" not in both
