@@ -1,0 +1,20 @@
+SERVICES AGREEMENT
+
+Reference: HSE/2024/0117
+Sector: health
+Jurisdiction: Ireland
+
+This Agreement is made on 3 March 2024 between Ardmore Digital Limited,
+a company registered in Ireland under number 482991, having its registered
+office at 12 Ushers Quay, Dublin 8 ("the Supplier"), and the Health Service
+Executive ("the Client").
+
+1. Term. This Agreement commences on 1 April 2024 and terminates on
+   31 March 2027.
+
+2. Charges. The Client shall pay EUR 250,000 per annum.
+
+3. Governing law. This Agreement is governed by the laws of Ireland.
+
+Signed for and on behalf of Ardmore Digital Limited
+Nuala Ryan, Managing Director
