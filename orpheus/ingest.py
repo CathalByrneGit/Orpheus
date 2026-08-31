@@ -19,7 +19,7 @@ from . import textract
 from .audit import record_edit
 from .rubric import VISIBILITY
 from .store import Store
-from .utils import OrpheusError, new_id, now, require_choice
+from .utils import NotFound, OrpheusError, new_id, now, require_choice
 
 
 def storage_path_for(root: str | Path, file_hash: str, extension: str) -> Path:
@@ -176,6 +176,107 @@ def _apply_ocr(pages: list[dict], page_numbers: list[int], stored: Path,
 # ---------------------------------------------------------------------------
 # Reading a document back
 # ---------------------------------------------------------------------------
+
+class OriginalUnavailable(OrpheusError):
+    """The row is there; the bytes behind it are not what they should be.
+
+    `reason` says which, because the three call for different responses and a
+    single "could not serve that" would hide the one that matters:
+
+    - `not_stored` -- the row never recorded a path.
+    - `misfiled`   -- the path is not where a document of that hash belongs.
+    - `missing`    -- the path is right and nothing is there.
+    - `altered`    -- something is there and it is not what was ingested.
+    """
+
+    def __init__(self, message: str, *, reason: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+def original(store: Store, document_id: str, *, verify: bool = True) -> dict:
+    """The file that was ingested, located and checked before it is handed back.
+
+    The docstring at the top of this module promises the original is kept "so
+    an extraction can always be re-run against exactly the bytes it was derived
+    from". This is where that promise is made good, and the whole of it is in
+    the word *exactly*: a path that resolves is not enough, because the thing
+    at the end of it may have been replaced, truncated, or pruned and restored
+    from a backup taken at the wrong moment.
+
+    So the check that carries the weight is the hash. `file_hash` was computed
+    over the bytes at ingest and every excerpt, page number and character
+    offset in the store was computed from them. Re-reading it costs about
+    150ms for a 50MB file and is worth every one of them: it is the difference
+    between serving the document and serving whatever is at its address.
+
+    It also happens to be what makes trusting `storage_path` safe. That column
+    is a path in a database, and a database is a thing that gets written to; an
+    arbitrary value in it would otherwise be an arbitrary file read. Nothing an
+    attacker can point it at will hash to a digest recorded before they got
+    there. The layout check below is the cheap version of the same test --
+    content-addressed storage puts a document at exactly one place, so a path
+    that is not that place is wrong before anything is read.
+
+    `verify=False` skips only the re-read, for a caller that has already done
+    it or is about to stream the file and check as it goes. The layout check is
+    not optional.
+    """
+    document = get_document(store, document_id)
+    if document is None:
+        raise NotFound(f"No document {document_id!r}.")
+
+    recorded = document["storage_path"]
+    if not recorded:
+        raise OriginalUnavailable(
+            f"Document {document_id!r} has no stored original.",
+            reason="not_stored")
+
+    file_hash = document["file_hash"]
+    path = Path(recorded).resolve()
+    # `storage_path_for` puts it at `<root>/documents/<hash[:2]>/<hash>[.ext]`
+    # and nothing else ever writes this column, so anything else is a path the
+    # store did not choose.
+    if not (path.name == file_hash or path.name.startswith(f"{file_hash}.")) \
+            or path.parent.name != file_hash[:2] \
+            or path.parent.parent.name != "documents":
+        raise OriginalUnavailable(
+            f"The original of {document_id!r} is recorded at a path no "
+            f"document of that hash belongs at: {recorded}.",
+            reason="misfiled")
+
+    if not path.is_file():
+        raise OriginalUnavailable(
+            f"The original of {document_id!r} is recorded at {recorded}, and "
+            "there is nothing there. The row is intact; the file is not.",
+            reason="missing")
+
+    if verify:
+        found = hash_file(path)
+        if found != file_hash:
+            raise OriginalUnavailable(
+                f"The file stored for {document_id!r} is not the file that was "
+                f"ingested: recorded {file_hash[:12]}, found {found[:12]}. "
+                "Every excerpt and page offset in the store was computed from "
+                "the recorded bytes, so serving these would be serving a "
+                "different document under the same provenance.",
+                reason="altered")
+
+    return {
+        "document_id": document_id,
+        "path": path,
+        "filename": document["filename"],
+        # The recorded type, not a guess from the extension. It is what the
+        # uploader sent and what every other surface reports; disagreeing with
+        # it here would make the download a second opinion nobody asked for.
+        "media_type": document["mime_type"] or "application/octet-stream",
+        # From disk, because this is what a `Content-Length` has to match. When
+        # `verify` ran it is necessarily the recorded size as well.
+        "byte_size": path.stat().st_size,
+        "file_hash": file_hash,
+        "verified": verify,
+    }
+
 
 def get_document(store: Store, document_id: str) -> dict | None:
     return store.one("SELECT * FROM documents WHERE document_id = ?", (document_id,))

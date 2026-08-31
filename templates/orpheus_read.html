@@ -2,7 +2,11 @@
 {% block title %}Reading {{ document.filename }}{% endblock %}
 {% block content %}
 <p><a href="{{ urls.path('/-/orpheus/document/' + document.document_id) }}">&larr; {{ document.filename }}</a>
-   &middot; <a href="{{ urls.path('/-/orpheus') }}">Documents</a></p>
+   &middot; <a href="{{ urls.path('/-/orpheus') }}">Documents</a>
+   {%- if document.original and document.original.available %}
+   &middot; <a href="{{ urls.path('/-/orpheus/api/documents/' + document.document_id + '/original') }}"
+                target="_blank" rel="noopener">the original</a>
+   {%- endif %}</p>
 
 {% if error %}<p class="message-error">{{ error }}</p>{% endif %}
 {% if note %}<p class="message-info">{{ note }}</p>{% endif %}

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -250,6 +251,36 @@ def cmd_extract(args) -> int:
     # a success either: the caller gets a distinct status rather than a message
     # they have to parse.
     return 2 if result.get("model_error") else 0
+
+
+def cmd_original(args) -> int:
+    """Copy the file that was ingested back out.
+
+    Refuses rather than warns when the bytes on disk are not the bytes that
+    were ingested: a copy taken from a store that has drifted would carry the
+    document's name and provenance without being the document, and there is no
+    later point at which anyone would find that out.
+    """
+    store = open_store(args, mode="read")
+    try:
+        located = ingest_mod.original(store, args.document_id)
+    finally:
+        store.close()
+
+    if not args.to:
+        emit({k: str(v) for k, v in located.items()}, args.json)
+        return 0
+
+    destination = Path(args.to)
+    if destination.is_dir():
+        destination = destination / (Path(located["filename"]).name or "original")
+    if destination.exists() and not args.force:
+        raise OrpheusError(f"{destination} exists. Pass --force to overwrite.")
+    shutil.copyfile(located["path"], destination)
+    emit({"document_id": args.document_id, "written": str(destination),
+          "byte_size": located["byte_size"], "file_hash": located["file_hash"],
+          "verified": True}, args.json)
+    return 0
 
 
 def cmd_analyse(args) -> int:
@@ -1358,6 +1389,14 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--tier", default="local", choices=("local", "cloud"))
     ingest.add_argument("--engine")
     ingest.add_argument("--cloud-opt-in", action="store_true")
+
+    original = add("original", cmd_original,
+                   "copy the file that was ingested back out")
+    original.add_argument("document_id")
+    original.add_argument("--to", help="a file or a directory to write it to; "
+                                       "omit to report what is there")
+    original.add_argument("--force", action="store_true",
+                          help="overwrite the destination if it exists")
 
     extract = add("extract", cmd_extract, "extract from an ingested document")
     extract.add_argument("document_id")

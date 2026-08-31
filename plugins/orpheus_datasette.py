@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 import tempfile
 import urllib.parse
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from datasette import hookimpl
 from datasette.utils.asgi import Response
@@ -1099,7 +1100,67 @@ async def api_route(datasette, request):
 
     status, payload = await _call(datasette, request, request.method,
                                   "/" + rest, body)
+    if isinstance(payload, orpheus_api.FileBody):
+        return _send_file(request, payload,
+                          download="download" in request.args)
     return Response.json(payload, status=status)
+
+
+# A filename is user input on its way into a response header, which is two
+# problems at once: a newline would end the header and begin another, and a
+# separator would suggest a path. Both are replaced rather than rejected --
+# somebody's document should still arrive when its name is odd.
+_UNSAFE_IN_HEADER = re.compile(r'[\x00-\x1f\x7f"\\]')
+
+# Types a browser renders without running anything the uploader wrote. PDFs and
+# images are the point of the feature -- a reviewer wants to *look* at the
+# signature block, not find it in their downloads folder. Everything else is an
+# attachment, and `image/svg+xml` is deliberately not on this list: an SVG is a
+# document that can carry script, and rendering one inline would run it on
+# Datasette's own origin with the reviewer's session.
+_RENDERABLE = frozenset({
+    "application/pdf", "text/plain", "image/png", "image/jpeg", "image/gif",
+    "image/webp", "image/bmp", "image/tiff",
+})
+
+
+def _disposition(filename: str, media_type: str, download: bool) -> str:
+    name = PurePosixPath((filename or "").replace("\\", "/")).name
+    name = _UNSAFE_IN_HEADER.sub("_", name).strip(". ") or "download"
+    how = "attachment" if download or media_type not in _RENDERABLE else "inline"
+    # RFC 6266: the ASCII `filename` every client understands, and `filename*`
+    # for the ones that can spell the name the uploader actually used.
+    fallback = name.encode("ascii", "replace").decode("ascii")
+    return (f"{how}; filename=\"{fallback}\"; "
+            f"filename*=UTF-8''{urllib.parse.quote(name, safe='')}")
+
+
+def _send_file(request, body, *, download: bool) -> Response:
+    """Send a located original back.
+
+    The ETag is the document's SHA-256, which is not a cache heuristic here but
+    the document's identity: content-addressed storage means a given digest is
+    one sequence of bytes forever, so a client holding it needs nothing else.
+    `no-cache` pairs with it deliberately -- revalidate every time, which is
+    what makes the permission check run every time. `private` on top, because a
+    shared cache holding a permissioned document is the whole problem.
+    """
+    etag = f'"{body.file_hash}"'
+    headers = {
+        "etag": etag,
+        "cache-control": "private, no-cache",
+        "content-disposition": _disposition(body.filename, body.media_type,
+                                            download),
+        # The media type is the uploader's word for what this is, and it is
+        # served back unchanged. `nosniff` is what makes that safe: without it
+        # a browser may decide a mislabelled file is HTML and render it here,
+        # on this origin, with this reviewer's cookies.
+        "x-content-type-options": "nosniff",
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response("", status=304, headers=headers)
+    return Response(body.path.read_bytes(), status=200,
+                    content_type=body.media_type, headers=headers)
 
 
 # ---------------------------------------------------------------------------

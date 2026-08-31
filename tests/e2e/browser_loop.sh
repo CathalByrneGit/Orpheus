@@ -123,6 +123,61 @@ say "the document page renders every finding with its excerpt"
 grep -q "Extracted facts" "$WORK/doc.html" || fail "no findings section"
 grep -q "unconfirmed" "$WORK/doc.html" || fail "nothing is awaiting review"
 
+say "the original comes back byte for byte, through the whole stack"
+ORIGINAL="$BASE/-/orpheus/api/documents/$DOC/original"
+"${CURL[@]}" -D "$WORK/original.headers" -o "$WORK/original.pdf" "$ORIGINAL"
+cmp -s "$PDF" "$WORK/original.pdf" || fail "the file served back is not the file uploaded"
+HEADERS="$(tr -d '\r' < "$WORK/original.headers" | tr 'A-Z' 'a-z')"
+grep -q "^content-type: application/pdf" <<<"$HEADERS" || fail "wrong content-type"
+grep -q "^x-content-type-options: nosniff" <<<"$HEADERS" || fail "sniffable"
+grep -q "^content-disposition: inline" <<<"$HEADERS" || fail "a PDF should render inline"
+grep -q "services-agreement.pdf" <<<"$HEADERS" || fail "the filename was not carried"
+
+# The ETag is the document's own SHA-256, so it has to be the digest of the
+# file on this machine rather than anything the server chose for itself.
+ETAG="$(awk 'tolower($1)=="etag:"{print $2}' <<<"$(tr -d '\r' < "$WORK/original.headers")")"
+DIGEST="$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$PDF")"
+[ "$ETAG" = "\"$DIGEST\"" ] || fail "etag $ETAG is not the file's digest \"$DIGEST\""
+
+STATUS="$("${CURL[@]}" -o /dev/null -w '%{http_code}' -H "if-none-match: $ETAG" "$ORIGINAL")"
+[ "$STATUS" = "304" ] || fail "a client holding the digest got $STATUS, expected 304"
+
+"${CURL[@]}" -D - -o /dev/null "$ORIGINAL?download=1" | tr -d '\r' |
+  grep -qi "^content-disposition: attachment" || fail "?download did not force a download"
+
+grep -q "Open the original" "$WORK/doc.html" || fail "the document page does not offer it"
+
+# The question a client asks before deciding to fetch fifty megabytes, answered
+# without fetching fifty megabytes.
+META="$("${CURL[@]}" "$ORIGINAL?metadata=1")"
+python3 - "$META" "$DIGEST" <<'PY2'
+import json, sys
+meta, digest = json.loads(sys.argv[1]), sys.argv[2]
+assert meta["available"] is True, meta
+assert meta["file_hash"] == digest, meta
+assert meta["media_type"] == "application/pdf", meta
+assert meta["byte_size"] > 0, meta
+assert "path" not in meta, f"the server's filesystem layout leaked: {meta}"
+PY2
+
+say "a document the store has lost the file for says so rather than 404ing blankly"
+STORED="$(python3 -c "
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1])
+print(conn.execute('SELECT storage_path FROM documents WHERE document_id = ?', (sys.argv[2],)).fetchone()[0])
+" "$WORK/orpheus.sqlite" "$DOC")"
+mv "$STORED" "$STORED.aside"
+BODY="$("${CURL[@]}" -w '\n%{http_code}' "$ORIGINAL")"
+[ "$(tail -1 <<<"$BODY")" = "404" ] || fail "a pruned file returned $(tail -1 <<<"$BODY"), expected 404"
+grep -q '"reason": "missing"' <<<"$BODY" || fail "the reason was not reported: $BODY"
+
+say "and one whose bytes changed underneath it is a conflict, not a download"
+printf 'not the same file at all' > "$STORED"
+BODY="$("${CURL[@]}" -w '\n%{http_code}' "$ORIGINAL")"
+[ "$(tail -1 <<<"$BODY")" = "409" ] || fail "an altered file returned $(tail -1 <<<"$BODY"), expected 409"
+grep -q '"reason": "altered"' <<<"$BODY" || fail "the reason was not reported: $BODY"
+mv "$STORED.aside" "$STORED"
+
 read -r FIRST SECOND THIRD <<<"$(printf '%s' "$INSTANCES" | python3 -c \
   "import json,sys; print(*(i['instance_id'] for i in json.load(sys.stdin)['instances'][:3]))")"
 
@@ -216,6 +271,9 @@ PY
 say "reading with the machine: offers are not extractions until somebody says so"
 "${CURL[@]}" "$BASE/-/orpheus/read/$DOC?page=1" > "$WORK/read.html"
 grep -q "Worth recording?" "$WORK/read.html" || fail "the reading page did not render"
+# The reading page is where a reviewer is deciding whether an excerpt is real,
+# so the source has to be one click away from it and not only from the index.
+grep -q "the original" "$WORK/read.html" || fail "the reading page does not link the source"
 READ_CSRF="$(grep -o 'name="csrftoken" value="[^"]*"' "$WORK/read.html" | head -1 |
              sed 's/.*value="//;s/"//' || true)"
 [ -n "$READ_CSRF" ] || fail "no CSRF token on the reading page"

@@ -311,7 +311,12 @@ sqlite3 /srv/orpheus/data/orpheus.sqlite ".backup '/backup/orpheus-$(date +%F).s
 ```
 
 `storage/` must be backed up too — it holds the originals every extraction is
-derived from, and **nothing in Orpheus ever deletes from it**. There is no
+derived from, and it is now served back: `GET /documents/<id>/original` hands a
+reviewer the file itself, after checking it against the SHA-256 recorded at
+ingest. A restore that brings back the database without `storage/`, or with a
+`storage/` from a different moment, therefore stops being invisible — that
+route answers `409 altered` rather than serving bytes the store's excerpts were
+not computed from. **Nothing in Orpheus ever deletes from it.** There is no
 delete path in the codebase: no `DELETE FROM documents`, no unlink of a stored
 original. `delete` exists in the `ACTIONS` vocabulary and in `auth.py`, and
 nothing consumes it. Storage only grows, which is the right default for an

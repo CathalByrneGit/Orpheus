@@ -58,6 +58,34 @@ class ApiError(OrpheusError):
         self.status = status
 
 
+class FileBody:
+    """A payload that is a file on disk rather than JSON.
+
+    `handle()` returns one of these like any other payload, and a transport
+    that can send bytes sends them. It is a distinct type rather than a dict
+    with an agreed key so that a transport which *cannot* -- or a caller that
+    forgot -- fails visibly instead of serialising a `PosixPath` into a JSON
+    body and calling that a download.
+
+    It carries a path, not bytes: the file has been located and checked, and
+    reading it is the transport's business, which is the only layer that knows
+    whether it can stream.
+    """
+
+    __slots__ = ("path", "filename", "media_type", "byte_size", "file_hash")
+
+    def __init__(self, *, path, filename, media_type, byte_size, file_hash):
+        self.path = path
+        self.filename = filename
+        self.media_type = media_type
+        self.byte_size = byte_size
+        self.file_hash = file_hash
+
+    def __repr__(self) -> str:                       # pragma: no cover - debug
+        return (f"FileBody({self.filename!r}, {self.byte_size} bytes, "
+                f"{self.media_type})")
+
+
 def handle(store: Store, method: str, path: str, body: dict | None = None,
            token: str | None = None, actor: dict | None = None) -> tuple[int, Any]:
     """Dispatch one request. Returns `(status, payload)`."""
@@ -98,6 +126,13 @@ def _run(handler, store, match, body, actor) -> tuple[int, Any]:
         return 403, {"error": {"message": str(exc)}}
     except NotFound as exc:
         return 404, {"error": {"message": str(exc)}}
+    except ingest_mod.OriginalUnavailable as exc:
+        # `altered` is not a 404 and not a 400. The row is there, the request
+        # was well formed, and the answer is that the store disagrees with its
+        # own disk -- which an operator has to act on, and which a client must
+        # not retry its way past. 409 is the only code that says that.
+        status = 409 if exc.reason == "altered" else 404
+        return status, {"error": {"message": str(exc), "reason": exc.reason}}
     except ApiError as exc:
         return exc.status, {"error": {"message": str(exc)}}
     except OrpheusError as exc:
@@ -215,13 +250,64 @@ def get_document(store, document_id, **_):
         "FROM extraction_runs WHERE document_id = ? ORDER BY started_at DESC",
         (document_id,))
     return {**document, "review": review.review_progress(store, document_id),
-            "runs": [dict(r) for r in runs]}
+            "runs": [dict(r) for r in runs],
+            "original": _original_summary(store, document_id)}
+
+
+def _original_summary(store, document_id: str) -> dict:
+    """Is the file still there -- without reading it.
+
+    `verify=False` on purpose. A page load should not hash a fifty-megabyte
+    PDF to decide whether to draw a link, and the download itself hashes
+    anyway. So this answers the cheap question, "is there a file", and the
+    download answers the expensive one, "is it the right file". A page that
+    offers the link and a download that then refuses is the correct pair: the
+    second is a real finding and deserves to be seen, not hidden by greying
+    out a button.
+    """
+    try:
+        located = ingest_mod.original(store, document_id, verify=False)
+    except ingest_mod.OriginalUnavailable as exc:
+        return {"available": False, "reason": exc.reason, "message": str(exc)}
+    return {"available": True, "byte_size": located["byte_size"],
+            "media_type": located["media_type"],
+            "file_hash": located["file_hash"]}
 
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/text", permission="view")
 def get_text(store, document_id, **_):
     return {"document_id": document_id,
             "pages": ingest_mod.document_pages(store, document_id)}
+
+
+@route("GET", r"/documents/(?P<document_id>[^/]+)/original", permission="view")
+def get_original(store, document_id, body, **_):
+    """The file as it was uploaded.
+
+    Everything else this surface returns is Orpheus's reading of a document:
+    text with page markers, instances, excerpts, a wiki page. All of it is
+    derived, and a reviewer confirming a finding is entitled to the thing it
+    was derived from -- the signature block, the table that lost its columns in
+    text extraction, the handwriting the OCR guessed at.
+
+    `?metadata=1` answers without the file: what it is, how big, and whether it
+    is still there and still itself. That is the question a client asks before
+    deciding to fetch fifty megabytes, and answering it with fifty megabytes
+    would be a strange way to do it.
+    """
+    wants_metadata = str(body.get("metadata", "")).lower() in ("1", "true", "yes")
+    located = ingest_mod.original(store, document_id)
+    if wants_metadata:
+        return {"document_id": document_id,
+                "filename": located["filename"],
+                "media_type": located["media_type"],
+                "byte_size": located["byte_size"],
+                "file_hash": located["file_hash"],
+                "available": True}
+    return FileBody(path=located["path"], filename=located["filename"],
+                    media_type=located["media_type"],
+                    byte_size=located["byte_size"],
+                    file_hash=located["file_hash"])
 
 
 @route("POST", r"/documents/(?P<document_id>[^/]+)/classify", permission="edit")

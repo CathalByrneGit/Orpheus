@@ -87,8 +87,64 @@ uploads something the server cannot read.
 | `POST` | `/documents` | actor | `201` new, `200` duplicate |
 | `GET` | `/documents/<id>` | view | Metadata plus review progress |
 | `GET` | `/documents/<id>/text` | view | Full text and per-page `text_source` |
+| `GET` | `/documents/<id>/original` | view | The file as uploaded; `?metadata=1` for its size and digest, `?download=1` to force a save |
 | `GET` | `/documents/<id>/instances` | view | `?type_id=`, `?include_rejected=` |
 | `GET` | `/documents/<id>/history` | view | The document's audit trail |
+
+#### Getting the original back
+
+Everything else on this surface is Orpheus's *reading* of a document. `/original`
+is the document: the bytes that were uploaded, which every excerpt, page number
+and character offset in the store was computed from.
+
+It is the one route that does not return JSON. The payload is a `FileBody`, and
+a transport that can send bytes sends them — a distinct type rather than a dict
+with an agreed key, so a transport that cannot fails visibly instead of
+serialising a path into a body and calling that a download.
+
+Before anything is sent, the file is checked against the SHA-256 recorded at
+ingest. That check is the point of the route, and it decides the status:
+
+| Condition | Status | `reason` |
+|---|---|---|
+| The bytes hash to the recorded digest | `200` | — |
+| The row records no path | `404` | `not_stored` |
+| The path is not where a document of that hash belongs | `404` | `misfiled` |
+| The path is right and nothing is there | `404` | `missing` |
+| Something is there and it is not what was ingested | `409` | `altered` |
+
+`409` rather than `404` for the last one is deliberate: the document exists and
+the request was fine — the store disagrees with its own disk, which an operator
+has to act on and a client must not retry its way past.
+
+Verifying the hash is also what makes reading a path out of a database column
+safe. `storage_path` is a path in a table, and a table is a thing that gets
+written to; serving whatever is at the end of it would turn one write into an
+arbitrary file read. Nothing an attacker can point that column at will hash to
+a digest recorded before they got there — and the layout check refuses a path
+that is not where content-addressed storage puts a document, before anything is
+read at all.
+
+The response is served `inline` for the handful of types a browser renders
+without running anything the uploader wrote (PDF, plain text, raster images) and
+as an `attachment` for everything else — `image/svg+xml` deliberately included,
+since an SVG can carry script and would run it on this origin with the
+reviewer's session. `X-Content-Type-Options: nosniff` covers the mislabelled
+rest. The ETag is the document's own digest, so a client that already has the
+file gets a `304`.
+
+```bash
+# What is there, without fetching fifty megabytes to find out
+curl -H "Authorization: Bearer $TOKEN" \
+  'localhost:8001/-/orpheus/api/documents/doc_abc/original?metadata=1'
+
+# The file itself
+curl -H "Authorization: Bearer $TOKEN" -OJ \
+  localhost:8001/-/orpheus/api/documents/doc_abc/original
+```
+
+From the CLI, `orpheus original <document_id> --to <path>` does the same and
+refuses on the same terms.
 
 Upload takes either a multipart file or a JSON body naming a server-local path —
 which is how a watched drop-directory or a batch load feeds the same code path

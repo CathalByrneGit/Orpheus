@@ -17,6 +17,20 @@
 </p>
 
 <p>
+  {% if document.original and document.original.available %}
+  <a href="{{ urls.path('/-/orpheus/api/documents/' + document.document_id + '/original') }}">Open the original</a>
+  <span style="color:#666">&mdash; the file as it was uploaded, checked against
+  the hash every excerpt below was measured from
+  ({{ '%.0f'|format(document.original.byte_size / 1024) }} KB).</span>
+  <a href="{{ urls.path('/-/orpheus/api/documents/' + document.document_id + '/original') }}?download=1"
+     style="color:#666">Download</a>
+  {% elif document.original %}
+  <span class="message-warning">The original is not available:
+  {{ document.original.message }}</span>
+  {% endif %}
+</p>
+
+<p>
   <a href="{{ urls.path('/-/orpheus/read/' + document.document_id) }}">Read it with the machine &rarr;</a>
   <span style="color:#666">&mdash; a page at a time, offering what seems worth
   recording. Nothing is stored until you say so.</span>
