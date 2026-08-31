@@ -283,6 +283,34 @@ def cmd_original(args) -> int:
     return 0
 
 
+def cmd_triage(args) -> int:
+    """What to review first, and what reviewing it would settle."""
+    store = open_store(args, mode="read")
+    try:
+        result = review.triage(store, limit=args.limit,
+                               min_reviewed=args.min_reviewed,
+                               document_id=args.document_id)
+    finally:
+        store.close()
+    if args.json:
+        emit(result, True)
+        return 0
+    print(result["headline"])
+    if result.get("levels"):
+        print()
+        for level in result["levels"]:
+            mark = "counts" if level["counts_toward_a_verdict"] else "short"
+            print(f"  {level['confidence_label']:12} {level['n_reviewed']:>4} "
+                  f"reviewed, {level['n_waiting']:>4} waiting  ({mark})")
+    if result["queue"]:
+        print(f"\n  next {len(result['queue'])}:")
+        for item in result["queue"]:
+            print(f"    {item['instance_id']}  {item['type_id']:<16} "
+                  f"{item['confidence_label']}")
+        print(f"\n  {result['queue'][0]['reason']}")
+    return 0
+
+
 def cmd_redact(args) -> int:
     """Destroy everything read from a document; keep the record it was here.
 
@@ -1437,6 +1465,11 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--tier", default="local", choices=("local", "cloud"))
     ingest.add_argument("--engine")
     ingest.add_argument("--cloud-opt-in", action="store_true")
+
+    triage = add("triage", cmd_triage, "what to review first, and why")
+    triage.add_argument("--limit", type=int, default=20)
+    triage.add_argument("--min-reviewed", type=int, default=5)
+    triage.add_argument("--document-id")
 
     redact_cmd = add("redact", cmd_redact,
                      "destroy everything read from a document, keeping the row")

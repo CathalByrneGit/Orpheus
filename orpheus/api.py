@@ -1232,6 +1232,27 @@ def post_export(store, actor, body, **_):
         confirmed_only=body.get("confirmed_only") in ("1", "true", "True", True))
 
 
+@route("GET", "/review/triage")
+def get_triage(store, actor, body, **_):
+    """Which unreviewed extractions to look at first, and what it would settle.
+
+    Corpus-wide it spans documents the caller may not be able to read, so it is
+    administrator-only for the reason `/lint` is; pass `document_id` for one
+    you can see.
+    """
+    document_id = body.get("document_id")
+    if document_id:
+        if not auth.can(store, actor, document_id, "view"):
+            raise PermissionDenied(f"Not permitted to view {document_id}.")
+    elif not actor.get("is_admin"):
+        raise PermissionDenied(
+            "A corpus-wide review queue spans documents you may not be able to "
+            "read. Pass `document_id` for one you can.")
+    return review.triage(store, limit=_int(body, "limit", 50),
+                         min_reviewed=_int(body, "min_reviewed", 5),
+                         document_id=document_id)
+
+
 @route("GET", "/lint")
 def get_lint(store, actor, body, **_):
     """The adversarial pass. Administrator only, same reason as `/quality`.

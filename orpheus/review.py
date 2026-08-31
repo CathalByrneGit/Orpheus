@@ -18,8 +18,10 @@ read as a machine guess.
 from __future__ import annotations
 
 from . import bundle as bundle_mod
+from . import quality
 from .audit import record_edit
-from .rubric import CONFIDENCE, RESERVED_PROPS, STATUSES
+from .rubric import (CONFIDENCE, RESERVED_PROPS, REVIEWED_STATUSES,
+                     STATUSES, confidence_label)
 from .store import Store
 from .utils import (NotFound, OrpheusError, naive_key, now, 
                     require_choice, require_string)
@@ -259,6 +261,172 @@ def mark_document_reviewed(store: Store, document_id: str, actor_id: str,
 # ---------------------------------------------------------------------------
 # Schema amendments
 # ---------------------------------------------------------------------------
+
+def triage(store: Store, *, limit: int = 50, min_reviewed: int = 5,
+           document_id: str | None = None) -> dict:
+    """Which unreviewed extractions to look at first, and what it would settle.
+
+    A store with nine hundred unconfirmed instances and no order on them is a
+    store nobody reviews. That matters more than it sounds: `orpheus report`
+    answers `insufficient_evidence` until review has happened, so every quality
+    claim this system makes is downstream of somebody starting -- and "start
+    anywhere" is the instruction people do not act on.
+
+    **The ranking is not a heuristic about importance.** It is read off the
+    thing the report is actually waiting for. `confidence_calibration` needs
+    two confidence levels each holding `min_reviewed` reviewed instances before
+    it will say anything at all; below that it returns `insufficient_evidence`
+    no matter how much work has gone in. So a reviewer can confirm three
+    hundred `explicit` extractions and move the verdict not one inch, while
+    five at a level nobody has touched would move it from silence to an answer.
+    This puts those five at the top and says so.
+
+    Within a level, the queue rotates through documents. A calibration measured
+    on one document is a measurement of that document -- it says how well the
+    extractor read *that* contract, which is not the question. Spreading the
+    same amount of review across the corpus costs the reviewer nothing and is
+    the difference between a number and a number that generalises.
+
+    Once two levels are over the line the ranking keeps going, weakest level
+    first. It cannot promise a verdict then: the next thing in the way is
+    whether the levels *separate*, and that depends on the corpus containing
+    enough wrong extractions to tell them apart. Saying so is better than
+    ranking on a rule invented to look purposeful.
+    """
+    outcomes = quality.collect_review_outcomes(store, document_id)
+    if not outcomes:
+        return {"n_unreviewed": 0, "queue": [], "levels": [],
+                "headline": "Nothing has been extracted yet."}
+
+    reviewed_at: dict[float, int] = {}
+    waiting: dict[float, list[dict]] = {}
+    for row in outcomes:
+        level = row["confidence"]
+        if row["status"] in REVIEWED_STATUSES:
+            reviewed_at[level] = reviewed_at.get(level, 0) + 1
+        else:
+            waiting.setdefault(level, []).append(row)
+        reviewed_at.setdefault(level, 0)
+
+    over_the_line = [lvl for lvl, n in reviewed_at.items() if n >= min_reviewed]
+    # A level with nothing left to review cannot be brought over the line, so
+    # counting it among the ways out would be offering work that does not exist.
+    reachable = [lvl for lvl in waiting
+                 if reviewed_at[lvl] < min_reviewed
+                 and reviewed_at[lvl] + len(waiting[lvl]) >= min_reviewed]
+
+    levels = [{
+        "confidence": lvl,
+        "confidence_label": confidence_label(lvl),
+        "n_reviewed": reviewed_at[lvl],
+        "n_waiting": len(waiting.get(lvl, [])),
+        "short_by": max(0, min_reviewed - reviewed_at[lvl]),
+        "counts_toward_a_verdict": lvl in over_the_line,
+    } for lvl in sorted(reviewed_at, reverse=True)]
+
+    # The levels that would unblock a verdict, cheapest first: the one closest
+    # to the threshold is the shortest way to a second qualifying level. On a
+    # tie -- which is the ordinary case, since a corpus nobody has reviewed has
+    # every level at zero -- prefer the level with the fewest waiting. That is
+    # the scarcest evidence in the store and the one a reviewer working through
+    # volume will never reach on their own, so it is the review that buys
+    # something nothing else would.
+    unblocking = sorted(reachable, key=lambda lvl: (min_reviewed - reviewed_at[lvl],
+                                                    len(waiting[lvl])))
+    if len(over_the_line) >= 2:
+        # Already answerable. Deepen the thinnest evidence instead, which is
+        # where a wrong verdict would come from.
+        ordered = sorted(waiting, key=lambda lvl: reviewed_at[lvl])
+        why = "deepening"
+    else:
+        needed = 2 - len(over_the_line)
+        ordered = unblocking[:needed] + [
+            lvl for lvl in sorted(waiting, key=lambda l: reviewed_at[l])
+            if lvl not in unblocking[:needed]]
+        why = "unblocking"
+
+    queue: list[dict] = []
+    for lvl in ordered:
+        rows = waiting.get(lvl, [])
+        if not rows:
+            continue
+        short_by = max(0, min_reviewed - reviewed_at[lvl])
+        unblocks = why == "unblocking" and lvl in unblocking[:2 - len(over_the_line)]
+        # A level being brought over the line contributes exactly what it is
+        # short by and no more. Letting the first one fill the whole queue
+        # would leave the second one short and the report still silent, which
+        # is the failure this exists to prevent -- and it is why the count
+        # comes out at `min_reviewed` times two rather than approximately that.
+        candidates = _round_robin_by_document(rows)
+        if unblocks:
+            candidates = candidates[:short_by]
+        for row in candidates:
+            queue.append({
+                "instance_id": row["instance_id"],
+                "document_id": row["document_id"],
+                "type_id": row["type_id"],
+                "confidence": lvl,
+                "confidence_label": confidence_label(lvl),
+                "source": row["source"],
+                "reason": (
+                    f"{confidence_label(lvl)} is {short_by} reviewed instance(s) "
+                    "short of counting toward a verdict, and nothing else is "
+                    "closer." if unblocks else
+                    f"{confidence_label(lvl)} has the least review behind it "
+                    f"({reviewed_at[lvl]} instance(s))."),
+            })
+            if len(queue) >= limit:
+                break
+        if len(queue) >= limit:
+            break
+
+    n_unreviewed = sum(len(rows) for rows in waiting.values())
+    return {"n_unreviewed": n_unreviewed, "min_reviewed": min_reviewed,
+            "levels": levels, "queue": queue,
+            "headline": _triage_headline(n_unreviewed, over_the_line, unblocking,
+                                         reviewed_at, min_reviewed)}
+
+
+def _round_robin_by_document(rows: list[dict]) -> list[dict]:
+    """One from each document, then round again.
+
+    A calibration measured on one document is a measurement of that document.
+    Spreading the same amount of review across the corpus costs the reviewer
+    nothing and is the difference between a number and a number that
+    generalises.
+    """
+    by_document: dict[str, list[dict]] = {}
+    for row in rows:
+        by_document.setdefault(row["document_id"], []).append(row)
+    spread = []
+    while by_document:
+        for document_id in list(by_document):
+            spread.append(by_document[document_id].pop(0))
+            if not by_document[document_id]:
+                del by_document[document_id]
+    return spread
+
+
+def _triage_headline(n_unreviewed: int, over_the_line: list, unblocking: list,
+                     reviewed_at: dict, min_reviewed: int) -> str:
+    if not n_unreviewed:
+        return "Everything extracted has been reviewed."
+    if len(over_the_line) >= 2:
+        return (f"{n_unreviewed} unreviewed. The rubric already has two levels "
+                "with enough behind them, so the report will answer; what is "
+                "left is depth, weakest level first.")
+    if not unblocking:
+        return (f"{n_unreviewed} unreviewed, and no confidence level can reach "
+                f"{min_reviewed} reviewed instances even if you review every "
+                "one of them. The report cannot rank this rubric on this "
+                "corpus -- it needs more documents, not more review.")
+    first = unblocking[0]
+    needed = min_reviewed - reviewed_at[first]
+    return (f"{n_unreviewed} unreviewed, and the report is silent because "
+            f"fewer than two confidence levels have {min_reviewed} reviewed "
+            f"instances behind them. Reviewing {needed} at "
+            f"`{confidence_label(first)}` is the shortest way to an answer.")
+
 
 def schema_amendments(store: Store, status: str = "pending") -> list[dict]:
     return store.query(
