@@ -187,6 +187,21 @@ post_review() {
     "$BASE/-/orpheus/review" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}'
 }
 
+say "the storage audit, over HTTP"
+AUDIT="$("${CURL[@]}" "$BASE/-/orpheus/api/storage/audit")"
+python3 - "$AUDIT" <<'PY2'
+import json, sys
+audit = json.loads(sys.argv[1])
+assert audit["n_documents"] == 1 and audit["n_unavailable"] == 0, audit
+# A stat establishes a file exists. Claiming a corpus is sound on that basis is
+# the reassurance this project keeps refusing to give.
+assert "Nothing was read" in audit["headline"], audit["headline"]
+PY2
+STATUS="$("${CURL[@]}" -o /dev/null -w '%{http_code}' "$BASE/-/orpheus/api/storage/audit?verify=1")"
+[ "$STATUS" = "400" ] || fail "a corpus-wide hash over HTTP returned $STATUS, expected 400"
+"${CURL[@]}" "$BASE/-/orpheus/api/storage/audit?verify=1&document_id=$DOC" |
+  grep -q '"verified": true' || fail "one document could not be verified over HTTP"
+
 say "confirming, amending and rejecting through the form"
 post_review --data-urlencode "instance_id=$FIRST" --data-urlencode "action=confirm" \
   --data-urlencode "note=checked against the signature page" | grep -q "confirmed" \

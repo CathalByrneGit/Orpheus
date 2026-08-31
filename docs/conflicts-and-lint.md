@@ -135,6 +135,7 @@ reader who trusts the output:
 | `split_page` | medium | two pages that are probably one thing |
 | `unnamed_page` | medium | a page filed under a role word, or under something with no letters in it |
 | `unextracted_document` | medium | ingested, and nothing read from it |
+| `unavailable_original` | high / medium | the file the document was read from is not where the store says it is |
 | `stale_evaluation` | medium | an analysis whose evidence has since been amended |
 | `unreviewed_grouping` | low | a page joining 3+ documents on machine evidence alone |
 
@@ -160,6 +161,40 @@ Nothing found across 9 check(s), over 40 reviewed link(s). That is evidence,
 not proof: these checks find contradictions, uncited claims and gaps, and they
 cannot find a claim that is wrong in a way every source agrees on.
 ```
+
+### The one check that reads a disk
+
+`unavailable_original` asks whether the file each document was read from is
+still there. It is not an assertion this store makes falsely — it is one it can
+no longer be checked on. Every excerpt from such a document still renders, with
+its page number and its character span, and there is nothing left to hold them
+against. The store looks exactly as sound as it did yesterday.
+
+It is `high` when the recorded path is not where content-addressed storage puts
+a document, for the same reason `uncited_page` is: nothing but `ingest` writes
+`storage_path`, so a value that is not that path did not come from this
+codebase. A file that is simply gone is `medium`.
+
+It is one `stat` per document, which is why it runs on every lint. It cannot
+see a file whose *bytes* changed:
+
+```bash
+orpheus verify          # re-read every original, check it against its digest
+orpheus verify --quick  # only that they exist -- what the lint already does
+```
+
+That is a separate command rather than a `deep` lint check because `deep` means
+a few seconds of SQL and this means the size of the corpus in disk reads. It
+exits non-zero when anything is unavailable, so it can gate a restore — which
+is the question it exists for. A database and a `storage/` from two different
+moments looks perfectly healthy from the inside: every row present, every
+excerpt rendering, every offset pointing into bytes nobody has compared to
+anything. Nothing else in Orpheus would notice.
+
+`GET /storage/audit` is the same audit over HTTP, administrator-only. It runs
+the cheap pass corpus-wide; `?verify=1` is bounded to a single `document_id`,
+because hashing the whole corpus would hold the connection Datasette answers
+pages on.
 
 `orpheus lint` exits non-zero on a `high` finding, so it can gate a corpus run.
 `/-/orpheus/lint` renders the same report with every finding linked to the thing

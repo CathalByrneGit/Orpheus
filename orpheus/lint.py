@@ -28,6 +28,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import entities as entities_mod
+from . import ingest as ingest_mod
 from .store import Store
 
 SEVERITIES = ("high", "medium", "low")
@@ -296,6 +297,47 @@ def unextracted_documents(store: Store, limit: int = 50) -> list[dict]:
         for r in rows]
 
 
+def unavailable_originals(store: Store, document_id: str | None = None,
+                          limit: int = 50) -> list[dict]:
+    """Documents whose original is no longer where the store says it is.
+
+    Not an assertion this store makes falsely -- it is one it can no longer be
+    checked on. Every excerpt from such a document still renders, still carries
+    a page number and a character span, and there is now nothing on disk to
+    hold them against. The store looks exactly as sound as it did yesterday,
+    which is the problem.
+
+    This is the cheap half: one `stat` per document, so it can run on every
+    lint. It cannot see a file whose *bytes* changed, and does not pretend to
+    -- that costs the size of the corpus in disk reads and is `orpheus verify`.
+
+    `misfiled` is separated out and rated higher than a file that is simply
+    gone, for the same reason `uncited_page` is: nothing but `ingest` writes
+    `storage_path`, so a value that is not where content-addressed storage puts
+    a document means something else wrote it, and that is worth knowing at once.
+    """
+    audit = ingest_mod.audit_storage(store, verify=False, document_id=document_id)
+    findings = []
+    for entry in audit["documents"]:
+        if entry["available"]:
+            continue
+        misfiled = entry["reason"] == "misfiled"
+        findings.append(_finding(
+            "unavailable_original", "high" if misfiled else "medium",
+            {"document_id": entry["document_id"],
+             "filename": entry["filename"], "reason": entry["reason"]},
+            entry["message"],
+            "Restore it from backup, or record that it is gone. Until then no "
+            "excerpt taken from this document can be checked against it."
+            if not misfiled else
+            "Nothing but ingest writes `storage_path`. Find out what did: a "
+            "value that is not where content-addressed storage puts a document "
+            "did not come from this codebase."))
+        if len(findings) >= limit:
+            break
+    return findings
+
+
 def stale_evaluations(store: Store, limit: int = 50) -> list[dict]:
     """Analyses whose evidence has since been amended."""
     rows = store.query(
@@ -393,6 +435,7 @@ CHECKS = {
     "split_page": lambda s, d: split_pages(s),
     "unnamed_page": lambda s, d: unnamed_pages(s),
     "unextracted_document": lambda s, d: unextracted_documents(s),
+    "unavailable_original": lambda s, d: unavailable_originals(s, d),
     "stale_evaluation": lambda s, d: stale_evaluations(s),
     "unreviewed_grouping": lambda s, d: unreviewed_groupings(s),
     "fragile_join": lambda s, d: fragile_joins(s),
@@ -401,7 +444,8 @@ CHECKS = {
 # The cheap ones. `smoothed_conflict` and `split_page` both compare every
 # mention against every other, which is fine for a page and slow for a corpus.
 SHALLOW = ("uncited_page", "ungrounded_quotation", "unchecked_conflict",
-           "unextracted_document", "stale_evaluation", "unnamed_page")
+           "unextracted_document", "unavailable_original",
+           "stale_evaluation", "unnamed_page")
 
 
 def lint(store: Store, deep: bool = True, document_id: str | None = None,

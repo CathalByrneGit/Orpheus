@@ -316,6 +316,7 @@ decided then stays readable. See [Conflicts and lint](conflicts-and-lint.md).
 | Method | Path | Permission | Notes |
 |---|---|---|---|
 | `GET` | `/lint` | **administrator** | `?deep=0` for the cheap checks, `?checks=a,b` |
+| `GET` | `/storage/audit` | **administrator** | Are the originals still there; `?verify=1` with a `document_id` re-reads one |
 | `POST` | `/export` | **administrator** | `out` (server path), `?confirmed_only=1` |
 
 Both span the whole corpus, including documents the caller may not be able to

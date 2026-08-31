@@ -316,7 +316,18 @@ reviewer the file itself, after checking it against the SHA-256 recorded at
 ingest. A restore that brings back the database without `storage/`, or with a
 `storage/` from a different moment, therefore stops being invisible — that
 route answers `409 altered` rather than serving bytes the store's excerpts were
-not computed from. **Nothing in Orpheus ever deletes from it.** There is no
+not computed from, and `orpheus verify` will tell you so across the whole corpus
+before anyone finds out one document at a time:
+
+```bash
+orpheus verify --db /srv/orpheus/data/orpheus.sqlite
+# All 128 originals are present and hash to the digests recorded at ingest.
+```
+
+It exits non-zero when anything is unavailable, so a restore can be gated on it.
+Run it after every restore: a database and a `storage/` from two different
+moments looks perfectly healthy from the inside, and this is the only thing that
+would notice. **Nothing in Orpheus ever deletes from it.** There is no
 delete path in the codebase: no `DELETE FROM documents`, no unlink of a stored
 original. `delete` exists in the `ACTIONS` vocabulary and in `auth.py`, and
 nothing consumes it. Storage only grows, which is the right default for an

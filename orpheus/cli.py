@@ -283,6 +283,34 @@ def cmd_original(args) -> int:
     return 0
 
 
+def cmd_verify(args) -> int:
+    """Re-read every original and check it against the digest recorded at ingest.
+
+    The question this exists for is a restore. A database and a `storage/` from
+    two different moments looks perfectly healthy from the inside: every row is
+    there, every excerpt renders, and every character offset points into bytes
+    nobody has compared to anything. Nothing else in Orpheus would notice.
+
+    Exits non-zero when anything is unavailable, so it can gate a restore.
+    """
+    store = open_store(args, mode="read")
+    try:
+        audit = ingest_mod.audit_storage(store, verify=not args.quick,
+                                         document_id=args.document_id)
+    finally:
+        store.close()
+
+    if args.json:
+        emit(audit, True)
+    else:
+        print(audit["headline"])
+        for entry in audit["documents"]:
+            if not entry["available"]:
+                print(f"  {entry['reason']:10} {entry['document_id']}  "
+                      f"{entry['message']}")
+    return 1 if audit["n_unavailable"] else 0
+
+
 def cmd_analyse(args) -> int:
     store = open_store(args)
     try:
@@ -1389,6 +1417,12 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--tier", default="local", choices=("local", "cloud"))
     ingest.add_argument("--engine")
     ingest.add_argument("--cloud-opt-in", action="store_true")
+
+    verify = add("verify", cmd_verify,
+                 "check every stored original against its recorded digest")
+    verify.add_argument("--document-id", help="check one rather than all")
+    verify.add_argument("--quick", action="store_true",
+                        help="only check the files exist; do not read them")
 
     original = add("original", cmd_original,
                    "copy the file that was ingested back out")

@@ -1199,6 +1199,37 @@ def get_lint(store, actor, body, **_):
         document_id=body.get("document_id"), checks=checks or None)
 
 
+@route("GET", "/storage/audit")
+def get_storage_audit(store, actor, body, **_):
+    """Is every original still there, and is it still itself.
+
+    Administrator-only for the reason `/lint` is: it spans documents the caller
+    may not be able to read.
+
+    Corpus-wide, this is one `stat` per document and returns immediately.
+    `?verify=1` re-reads and hashes, which is bounded here to a single
+    `document_id` on purpose -- it costs the size of the corpus in disk reads,
+    and this route runs on the connection Datasette serves pages from. A pass
+    over the whole corpus is `orpheus verify`, at a terminal, where taking four
+    minutes is a thing an operator watches rather than a request that times
+    out.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "A storage audit spans documents you may not be able to read, so "
+            "it is an administrator view.")
+    document_id = body.get("document_id")
+    verify = str(body.get("verify", "")).lower() in ("1", "true", "yes")
+    if verify and not document_id:
+        raise ApiError(400,
+                       "Hashing the whole corpus would hold the connection "
+                       "this server answers pages on. Pass `document_id` to "
+                       "verify one, or run `orpheus verify` for all of them.")
+    return ingest_mod.audit_storage(store, verify=verify,
+                                    document_id=document_id,
+                                    limit=_int(body, "limit", 0) or None)
+
+
 @route("GET", "/grounding")
 def get_grounding(store, actor, body, **_):
     """How often each engine quoted something its document contains.

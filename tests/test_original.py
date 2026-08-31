@@ -315,3 +315,128 @@ def test_a_stale_etag_is_served_in_full(filed):
     response = plugin._send_file(request, _body(filed), download=False)
     assert response.status == 200
     assert response.body == CONTENT.encode()
+
+
+# -- auditing the corpus -----------------------------------------------------
+
+@pytest.fixture
+def three(store, tmp_path):
+    """Three ingested documents, so an audit has something to be partial about."""
+    store.insert("actors", {"actor_id": "act_test", "display_name": "Ada",
+                            "is_admin": 1, "created_at": "2026-01-01T00:00:00Z"})
+    ids = []
+    for n in range(3):
+        source = tmp_path / f"doc-{n}.txt"
+        source.write_text(f"{CONTENT}Document {n}.\n")
+        ids.append(ingest_file(store, source, actor_id="act_test",
+                               storage_root=tmp_path / "storage")["document_id"])
+    return {"store": store, "ids": ids, "tmp": tmp_path}
+
+
+def _path_of(store, document_id) -> Path:
+    return Path(store.one("SELECT storage_path FROM documents "
+                          "WHERE document_id = ?", (document_id,))["storage_path"])
+
+
+def test_a_clean_corpus_does_not_claim_more_than_it_checked(three):
+    """A `stat` establishes that a file exists. Saying a corpus is sound on
+    that basis is the reassurance this project keeps refusing to give."""
+    audit = ingest.audit_storage(three["store"], verify=False)
+    assert audit["n_documents"] == 3 and audit["n_unavailable"] == 0
+    assert "Nothing was read" in audit["headline"]
+    assert "orpheus verify" in audit["headline"]
+
+    verified = ingest.audit_storage(three["store"], verify=True)
+    assert "hash to the digests recorded at ingest" in verified["headline"]
+    assert verified["bytes_read"] > 0
+
+
+def test_the_audit_counts_each_kind_of_loss_separately(three):
+    store, (a, b, c) = three["store"], three["ids"]
+    _path_of(store, a).unlink()
+    store.execute("UPDATE documents SET storage_path = NULL WHERE document_id = ?",
+                  (b,))
+    audit = ingest.audit_storage(store, verify=False)
+    assert audit["reasons"] == {"missing": 1, "not_stored": 1}
+    assert audit["n_available"] == 1
+    assert "Every excerpt taken from them is now unverifiable" in audit["headline"]
+    # The dangerous case is not the clean one. A quick pass that finds two
+    # problems reads like a complete answer and is not, so the caveat goes on
+    # both.
+    assert "Nothing was read" in audit["headline"]
+
+
+def test_only_the_hashing_pass_sees_a_file_whose_bytes_changed(three):
+    """The distinction the two passes exist for. A restored corpus from the
+    wrong moment has every file present and the wrong contents, and the cheap
+    pass reports it as sound."""
+    store, (a, _, _) = three["store"], three["ids"]
+    _path_of(store, a).write_text("a different document entirely")
+
+    assert ingest.audit_storage(store, verify=False)["n_unavailable"] == 0
+    hashed = ingest.audit_storage(store, verify=True)
+    assert hashed["reasons"] == {"altered": 1}
+
+
+def test_the_lint_locates_a_lost_original(three):
+    from orpheus import lint as lint_mod
+    store, (a, _, _) = three["store"], three["ids"]
+    _path_of(store, a).unlink()
+
+    findings = lint_mod.unavailable_originals(store)
+    assert len(findings) == 1
+    assert findings[0]["where"]["document_id"] == a
+    assert findings[0]["severity"] == "medium"
+
+    # And it is cheap enough to be in the pass that runs by default.
+    assert "unavailable_original" in lint_mod.SHALLOW
+    report = lint_mod.lint(store, deep=False)
+    assert any(f["check"] == "unavailable_original" for f in report["findings"])
+
+
+def test_a_path_nothing_in_this_codebase_would_write_is_rated_higher(three):
+    """Same reasoning as `uncited_page`: not "something is missing" but
+    "something wrote where only ingest writes"."""
+    from orpheus import lint as lint_mod
+    store, (a, _, _) = three["store"], three["ids"]
+    store.execute("UPDATE documents SET storage_path = '/etc/passwd' "
+                  "WHERE document_id = ?", (a,))
+    findings = lint_mod.unavailable_originals(store)
+    assert findings[0]["severity"] == "high"
+    assert "did not come from this codebase" in findings[0]["suggestion"]
+
+
+def test_the_lint_does_not_read_a_single_file(three, monkeypatch):
+    """It runs on every lint, so it has to stay a stat per document."""
+    from orpheus import lint as lint_mod
+    monkeypatch.setattr(ingest, "hash_file",
+                        lambda path: pytest.fail("the lint hashed a file"))
+    assert lint_mod.unavailable_originals(three["store"]) == []
+
+
+def test_hashing_the_whole_corpus_is_refused_over_http(three):
+    """It would hold the connection Datasette answers pages on."""
+    status, payload = api.handle(
+        three["store"], "GET", "/storage/audit", body={"verify": "1"},
+        actor=_actor(three["store"]))
+    assert status == 400
+    assert "orpheus verify" in payload["error"]["message"]
+
+
+def test_one_document_may_be_verified_over_http(three):
+    store, (a, _, _) = three["store"], three["ids"]
+    _path_of(store, a).write_text("not the same file")
+    status, payload = api.handle(
+        store, "GET", "/storage/audit",
+        body={"verify": "1", "document_id": a}, actor=_actor(store))
+    assert status == 200
+    assert payload["reasons"] == {"altered": 1}
+
+
+def test_the_audit_is_an_administrators_view(three):
+    three["store"].insert("actors", {
+        "actor_id": "act_other", "display_name": "Bo", "is_admin": 0,
+        "created_at": "2026-01-01T00:00:00Z"})
+    status, _ = api.handle(three["store"], "GET", "/storage/audit",
+                           actor=_actor(three["store"], "act_other"))
+    assert status == 403

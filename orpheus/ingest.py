@@ -278,6 +278,91 @@ def original(store: Store, document_id: str, *, verify: bool = True) -> dict:
     }
 
 
+def audit_storage(store: Store, *, verify: bool = False,
+                  document_id: str | None = None,
+                  limit: int | None = None) -> dict:
+    """Ask of every document whether its original is still there and still itself.
+
+    Two passes in one function, because they differ only in what they can
+    afford. Without `verify` this is one `stat` per document and answers "is
+    there a file" -- cheap enough to run on every lint. With it, every file is
+    re-read and hashed, which answers "is it the right file" and costs the size
+    of the corpus in disk reads.
+
+    That is the whole reason `orpheus verify` is its own command rather than a
+    `deep` lint check. `deep` means a few seconds of SQL; this means minutes of
+    I/O over gigabytes, and a check somebody stops running is worse than one
+    they have to ask for.
+
+    The question it exists to answer is a restore. A database and a `storage/`
+    from two different moments looks perfectly healthy from the inside: every
+    row is there, every excerpt renders, and the offsets point into bytes
+    nobody has compared to anything.
+    """
+    rows = store.query(
+        "SELECT document_id, filename FROM documents "
+        + ("WHERE document_id = ? " if document_id else "")
+        + "ORDER BY date_added" + (" LIMIT ?" if limit else ""),
+        tuple(p for p in (document_id, limit) if p is not None))
+
+    documents: list[dict] = []
+    checked_bytes = 0
+    for row in rows:
+        # The filename comes from the row rather than from the located
+        # file, so a finding about a document whose original is *gone*
+        # can still say which document it is.
+        entry = {"document_id": row["document_id"],
+                 "filename": row["filename"]}
+        try:
+            located = original(store, row["document_id"], verify=verify)
+        except OriginalUnavailable as exc:
+            entry.update(available=False, reason=exc.reason, message=str(exc))
+        else:
+            entry.update(available=True, reason=None,
+                         byte_size=located["byte_size"])
+            checked_bytes += located["byte_size"] if verify else 0
+        documents.append(entry)
+
+    unavailable = [d for d in documents if not d["available"]]
+    reasons: dict[str, int] = {}
+    for entry in unavailable:
+        reasons[entry["reason"]] = reasons.get(entry["reason"], 0) + 1
+    return {
+        "verified": verify,
+        "n_documents": len(documents),
+        "n_available": len(documents) - len(unavailable),
+        "n_unavailable": len(unavailable),
+        "reasons": reasons,
+        "bytes_read": checked_bytes,
+        # A pass that only stat()ed cannot say a corpus is sound, and saying so
+        # is the difference between a report and a reassurance.
+        "headline": _audit_headline(len(documents), unavailable, verify),
+        "documents": documents,
+    }
+
+
+def _audit_headline(total: int, unavailable: list[dict], verify: bool) -> str:
+    """What was found, and -- when nothing was read -- what could not have been.
+
+    A pass that only stat()ed cannot say a corpus is unaltered, and the
+    dangerous case is not the clean one: a quick pass that finds two problems
+    reads like a complete answer, and is not. So the caveat goes on both.
+    """
+    if not total:
+        return "No documents to check."
+    unread = ("Nothing was read, so this says they exist, not that they are "
+              "unaltered -- run `orpheus verify` for that.")
+    if not unavailable:
+        return (f"All {total} originals are present and hash to the digests "
+                f"recorded at ingest." if verify else
+                f"All {total} originals are where they should be. {unread}")
+    kinds = ", ".join(f"{sum(1 for u in unavailable if u['reason'] == r)} "
+                      f"{r}" for r in sorted({u["reason"] for u in unavailable}))
+    found = (f"{len(unavailable)} of {total} originals cannot be served: "
+             f"{kinds}. Every excerpt taken from them is now unverifiable.")
+    return found if verify else f"{found} {unread}"
+
+
 def get_document(store: Store, document_id: str) -> dict | None:
     return store.one("SELECT * FROM documents WHERE document_id = ?", (document_id,))
 
