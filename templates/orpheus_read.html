@@ -4,7 +4,7 @@
 <p><a href="{{ urls.path('/-/orpheus/document/' + document.document_id) }}">&larr; {{ document.filename }}</a>
    &middot; <a href="{{ urls.path('/-/orpheus') }}">Documents</a>
    {%- if document.original and document.original.available %}
-   &middot; <a href="{{ urls.path('/-/orpheus/api/documents/' + document.document_id + '/original') }}"
+   &middot; <a href="{{ urls.path('/-/orpheus/api/documents/' + document.document_id + '/original') }}{% if document.original.media_type == 'application/pdf' %}#page={{ page.page_no }}{% endif %}"
                 target="_blank" rel="noopener">the original</a>
    {%- endif %}</p>
 

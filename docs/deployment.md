@@ -327,12 +327,16 @@ orpheus verify --db /srv/orpheus/data/orpheus.sqlite
 It exits non-zero when anything is unavailable, so a restore can be gated on it.
 Run it after every restore: a database and a `storage/` from two different
 moments looks perfectly healthy from the inside, and this is the only thing that
-would notice. **Nothing in Orpheus ever deletes from it.** There is no
-delete path in the codebase: no `DELETE FROM documents`, no unlink of a stored
-original. `delete` exists in the `ACTIONS` vocabulary and in `auth.py`, and
-nothing consumes it. Storage only grows, which is the right default for an
-audit trail and is not a retention policy — a deployment that needs one has to
-build it.
+would notice.
+
+**One thing deletes from it, and only when a person asks.** `orpheus redact`
+destroys everything read from one document, the stored original included, and
+keeps the row as a tombstone so the audit trail stays whole — see
+[Redaction](redaction.md). `verify` counts redactions separately and does not
+call them failures, so a store that has used it still passes its restore gate.
+Nothing else in Orpheus removes anything: storage otherwise only grows, which is
+the right default for an audit trail and is not a retention policy. A deployment
+that needs one now has the piece to build it out of.
 
 ---
 

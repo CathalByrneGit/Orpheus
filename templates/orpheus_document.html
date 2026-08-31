@@ -9,6 +9,17 @@
 
 {% if document %}
 <h1>{{ document.filename }}</h1>
+
+{% if document.redacted_at %}
+<p class="message-warning" style="border-left:3px solid #c00;padding-left:1em">
+  <strong>Redacted {{ document.redacted_at }}.</strong>
+  Everything read from this document was destroyed, and the file with it. The
+  row remains so the record of it does &mdash; and so does its place in the
+  audit trail below.<br>
+  <span style="color:#666">{{ document.redaction_note }}</span>
+</p>
+{% endif %}
+
 <p style="color:#666">
   {{ document.doc_type or "unclassified" }}
   {%- if document.sector %} &middot; {{ document.sector }}{% endif %}
@@ -16,6 +27,7 @@
   &middot; {{ document.n_pages }} page(s) &middot; {{ document.review_status }}
 </p>
 
+{% if not document.redacted_at %}
 <p>
   {% if document.original and document.original.available %}
   <a href="{{ urls.path('/-/orpheus/api/documents/' + document.document_id + '/original') }}">Open the original</a>
@@ -35,6 +47,16 @@
   <span style="color:#666">&mdash; a page at a time, offering what seems worth
   recording. Nothing is stored until you say so.</span>
 </p>
+
+{% if document.permissions and document.permissions.delete %}
+<p style="color:#666">
+  <a href="{{ urls.path('/-/orpheus/document/' + document.document_id + '/redact') }}"
+     style="color:#a00">Redact this document</a>
+  &mdash; destroy everything read from it and the file itself, keeping the
+  record that it was here. You will be shown what goes before anything does.
+</p>
+{% endif %}
+{% endif %}
 
 {% for run in document.runs or [] %}
   {% if run.status == "partial" %}
@@ -76,7 +98,17 @@
   {% if i.excerpt %}
   <blockquote style="color:#444;border-left:3px solid #ccc;padding-left:1em;margin-left:0">
     {{ i.excerpt }}
-    {% if i.page_no %}<br><span style="color:#888">page {{ i.page_no }}</span>{% endif %}
+    {% if i.page_no %}<br>
+    {%- if document.original and document.original.available
+           and document.original.media_type == "application/pdf" %}
+    {# `#page=` is a PDF viewer convention, so it is only offered where it
+       means something. A link that silently opened page one would be worse
+       than the plain number. #}
+    <a style="color:#888"
+       href="{{ urls.path('/-/orpheus/api/documents/' + document.document_id + '/original') }}#page={{ i.page_no }}"
+       target="_blank" rel="noopener">page {{ i.page_no }} in the original</a>
+    {%- else %}<span style="color:#888">page {{ i.page_no }}</span>{% endif %}
+    {%- endif %}
   </blockquote>
   {% endif %}
 

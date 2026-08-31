@@ -331,11 +331,11 @@ def with_pdf(initialised, capsys, offline):
     result = out_json(capsys, "--db", db, "--json", "ingest", str(PDF),
                       "--actor-id", actor, "--storage-root",
                       str(tmp_path / "storage"))
-    return db, result["documents"][0]["document_id"], tmp_path
+    return db, result["documents"][0]["document_id"], tmp_path, actor
 
 
 def test_original_writes_the_file_that_was_ingested(with_pdf, capsys):
-    db, document_id, tmp_path = with_pdf
+    db, document_id, tmp_path, actor = with_pdf
     out = out_json(capsys, "--db", db, "--json", "original", document_id,
                    "--to", str(tmp_path / "out.pdf"))
     assert out["verified"] is True
@@ -343,7 +343,7 @@ def test_original_writes_the_file_that_was_ingested(with_pdf, capsys):
 
 
 def test_original_into_a_directory_keeps_the_uploaded_name(with_pdf, capsys):
-    db, document_id, tmp_path = with_pdf
+    db, document_id, tmp_path, actor = with_pdf
     destination = tmp_path / "out"
     destination.mkdir()
     out = out_json(capsys, "--db", db, "--json", "original", document_id,
@@ -352,7 +352,7 @@ def test_original_into_a_directory_keeps_the_uploaded_name(with_pdf, capsys):
 
 
 def test_original_will_not_overwrite_without_being_told_to(with_pdf, capsys):
-    db, document_id, tmp_path = with_pdf
+    db, document_id, tmp_path, actor = with_pdf
     target = tmp_path / "out.pdf"
     target.write_text("something else")
     code, _, err = run(capsys, "--db", db, "original", document_id,
@@ -367,7 +367,7 @@ def test_original_will_not_overwrite_without_being_told_to(with_pdf, capsys):
 
 
 def test_verify_passes_on_a_store_that_agrees_with_its_disk(with_pdf, capsys):
-    db, _, _ = with_pdf
+    db, _, _, actor = with_pdf
     code, out, _ = run(capsys, "--db", db, "verify")
     assert code == 0
     assert "hash to the digests recorded at ingest" in out
@@ -376,7 +376,7 @@ def test_verify_passes_on_a_store_that_agrees_with_its_disk(with_pdf, capsys):
 def test_verify_exits_non_zero_so_it_can_gate_a_restore(with_pdf, capsys):
     """A database and a `storage/` from two different moments looks perfectly
     healthy from the inside. This is the only thing that would notice."""
-    db, document_id, _ = with_pdf
+    db, document_id, _, actor = with_pdf
     store = Store(db, mode="write")
     stored = Path(store.one("SELECT storage_path FROM documents "
                             "WHERE document_id = ?",
@@ -392,3 +392,58 @@ def test_verify_exits_non_zero_so_it_can_gate_a_restore(with_pdf, capsys):
     code, out, _ = run(capsys, "--db", db, "verify", "--quick")
     assert code == 0
     assert "Nothing was read" in out
+
+
+# -- redaction ----------------------------------------------------------------
+
+def test_redact_needs_a_reason(with_pdf, capsys):
+    db, document_id, _, actor = with_pdf
+    code, _, err = run(capsys, "--db", db, "redact", document_id,
+                       "--actor-id", actor, "--note", "  ")
+    assert code != 0 and "saying why" in err
+
+
+def test_a_dry_run_reports_what_would_go_and_goes_nowhere_near_it(with_pdf, capsys):
+    db, document_id, _, actor = with_pdf
+    out = out_json(capsys, "--db", db, "--json", "redact", document_id,
+                   "--actor-id", actor, "--note", "checking", "--dry-run")
+    assert out["dry_run"] is True and out["would_remove"]["pages"] > 0
+    # And the store is untouched: the pages and the file are still there.
+    store = Store(db, mode="read")
+    row = store.one("SELECT storage_path, redacted_at FROM documents "
+                    "WHERE document_id = ?", (document_id,))
+    pages = store.scalar("SELECT COUNT(*) FROM document_pages WHERE "
+                         "document_id = ?", (document_id,))
+    store.close()
+    assert row["redacted_at"] is None and pages > 0
+    assert Path(row["storage_path"]).exists()
+
+
+def test_redact_destroys_the_file_and_keeps_the_row(with_pdf, capsys):
+    db, document_id, _, actor = with_pdf
+    store = Store(db, mode="read")
+    stored = Path(store.one("SELECT storage_path FROM documents WHERE "
+                            "document_id = ?", (document_id,))["storage_path"])
+    store.close()
+    assert stored.exists()
+
+    code, out, _ = run(capsys, "--db", db, "redact", document_id,
+                       "--actor-id", actor, "--note", "Erasure request.")
+    assert code == 0 and "Redacted" in out
+    assert not stored.exists()
+
+    store = Store(db, mode="read")
+    row = store.one("SELECT * FROM documents WHERE document_id = ?", (document_id,))
+    store.close()
+    assert row is not None and row["redaction_note"] == "Erasure request."
+
+
+def test_verify_does_not_call_a_redaction_a_failure(with_pdf, capsys):
+    """Otherwise every store that ever removed a document fails its restore
+    gate for good, and a gate that is permanently red is a gate nobody reads."""
+    db, document_id, _, actor = with_pdf
+    run(capsys, "--db", db, "redact", document_id, "--actor-id", actor,
+        "--note", "Erasure request.")
+    code, out, _ = run(capsys, "--db", db, "verify")
+    assert code == 0
+    assert "redacted, and are absent on purpose" in out

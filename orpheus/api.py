@@ -30,6 +30,7 @@ from . import companion as companion_mod
 from . import corroboration as corroboration_mod
 from . import graph as graph_mod
 from . import ontology
+from . import redact as redact_mod
 from . import registers as registers_mod
 from . import questions as questions_mod
 from . import lint as lint_mod
@@ -131,7 +132,7 @@ def _run(handler, store, match, body, actor) -> tuple[int, Any]:
         # was well formed, and the answer is that the store disagrees with its
         # own disk -- which an operator has to act on, and which a client must
         # not retry its way past. 409 is the only code that says that.
-        status = 409 if exc.reason == "altered" else 404
+        status = {"altered": 409, "redacted": 410}.get(exc.reason, 404)
         return status, {"error": {"message": str(exc), "reason": exc.reason}}
     except ApiError as exc:
         return exc.status, {"error": {"message": str(exc)}}
@@ -237,7 +238,7 @@ def create_document(store, actor, body, **_):
 
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)", permission="view")
-def get_document(store, document_id, **_):
+def get_document(store, document_id, actor, **_):
     document = ingest_mod.get_document(store, document_id)
     if document is None:
         raise NotFound(f"No document {document_id!r}.")
@@ -251,7 +252,11 @@ def get_document(store, document_id, **_):
         (document_id,))
     return {**document, "review": review.review_progress(store, document_id),
             "runs": [dict(r) for r in runs],
-            "original": _original_summary(store, document_id)}
+            "original": _original_summary(store, document_id),
+            # What this actor may do, resolved once here rather than guessed
+            # at by every client that wants to know whether to draw a button.
+            "permissions": {action: auth.can(store, actor, document_id, action)
+                            for action in rubric.ACTIONS}}
 
 
 def _original_summary(store, document_id: str) -> dict:
@@ -276,8 +281,41 @@ def _original_summary(store, document_id: str) -> dict:
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/text", permission="view")
 def get_text(store, document_id, **_):
+    _refuse_if_redacted(store, document_id)
     return {"document_id": document_id,
             "pages": ingest_mod.document_pages(store, document_id)}
+
+
+def _refuse_if_redacted(store, document_id: str) -> None:
+    """A redacted document has no text, no instances and no original.
+
+    Those routes would answer with empty lists, which reads as "this document
+    said nothing" rather than "this document was removed". The difference is
+    the whole point of keeping the row.
+    """
+    row = store.one("SELECT redacted_at, redaction_note FROM documents "
+                    "WHERE document_id = ?", (document_id,))
+    if row and row["redacted_at"]:
+        raise ApiError(410, f"Document {document_id!r} was redacted on "
+                            f"{row['redacted_at']}: {row['redaction_note']}")
+
+
+@route("POST", r"/documents/(?P<document_id>[^/]+)/redact", permission="delete")
+def post_redact(store, document_id, actor, body, **_):
+    """Destroy everything read from a document; keep the record it was here.
+
+    `delete` permission, which resolves to the document's owner and to
+    administrators -- the same two who could have shared it. A `viewer` or an
+    `editor` cannot, and neither can a link: a share is permission to work on
+    a document, never to remove one.
+
+    `?dry_run=1` counts what would go without touching anything. Offering an
+    irreversible action without a way to look first is not offering a choice.
+    """
+    dry_run = str(body.get("dry_run", "")).lower() in ("1", "true", "yes")
+    return redact_mod.redact_document(
+        store, document_id, actor_id=_actor_id(actor),
+        note=body.get("note"), dry_run=dry_run)
 
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/original", permission="view")
@@ -312,6 +350,7 @@ def get_original(store, document_id, body, **_):
 
 @route("POST", r"/documents/(?P<document_id>[^/]+)/classify", permission="edit")
 def post_classify(store, document_id, actor, body, **_):
+    _refuse_if_redacted(store, document_id)
     return classify.classify(store, document_id, actor_id=_actor_id(actor),
                              tier=body.get("tier", "local"),
                              opt_in=bool(body.get("cloud_opt_in")),
@@ -320,6 +359,7 @@ def post_classify(store, document_id, actor, body, **_):
 
 @route("POST", r"/documents/(?P<document_id>[^/]+)/extract", permission="edit")
 def post_extract(store, document_id, actor, body, **_):
+    _refuse_if_redacted(store, document_id)
     return extract_mod.extract(store, document_id, tier=body.get("tier", "local"),
                                actor_id=_actor_id(actor),
                                opt_in=bool(body.get("cloud_opt_in")),
@@ -330,6 +370,7 @@ def post_extract(store, document_id, actor, body, **_):
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/instances", permission="view")
 def get_instances(store, document_id, body, **_):
+    _refuse_if_redacted(store, document_id)
     return {"instances": extract_mod.document_instances(
         store, document_id, type_id=body.get("type_id"),
         include_rejected=bool(body.get("include_rejected")))}
@@ -343,18 +384,21 @@ def get_history(store, document_id, **_):
 
 @route("POST", r"/documents/(?P<document_id>[^/]+)/review", permission="edit")
 def post_document_review(store, document_id, actor, body, **_):
+    _refuse_if_redacted(store, document_id)
     return review.mark_document_reviewed(store, document_id, _actor_id(actor),
                                          reviewed=body.get("reviewed", True))
 
 
 @route("POST", r"/documents/(?P<document_id>[^/]+)/share", permission="share")
 def post_share(store, document_id, actor, body, **_):
+    _refuse_if_redacted(store, document_id)
     return {"share": auth.share_document(store, document_id, body["actor_id"],
                                          body.get("role", "viewer"), actor)}
 
 
 @route("POST", r"/documents/(?P<document_id>[^/]+)/visibility", permission="share")
 def post_visibility(store, document_id, actor, body, **_):
+    _refuse_if_redacted(store, document_id)
     return {"visibility": auth.set_visibility(store, document_id,
                                               body["visibility"], _actor_id(actor))}
 
@@ -420,18 +464,21 @@ def post_amendment_review(store, amendment_id, actor, body, **_):
 @route("POST", r"/documents/(?P<document_id>[^/]+)/concepts/evaluate",
        permission="edit")
 def post_evaluate(store, document_id, actor, **_):
+    _refuse_if_redacted(store, document_id)
     return {"results": concepts.evaluate_concepts(store, document_id,
                                                   actor_id=_actor_id(actor))}
 
 
 @route("POST", r"/documents/(?P<document_id>[^/]+)/score", permission="edit")
 def post_score(store, document_id, actor, body, **_):
+    _refuse_if_redacted(store, document_id)
     return concepts.evaluate_score(store, document_id, body.get("score_id"),
                                    actor_id=_actor_id(actor))
 
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/evaluations", permission="view")
 def get_evaluations(store, document_id, body, **_):
+    _refuse_if_redacted(store, document_id)
     return {"evaluations": concepts.document_evaluations(
         store, document_id, kind=body.get("kind"),
         include_stale=body.get("include_stale", True))}
@@ -447,6 +494,7 @@ def post_evaluation_review(store, evaluation_id, actor, body, **_):
 @route("POST", r"/documents/(?P<document_id>[^/]+)/corpus-analysis",
        permission="edit")
 def post_corpus_analysis(store, document_id, actor, body, **_):
+    _refuse_if_redacted(store, document_id)
     return analysis.corpus_analysis(store, document_id, actor_id=_actor_id(actor),
                                     narrate=bool(body.get("narrate")),
                                     tier=body.get("tier", "cloud"),
@@ -578,6 +626,7 @@ def get_mention_candidates(store, instance_id, body, **_):
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/entities", permission="view")
 def get_document_entities(store, document_id, **_):
+    _refuse_if_redacted(store, document_id)
     return {"entities": entities_mod.entities_in_document(store, document_id)}
 
 
@@ -688,6 +737,7 @@ def post_read_passage(store, document_id, page_no, actor, body, **_):
     a set of proposals, not a change to the document. Requiring `edit` would
     stop a viewer from reading with the companion at all.
     """
+    _refuse_if_redacted(store, document_id)
     return companion_mod.read_passage(
         store, document_id, int(page_no), actor_id=_actor_id(actor),
         engine=body.get("engine", companion_mod.DEFAULT_ENGINE),
@@ -700,12 +750,14 @@ def post_read_passage(store, document_id, page_no, actor, body, **_):
 @route("GET", r"/documents/(?P<document_id>[^/]+)/passages/(?P<page_no>\d+)",
        permission="view")
 def get_passage(store, document_id, page_no, body, **_):
+    _refuse_if_redacted(store, document_id)
     return companion_mod.passage(store, document_id, int(page_no),
                                  status=body.get("status", "offered"))
 
 
 @route("GET", r"/documents/(?P<document_id>[^/]+)/reading", permission="view")
 def get_reading_progress(store, document_id, actor, **_):
+    _refuse_if_redacted(store, document_id)
     return companion_mod.reading_progress(store, document_id,
                                           actor_id=_actor_id(actor))
 

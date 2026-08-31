@@ -183,6 +183,7 @@ class OriginalUnavailable(OrpheusError):
     `reason` says which, because the three call for different responses and a
     single "could not serve that" would hide the one that matters:
 
+    - `redacted`   -- the document was deliberately removed. Not a fault.
     - `not_stored` -- the row never recorded a path.
     - `misfiled`   -- the path is not where a document of that hash belongs.
     - `missing`    -- the path is right and nothing is there.
@@ -225,6 +226,16 @@ def original(store: Store, document_id: str, *, verify: bool = True) -> dict:
     document = get_document(store, document_id)
     if document is None:
         raise NotFound(f"No document {document_id!r}.")
+
+    # Checked before `storage_path`, because a redaction clears that column
+    # and would otherwise report as `not_stored` -- an accident, when it was
+    # the most deliberate thing anyone did to this row.
+    if document["redacted_at"]:
+        raise OriginalUnavailable(
+            f"Document {document_id!r} was redacted on "
+            f"{document['redacted_at']}. The original was destroyed; the row "
+            "remains so the record of it does.",
+            reason="redacted")
 
     recorded = document["storage_path"]
     if not recorded:
@@ -323,25 +334,33 @@ def audit_storage(store: Store, *, verify: bool = False,
             checked_bytes += located["byte_size"] if verify else 0
         documents.append(entry)
 
-    unavailable = [d for d in documents if not d["available"]]
+    # A redacted original is absent on purpose. Counting it as a fault would
+    # mean every store that ever removed a document failed its restore check
+    # for good, and a gate that is permanently red is a gate nobody reads.
+    redacted = [d for d in documents if d.get("reason") == "redacted"]
+    unavailable = [d for d in documents
+                   if not d["available"] and d.get("reason") != "redacted"]
     reasons: dict[str, int] = {}
     for entry in unavailable:
         reasons[entry["reason"]] = reasons.get(entry["reason"], 0) + 1
     return {
         "verified": verify,
         "n_documents": len(documents),
-        "n_available": len(documents) - len(unavailable),
+        "n_available": len(documents) - len(unavailable) - len(redacted),
         "n_unavailable": len(unavailable),
+        "n_redacted": len(redacted),
         "reasons": reasons,
         "bytes_read": checked_bytes,
         # A pass that only stat()ed cannot say a corpus is sound, and saying so
         # is the difference between a report and a reassurance.
-        "headline": _audit_headline(len(documents), unavailable, verify),
+        "headline": _audit_headline(len(documents), unavailable, verify,
+                                    len(redacted)),
         "documents": documents,
     }
 
 
-def _audit_headline(total: int, unavailable: list[dict], verify: bool) -> str:
+def _audit_headline(total: int, unavailable: list[dict], verify: bool,
+                    n_redacted: int = 0) -> str:
     """What was found, and -- when nothing was read -- what could not have been.
 
     A pass that only stat()ed cannot say a corpus is unaltered, and the
@@ -352,15 +371,27 @@ def _audit_headline(total: int, unavailable: list[dict], verify: bool) -> str:
         return "No documents to check."
     unread = ("Nothing was read, so this says they exist, not that they are "
               "unaltered -- run `orpheus verify` for that.")
+    # Named, never folded into the total. A store that has removed documents
+    # should say so every time it is asked, and a count that quietly shrank
+    # would be the one way a redaction could look like a loss.
+    removed = (f" {n_redacted} were redacted, and are absent on purpose."
+               if n_redacted else "")
+    total -= n_redacted
+    if not total:
+        return (f"Nothing left to check: all {n_redacted} documents were "
+                "redacted, and are absent on purpose.")
     if not unavailable:
-        return (f"All {total} originals are present and hash to the digests "
-                f"recorded at ingest." if verify else
-                f"All {total} originals are where they should be. {unread}")
+        kept = (f"All {total} remaining originals are present and hash to the "
+                f"digests recorded at ingest." if verify else
+                f"All {total} remaining originals are where they should be. "
+                f"{unread}")
+        return kept + removed
     kinds = ", ".join(f"{sum(1 for u in unavailable if u['reason'] == r)} "
                       f"{r}" for r in sorted({u["reason"] for u in unavailable}))
     found = (f"{len(unavailable)} of {total} originals cannot be served: "
              f"{kinds}. Every excerpt taken from them is now unverifiable.")
-    return found if verify else f"{found} {unread}"
+    found = found if verify else f"{found} {unread}"
+    return found + removed
 
 
 def get_document(store: Store, document_id: str) -> dict | None:

@@ -23,7 +23,7 @@ from pathlib import Path
 
 from . import analysis, auth, bundle as bundle_mod, classify, concepts
 from . import datasette_config, extract as extract_mod, ingest as ingest_mod
-from . import quality, review, textract
+from . import quality, redact, review, textract
 from .store import Store
 from .utils import OrpheusError
 
@@ -280,6 +280,26 @@ def cmd_original(args) -> int:
     emit({"document_id": args.document_id, "written": str(destination),
           "byte_size": located["byte_size"], "file_hash": located["file_hash"],
           "verified": True}, args.json)
+    return 0
+
+
+def cmd_redact(args) -> int:
+    """Destroy everything read from a document; keep the record it was here.
+
+    Irreversible. `--dry-run` counts what would go without touching anything,
+    which is the only honest way to offer an action nobody can take back.
+    """
+    store = open_store(args, mode="write" if not args.dry_run else "read")
+    try:
+        result = redact.redact_document(store, args.document_id,
+                                        actor_id=args.actor_id, note=args.note,
+                                        dry_run=args.dry_run)
+    finally:
+        store.close()
+    if args.json:
+        emit(result, True)
+    else:
+        print(result["headline"])
     return 0
 
 
@@ -1417,6 +1437,16 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--tier", default="local", choices=("local", "cloud"))
     ingest.add_argument("--engine")
     ingest.add_argument("--cloud-opt-in", action="store_true")
+
+    redact_cmd = add("redact", cmd_redact,
+                     "destroy everything read from a document, keeping the row")
+    redact_cmd.add_argument("document_id")
+    redact_cmd.add_argument("--actor-id", required=True)
+    redact_cmd.add_argument("--note", required=True,
+                            help="why. A redaction nobody can account for "
+                                 "later is indistinguishable from data loss")
+    redact_cmd.add_argument("--dry-run", action="store_true",
+                            help="count what would go; change nothing")
 
     verify = add("verify", cmd_verify,
                  "check every stored original against its recorded digest")

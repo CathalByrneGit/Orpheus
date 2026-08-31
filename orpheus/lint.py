@@ -319,7 +319,10 @@ def unavailable_originals(store: Store, document_id: str | None = None,
     audit = ingest_mod.audit_storage(store, verify=False, document_id=document_id)
     findings = []
     for entry in audit["documents"]:
-        if entry["available"]:
+        # A redacted original is absent because somebody decided it should be.
+        # Reporting it as a problem would train a reviewer to ignore this
+        # check on exactly the stores that use redaction properly.
+        if entry["available"] or entry["reason"] == "redacted":
             continue
         misfiled = entry["reason"] == "misfiled"
         findings.append(_finding(

@@ -146,6 +146,8 @@ STATUS="$("${CURL[@]}" -o /dev/null -w '%{http_code}' -H "if-none-match: $ETAG" 
   grep -qi "^content-disposition: attachment" || fail "?download did not force a download"
 
 grep -q "Open the original" "$WORK/doc.html" || fail "the document page does not offer it"
+# An excerpt says "page 7"; the link beside it should open the source at page 7.
+grep -q "original#page=" "$WORK/doc.html" || fail "no excerpt is anchored to its page"
 
 # The question a client asks before deciding to fetch fifty megabytes, answered
 # without fetching fifty megabytes.
@@ -428,6 +430,66 @@ report = json.load(sys.stdin)
 assert "does not change any confidence value" in report["note"], report["note"]
 print("  ", report["headline"][:72])
 '
+
+say "redaction: shown what goes before anything does"
+REDACT="$BASE/-/orpheus/document/$DOC/redact"
+"${CURL[@]}" "$REDACT" > "$WORK/redact.html"
+grep -q "This cannot be undone" "$WORK/redact.html" || fail "no warning on the page"
+grep -q "instances" "$WORK/redact.html" || fail "the page does not say what goes"
+R_CSRF="$(grep -o 'name="csrftoken" value="[^"]*"' "$WORK/redact.html" | head -1 |
+          sed 's/.*value="//;s/"//')"
+[ -n "$R_CSRF" ] || fail "no CSRF token on the redact page"
+
+say "  a redaction with no reason is refused"
+"${CURL[@]}" -o /dev/null -D - -X POST --data-urlencode "csrftoken=$R_CSRF" \
+  --data-urlencode "note=" "$REDACT" | tr -d '\r' |
+  awk 'tolower($1)=="location:"{print $2}' | grep -q "error=" \
+  || fail "a redaction with no reason was accepted"
+
+say "  and one with a reason destroys the file and keeps the row"
+STORED="$(python3 -c "
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1])
+print(conn.execute('SELECT storage_path FROM documents WHERE document_id = ?', (sys.argv[2],)).fetchone()[0])
+" "$WORK/orpheus.sqlite" "$DOC")"
+[ -f "$STORED" ] || fail "the original was already gone"
+"${CURL[@]}" -o /dev/null -X POST --data-urlencode "csrftoken=$R_CSRF" \
+  --data-urlencode "note=E2E: erasure request from the signatory." "$REDACT"
+[ ! -f "$STORED" ] || fail "the original survived the redaction"
+
+STATUS="$("${CURL[@]}" -o /dev/null -w '%{http_code}' \
+  "$BASE/-/orpheus/api/documents/$DOC/text")"
+[ "$STATUS" = "410" ] || fail "reading a redacted document returned $STATUS, expected 410"
+
+"${CURL[@]}" "$BASE/-/orpheus/document/$DOC" > "$WORK/tomb.html"
+grep -q "Redacted" "$WORK/tomb.html" || fail "the page does not say it was redacted"
+grep -q "erasure request from the signatory" "$WORK/tomb.html" \
+  || fail "the page does not say why"
+
+python3 - "$WORK/orpheus.sqlite" "$DOC" <<'PY2'
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1]); conn.row_factory = sqlite3.Row
+doc = sys.argv[2]
+row = conn.execute("SELECT * FROM documents WHERE document_id = ?", (doc,)).fetchone()
+assert row is not None, "the row was deleted, not redacted"
+assert row["redacted_at"] and row["storage_path"] is None, dict(row)
+# The history keeps its rows and loses its payloads.
+history = conn.execute(
+    "SELECT action, previous_value, new_value FROM edit_history "
+    "WHERE document_id = ? ORDER BY seq", (doc,)).fetchall()
+assert [h["action"] for h in history][0] == "ingest", [h["action"] for h in history]
+assert history[-1]["action"] == "redact", [h["action"] for h in history]
+for h in history[:-1]:
+    assert h["previous_value"] is None and h["new_value"] is None, dict(h)
+# Nothing read from it is left anywhere.
+assert not conn.execute("SELECT 1 FROM document_pages WHERE document_id = ?",
+                        (doc,)).fetchall()
+assert not conn.execute("SELECT 1 FROM provenance WHERE document_id = ?",
+                        (doc,)).fetchall()
+assert not conn.execute("SELECT 1 FROM instances_KeyDate WHERE document_id = ?",
+                        (doc,)).fetchall()
+print(f"   row kept, {len(history)} history entries kept, everything else gone")
+PY2
 
 say "the export: a markdown bundle nothing has to read the store to use"
 python3 - "$WORK" <<'EXPORTPY'

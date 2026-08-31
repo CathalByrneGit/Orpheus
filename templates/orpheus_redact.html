@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Redact {{ document.filename }}{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus/document/' + document.document_id) }}">&larr; {{ document.filename }}</a></p>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+
+<h1>Redact {{ document.filename }}</h1>
+
+<p class="message-warning" style="border-left:3px solid #c00;padding-left:1em">
+  <strong>This cannot be undone.</strong> Everything read from this document is
+  destroyed: its text, its extracted values, every excerpt quoting it, the
+  relations drawn from it, and the file itself.
+</p>
+
+<p>
+  The row stays. So does its place in the audit trail, and the record that you
+  removed it, when, and why &mdash; that account is the only thing a redaction
+  leaves, and it is why one is not a delete.
+</p>
+
+<h2>What goes</h2>
+<p style="color:#666">Counted against the store as it is now, not estimated.</p>
+<table class="rows-and-columns">
+  <tbody>
+  {% for name, n in preview.would_remove.items() %}
+    {% if n %}
+    <tr><th style="text-align:left">{{ name.replace('_', ' ') }}</th><td>{{ n }}</td></tr>
+    {% endif %}
+  {% endfor %}
+  {% for path in preview.files %}
+    <tr><th style="text-align:left">file</th><td><code>{{ path }}</code></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if preview.would_remove.entity_pages %}
+<p style="color:#666">
+  {{ preview.would_remove.entity_pages }} wiki page(s) have no source but this
+  document, so they go with it. A page that outlived every one of its sources
+  would assert something no document says.
+</p>
+{% endif %}
+
+<h2>Why</h2>
+<form method="post" action="{{ urls.path('/-/orpheus/document/' + document.document_id + '/redact') }}">
+  <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  <p>
+    <label for="note">
+      Required. A redaction nobody can account for later is indistinguishable
+      from data loss, and the person who has to account for it is rarely the
+      person who did it.
+    </label><br>
+    <textarea id="note" name="note" rows="3" style="width:40em"
+              placeholder="e.g. Erasure request from the signatory, 2026-08-31."></textarea>
+  </p>
+  <p>
+    <button type="submit">Redact this document</button>
+    <a href="{{ urls.path('/-/orpheus/document/' + document.document_id) }}"
+       style="margin-left:1em">Cancel</a>
+  </p>
+</form>
+{% endblock %}

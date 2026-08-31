@@ -808,6 +808,35 @@ MIGRATIONS: list[dict] = [
             "ON ontology_evidence (candidate_id)",
         ],
     },
+    {
+        "version": 14,
+        "name": "redaction",
+        # The one thing this store could not do.
+        #
+        # Everything here is built to be immutable: provenance is the record of
+        # what the machine said, a rejected extraction is kept because deleting
+        # it would throw away the measurement along with the mistake, and
+        # nothing anywhere deletes. That is right for an audit trail and wrong
+        # for a corpus of contracts, which carry names, signatures, addresses
+        # and third parties who never agreed to be in anybody's database. A
+        # deployment that cannot remove a document cannot take one in.
+        #
+        # So the answer is not a delete. It is a tombstone: the row survives so
+        # the count, the ordering and the audit trail stay true, and everything
+        # read *from* the document is destroyed. "A document was here, this
+        # person removed it, on this date, for this reason" is itself part of
+        # the record, and the one fact a deletion would also erase.
+        "statements": [
+            "ALTER TABLE documents ADD COLUMN redacted_at TEXT",
+            "ALTER TABLE documents ADD COLUMN redacted_by TEXT "
+            "REFERENCES actors(actor_id)",
+            # Why, in the redactor's own words. A redaction nobody can account
+            # for later is indistinguishable from data loss.
+            "ALTER TABLE documents ADD COLUMN redaction_note TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_documents_redacted "
+            "ON documents (redacted_at)",
+        ],
+    },
 ]
 
 

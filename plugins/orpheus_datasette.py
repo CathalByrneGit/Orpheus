@@ -246,6 +246,7 @@ def register_routes():
     return [
         (r"^/-/orpheus$", index_page),
         (r"^/-/orpheus/upload$", upload),
+        (r"^/-/orpheus/document/(?P<document_id>[^/]+)/redact$", redact_act),
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)$", document_page),
         (r"^/-/orpheus/review$", review),
         (r"^/-/orpheus/read/act$", read_act),
@@ -959,6 +960,45 @@ async def ontology_act(datasette, request):
                           + f" \u2014 {result['status']}"
                           + (f" as {result['accepted_as']}"
                              if result.get("accepted_as") else "") + ".")
+
+
+async def redact_act(datasette, request):
+    """Destroy everything read from a document, from the browser.
+
+    Two steps rather than one. A GET shows what would go, counted by a real
+    dry run against the store rather than estimated; only a POST does it. An
+    irreversible action behind a single click is a trap, and the count is the
+    part that makes the choice informed -- "this will also remove 2 entity
+    pages" is not something a person can work out from the page they are on.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    document_id = request.url_vars["document_id"]
+
+    if request.method != "POST":
+        status, preview = await _call(
+            datasette, request, "POST", f"/documents/{document_id}/redact",
+            {"dry_run": "1", "note": "(preview)"})
+        if status != 200:
+            return _redirect(datasette, f"/-/orpheus/document/{document_id}",
+                             error=preview["error"]["message"])
+        _, document = await _call(datasette, request, "GET",
+                                  f"/documents/{document_id}")
+        return await _render(datasette, request, "orpheus_redact.html", {
+            "document": document.get("document", document),
+            "preview": preview,
+            "error": request.args.get("error"),
+        })
+
+    form = await request.post_vars()
+    status, result = await _call(
+        datasette, request, "POST", f"/documents/{document_id}/redact",
+        {"note": form.get("note") or ""})
+    if status != 200:
+        return _redirect(datasette, f"/-/orpheus/document/{document_id}/redact",
+                         error=result["error"]["message"])
+    return _redirect(datasette, f"/-/orpheus/document/{document_id}",
+                     note=result["headline"])
 
 
 async def wiki_queue(datasette, request):

@@ -90,6 +90,7 @@ uploads something the server cannot read.
 | `GET` | `/documents/<id>/original` | view | The file as uploaded; `?metadata=1` for its size and digest, `?download=1` to force a save |
 | `GET` | `/documents/<id>/instances` | view | `?type_id=`, `?include_rejected=` |
 | `GET` | `/documents/<id>/history` | view | The document's audit trail |
+| `POST` | `/documents/<id>/redact` | **delete** | Destroy everything read from it, keep the row; `?dry_run=1` counts first |
 
 #### Getting the original back
 

@@ -36,6 +36,7 @@ out would have made the wiki misleading rather than merely incomplete:
   resolves towards a single answer, so without it two confirmed and
   contradictory facts render in the same voice and read as agreement. See
   [Conflicts and lint](conflicts-and-lint.md).
+  [Redaction](redaction.md).
 - **Agreement is counted in wordings, not rows.** Six call-off contracts
   carrying one framework's boilerplate is one source wearing six hats, and
   reporting it as six agreeing sources manufactures certainty out of
