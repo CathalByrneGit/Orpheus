@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}What falls due{% endblock %}
+{% block content %}
+<p><a href="{{ urls.path('/-/orpheus') }}">&larr; Documents</a></p>
+
+<h1>What falls due</h1>
+
+<p style="color:#666">
+  As of {{ calendar.as_of }}, looking {{ calendar.within_days }} days ahead
+  &mdash;
+  {% for n in windows %}
+    <a href="{{ urls.path('/-/orpheus/calendar') }}?within_days={{ n }}"
+       {% if n == calendar.within_days %}style="font-weight:bold"{% endif %}>{{ n }}d</a>{% if not loop.last %} &middot; {% endif %}
+  {% endfor %}
+</p>
+
+<p {% if calendar.n_overdue %}class="message-warning"
+   style="border-left:3px solid #d90;padding-left:1em"{% endif %}>
+  {{ calendar.headline }}
+</p>
+
+{% macro rows(entries) %}
+<table class="rows-and-columns">
+  <thead>
+    <tr><th>Date</th><th></th><th>What</th><th>Document</th><th>Checked</th></tr>
+  </thead>
+  <tbody>
+  {% for e in entries %}
+    <tr>
+      <td style="white-space:nowrap">{{ e.date }}</td>
+      <td style="color:#888;white-space:nowrap">
+        {%- if e.days > 0 %}in {{ e.days }}d{% elif e.days < 0 %}{{ -e.days }}d ago{% else %}today{% endif %}</td>
+      <td>
+        {{ e.role }}
+        {%- if e.subject %} &middot; {{ e.subject }}{% endif %}
+        {%- if e.recurrence %}<br><span style="color:#888">recurs: {{ e.recurrence }}</span>{% endif %}
+        {%- if e.other_reading %}
+        <br><span style="color:#a60">&ldquo;{{ e.raw_text }}&rdquo; reads two ways
+        &mdash; this may be {{ e.other_reading }}</span>
+        {%- endif %}
+        {%- if e.excerpt %}<br><span style="color:#888">{{ e.excerpt }}</span>{% endif %}
+      </td>
+      <td><a href="{{ urls.path('/-/orpheus/document/' + e.document_id) }}">{{ e.filename or e.document_id }}</a>
+        {%- if e.page_no %} <span style="color:#888">p{{ e.page_no }}</span>{% endif %}</td>
+      <td style="white-space:nowrap">
+        {%- if e.reviewed %}{{ e.status }}
+        {%- else %}<span style="color:#a60">not checked</span>{% endif %}
+        <br><span style="color:#888">{{ e.confidence_label }}</span>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% if calendar.overdue %}
+<h2>Past its date</h2>
+<p style="color:#666">
+  A date that has passed and that nobody has checked is the most alarming row
+  here, so it gets its own section rather than a negative number in the list
+  below.
+</p>
+{{ rows(calendar.overdue) }}
+{% endif %}
+
+{% if calendar.due %}
+<h2>Coming up</h2>
+{{ rows(calendar.due) }}
+{% endif %}
+
+{% if not calendar.overdue and not calendar.due %}
+<p>Nothing in this window.</p>
+{% endif %}
+
+<h2>What this page can speak for</h2>
+<p style="color:#666">
+  {{ calendar.coverage.n_with_a_due_date }} of
+  {{ calendar.coverage.n_documents }} document(s) have a date that falls due.
+  {% if calendar.n_context_dates_set_aside %}
+  {{ calendar.n_context_dates_set_aside }} other date(s) were set aside as
+  start dates, signature dates or dates with no role read from them &mdash;
+  facts a contract has, not things that fall due.
+  {% endif %}
+</p>
+{% endblock %}

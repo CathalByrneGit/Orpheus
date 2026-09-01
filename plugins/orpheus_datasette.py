@@ -251,6 +251,7 @@ def register_routes():
         (r"^/-/orpheus/review$", review),
         (r"^/-/orpheus/read/act$", read_act),
         (r"^/-/orpheus/read/(?P<document_id>[^/]+)$", read_page),
+        (r"^/-/orpheus/calendar$", calendar_page),
         (r"^/-/orpheus/lint$", lint_page),
         (r"^/-/orpheus/network$", network_page),
         (r"^/-/orpheus/map$", map_page),
@@ -274,6 +275,8 @@ def menu_links(datasette, actor):
     if not actor:
         return []
     return [{"href": datasette.urls.path("/-/orpheus"), "label": "Documents"},
+            {"href": datasette.urls.path("/-/orpheus/calendar"),
+             "label": "Calendar"},
             {"href": datasette.urls.path("/-/orpheus/wiki"), "label": "Wiki"},
             {"href": datasette.urls.path("/-/orpheus/ontology"),
              "label": "Ontology"},
@@ -515,6 +518,28 @@ async def entity_page(datasette, request):
                       if e["entity_id"] != page["entity"]["entity_id"]],
         "error": request.args.get("error"),
         "note": request.args.get("note"),
+    })
+
+
+async def calendar_page(datasette, request):
+    """What falls due, with how much of the corpus can speak to it.
+
+    The one page somebody opens on a Monday without being asked to. Which is
+    why the review state is on every row rather than in a filter: a diary of
+    unconfirmed machine readings that looks like a diary is the failure this
+    page has to work hardest to avoid.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    body = {"within_days": request.args.get("within_days") or "90"}
+    if request.args.get("as_of"):
+        body["as_of"] = request.args["as_of"]
+    status, result = await _call(datasette, request, "GET", "/calendar", body)
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus", error=result["error"]["message"])
+    return await _render(datasette, request, "orpheus_calendar.html", {
+        "calendar": result,
+        "windows": (30, 90, 180, 365),
     })
 
 

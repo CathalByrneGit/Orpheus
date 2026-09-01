@@ -316,6 +316,7 @@ decided then stays readable. See [Conflicts and lint](conflicts-and-lint.md).
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
+| `GET` | `/calendar` | **administrator** | What falls due; `?within_days=`, `?as_of=`, `?document_id=` |
 | `GET` | `/review/triage` | **administrator** | What to review first, and what it would settle; `?document_id=` for one |
 | `GET` | `/lint` | **administrator** | `?deep=0` for the cheap checks, `?checks=a,b` |
 | `GET` | `/storage/audit` | **administrator** | Are the originals still there; `?verify=1` with a `document_id` re-reads one |

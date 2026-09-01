@@ -29,6 +29,7 @@ from . import export_md
 from . import companion as companion_mod
 from . import corroboration as corroboration_mod
 from . import graph as graph_mod
+from . import obligations as obligations_mod
 from . import ontology
 from . import redact as redact_mod
 from . import registers as registers_mod
@@ -1230,6 +1231,33 @@ def post_export(store, actor, body, **_):
     return export_md.export(
         store, body["out"], type_id=body.get("type_id"),
         confirmed_only=body.get("confirmed_only") in ("1", "true", "True", True))
+
+
+@route("GET", "/calendar")
+def get_calendar(store, actor, body, **_):
+    """What falls due, and how much of the corpus can speak to that.
+
+    Scoped like the other corpus-wide views: administrator-only across the
+    whole store, or pass `document_id` for one you can read.
+
+    `as_of` is a plain ISO date and defaults to today, so a report can be
+    reproduced -- "seventeen things were due last quarter" is a claim about a
+    date, and reading it off the clock makes the same request answer
+    differently every morning with nothing recording why.
+    """
+    document_id = body.get("document_id")
+    if document_id:
+        if not auth.can(store, actor, document_id, "view"):
+            raise PermissionDenied(f"Not permitted to view {document_id}.")
+    elif not actor.get("is_admin"):
+        raise PermissionDenied(
+            "A corpus-wide calendar spans documents you may not be able to "
+            "read. Pass `document_id` for one you can.")
+    return obligations_mod.upcoming(
+        store, within_days=_int(body, "within_days",
+                                obligations_mod.DEFAULT_WINDOW),
+        as_of=body.get("as_of") or None, document_id=document_id,
+        limit=_int(body, "limit", 200))
 
 
 @route("GET", "/review/triage")

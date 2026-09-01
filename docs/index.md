@@ -35,6 +35,7 @@ out would have made the wiki misleading rather than merely incomplete:
 - **A verified disagreement has somewhere to live.** Every other review verb
   resolves towards a single answer, so without it two confirmed and
   contradictory facts render in the same voice and read as agreement. See
+  [What falls due](calendar.md).
   [Conflicts and lint](conflicts-and-lint.md).
   [Redaction](redaction.md).
 - **Agreement is counted in wordings, not rows.** Six call-off contracts

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from . import analysis, auth, bundle as bundle_mod, classify, concepts
 from . import datasette_config, extract as extract_mod, ingest as ingest_mod
+from . import obligations as obligations_mod
 from . import quality, redact, review, textract
 from .store import Store
 from .utils import OrpheusError
@@ -281,6 +282,41 @@ def cmd_original(args) -> int:
           "byte_size": located["byte_size"], "file_hash": located["file_hash"],
           "verified": True}, args.json)
     return 0
+
+
+def cmd_calendar(args) -> int:
+    """What falls due, and how much of the corpus can speak to that.
+
+    Exits non-zero when anything is past its date, so it can run from cron and
+    only speak up when there is something to say.
+    """
+    store = open_store(args, mode="read")
+    try:
+        result = obligations_mod.upcoming(store, within_days=args.within_days,
+                                          as_of=args.as_of,
+                                          document_id=args.document_id)
+    finally:
+        store.close()
+    if args.json:
+        emit(result, True)
+        return 1 if result["n_overdue"] else 0
+
+    print(result["headline"])
+    for label, entries in (("past its date", result["overdue"]),
+                           ("coming up", result["due"])):
+        if not entries:
+            continue
+        print(f"\n  {label}:")
+        for entry in entries:
+            when = (f"{entry['days']:+5}d" if entry["days"] else "  today")
+            mark = " " if entry["reviewed"] else "?"
+            flag = (f"  ({entry['raw_text']} -- or {entry['other_reading']})"
+                    if entry["other_reading"] else "")
+            print(f"    {entry['date']} {when} {mark} {entry['role']:<10} "
+                  f"{entry['filename'] or entry['document_id']}{flag}")
+    if result["due"] or result["overdue"]:
+        print("\n  ? marks a machine reading nobody has confirmed.")
+    return 1 if result["n_overdue"] else 0
 
 
 def cmd_triage(args) -> int:
@@ -1465,6 +1501,12 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--tier", default="local", choices=("local", "cloud"))
     ingest.add_argument("--engine")
     ingest.add_argument("--cloud-opt-in", action="store_true")
+
+    calendar = add("calendar", cmd_calendar, "what falls due, and when")
+    calendar.add_argument("--within-days", type=int,
+                          default=obligations_mod.DEFAULT_WINDOW)
+    calendar.add_argument("--as-of", help="an ISO date; defaults to today")
+    calendar.add_argument("--document-id")
 
     triage = add("triage", cmd_triage, "what to review first, and why")
     triage.add_argument("--limit", type=int, default=20)

@@ -180,6 +180,26 @@ BODY="$("${CURL[@]}" -w '\n%{http_code}' "$ORIGINAL")"
 grep -q '"reason": "altered"' <<<"$BODY" || fail "the reason was not reported: $BODY"
 mv "$STORED.aside" "$STORED"
 
+say "the calendar: what falls due, and what it cannot speak for"
+"${CURL[@]}" "$BASE/-/orpheus/calendar?within_days=3650" > "$WORK/calendar.html"
+grep -q "What falls due" "$WORK/calendar.html" || fail "the calendar page did not render"
+grep -qi "not checked" "$WORK/calendar.html" \
+  || fail "the calendar does not mark unconfirmed readings"
+grep -q "What this page can speak for" "$WORK/calendar.html" \
+  || fail "the calendar has no coverage section"
+"${CURL[@]}" "$BASE/-/orpheus/api/calendar?within_days=3650" |
+  python3 -c "
+import json, sys
+cal = json.load(sys.stdin)
+shown = cal['overdue'] + cal['due']
+assert shown, 'the PDF has dates in it and none reached the calendar'
+assert all(e['role'] not in ('start', 'signature', 'unknown') for e in shown), \
+    [e['role'] for e in shown]
+assert cal['n_unreviewed'] == len(shown), cal
+assert cal['coverage']['n_documents'] == 1, cal['coverage']
+print(f\"   {len(shown)} due, none of them checked yet, coverage stated\")
+"
+
 read -r FIRST SECOND THIRD <<<"$(printf '%s' "$INSTANCES" | python3 -c \
   "import json,sys; print(*(i['instance_id'] for i in json.load(sys.stdin)['instances'][:3]))")"
 
