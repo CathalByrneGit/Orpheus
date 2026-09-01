@@ -46,6 +46,12 @@ REGISTER_STATUSES = ("staged", "active", "withdrawn")
 #: counting, because a bad row is evidence about the register.
 ROW_STATUSES = ("staged", "accepted", "rejected")
 
+#: A page's link to a register row. `proposed` is the machine's suggestion and
+#: means nothing until somebody looks; `rejected` is a person saying this row is
+#: not about this page, which is worth keeping so the same wrong pair is not
+#: offered again tomorrow.
+LINK_STATUSES = ("proposed", "confirmed", "rejected")
+
 #: Column names a register is likely to use for the two fields matching needs.
 #: Guessed, then shown to a person, because guessing wrong quietly is the
 #: failure that matters -- a register matched on the wrong column produces
@@ -522,6 +528,180 @@ def matches_for(store: Store, canonical_name: str, type_id: str | None = None,
                 "AND w.naive_key = ? LIMIT ?", (key, limit))]
 
 
+def links_for(store: Store, entity_id: str,
+              status: str = "confirmed") -> list[dict]:
+    """Register rows a person has said are about this page."""
+    return [{**dict(r), "values": from_json(r["values_json"]) or {}}
+            for r in store.query(
+                "SELECT l.*, w.name, w.identifier, w.values_json, "
+                "       g.name AS register_name "
+                "FROM entity_register_links l "
+                "JOIN register_rows w ON w.register_id = l.register_id "
+                "  AND w.row_no = l.row_no "
+                "JOIN registers g ON g.register_id = l.register_id "
+                "WHERE l.entity_id = ? AND l.status = ? "
+                "AND g.status = 'active' AND w.status = 'accepted' "
+                "ORDER BY l.decided_at", (entity_id, status))]
+
+
+def identifier_candidates(store: Store, type_id: str | None = None,
+                          limit: int = 50) -> dict:
+    """Pages that a register could give an identifier to, if somebody agreed.
+
+    This is the gap `registers.py` opened with. Only 2 of 74 companies in the
+    calibration corpus state a registered number, and a shared registered
+    number is the decisive, rare value resolution otherwise never gets. An
+    active register holds those numbers. Nothing joined the two.
+
+    What it will not do is join them itself. The match is on a normalised name
+    -- the same weak basis the wiki is built on -- and `bearing_on` already
+    warns that a wrong match into a register "argues confidently for the wrong
+    answer". Applied automatically that warning becomes the design: every page
+    would get a number, some of them wrong, and the wrong ones would be
+    indistinguishable from the right ones forever.
+
+    **A page whose matches disagree is reported and not proposed.** Two rows
+    with two different identifiers is a name that means two organisations, and
+    a coin toss between them is worse than leaving the page unidentified: an
+    absent identifier is only missing evidence, and a wrong one is evidence
+    pointing the wrong way.
+    """
+    already = {r["entity_id"] for r in store.query(
+        "SELECT DISTINCT entity_id FROM entity_register_links "
+        "WHERE status IN ('confirmed', 'rejected')")}
+
+    scope = " AND type_id = ?" if type_id else ""
+    params = (type_id,) if type_id else ()
+    proposals, ambiguous = [], []
+    for page in store.query(
+            "SELECT entity_id, canonical_name, type_id FROM entities "
+            f"WHERE merged_into IS NULL{scope} ORDER BY canonical_name", params):
+        if page["entity_id"] in already:
+            continue
+        matches = [m for m in matches_for(store, page["canonical_name"],
+                                          page["type_id"])
+                   if m["identifier"]]
+        if not matches:
+            continue
+        identifiers = {m["identifier"] for m in matches}
+        entry = {
+            "entity_id": page["entity_id"],
+            "canonical_name": page["canonical_name"],
+            "type_id": page["type_id"],
+            "matches": [{"register_id": m["register_id"],
+                         "register": m["register_name"],
+                         "row_no": m["row_no"], "name": m["name"],
+                         "identifier": m["identifier"],
+                         "values": m["values"]} for m in matches],
+        }
+        if len(identifiers) > 1:
+            entry["reading"] = (
+                "This name matches register rows with "
+                f"{len(identifiers)} different identifiers, which says it is "
+                "more than one organisation. Nothing is proposed: a wrong "
+                "identifier argues confidently for the wrong answer, and no "
+                "identifier only leaves the question open.")
+            ambiguous.append(entry)
+            continue
+        entry["identifier"] = matches[0]["identifier"]
+        entry["basis"] = "naive_key"
+        entry["reading"] = (
+            f"One active register row, matched on a normalised name, gives "
+            f"{page['canonical_name']!r} the identifier "
+            f"{matches[0]['identifier']!r}. Check it is the right row: the "
+            "match is on a name, and confirming it is what makes every later "
+            "comparison rest on a number instead.")
+        proposals.append(entry)
+        if len(proposals) >= limit:
+            break
+
+    return {
+        "proposals": proposals,
+        "ambiguous": ambiguous,
+        "n_proposed": len(proposals),
+        "n_ambiguous": len(ambiguous),
+        "headline": _candidates_headline(store, proposals, ambiguous, type_id),
+    }
+
+
+def _candidates_headline(store: Store, proposals: list, ambiguous: list,
+                         type_id: str | None) -> str:
+    scope = " AND type_id = ?" if type_id else ""
+    params = (type_id,) if type_id else ()
+    pages = store.scalar(
+        f"SELECT COUNT(*) FROM entities WHERE merged_into IS NULL{scope}",
+        params)
+    linked = store.scalar(
+        "SELECT COUNT(DISTINCT entity_id) FROM entity_register_links "
+        "WHERE status = 'confirmed'")
+    if not pages:
+        return "No pages."
+    if not proposals and not ambiguous:
+        return (f"{linked} of {pages} page(s) are linked to a register row. No "
+                "active register has an identifier for any of the rest -- "
+                "which is the absence of evidence, not evidence they have "
+                "none.")
+    line = (f"{linked} of {pages} page(s) are linked to a register row. "
+            f"{len(proposals)} more could be, if somebody agrees the row is "
+            "the right one.")
+    if ambiguous:
+        line += (f" {len(ambiguous)} name(s) match rows with different "
+                 "identifiers and are not proposed at all: that is a name "
+                 "meaning two organisations, and guessing between them is "
+                 "worse than leaving it open.")
+    return line
+
+
+def link_row(store: Store, entity_id: str, register_id: str, row_no: int,
+             status: str, actor_id: str | None = None,
+             note: str | None = None, basis: str = "naive_key") -> dict:
+    """Record a person's decision that a register row is, or is not, this page.
+
+    `rejected` is kept rather than forgotten, so the same wrong pair is not
+    proposed again tomorrow -- the same reason a settled merge stops being
+    offered.
+    """
+    store.assert_writable()
+    require_choice(status, LINK_STATUSES, "status")
+    page = store.one("SELECT canonical_name FROM entities WHERE entity_id = ?",
+                     (entity_id,))
+    if page is None:
+        raise NotFound(f"No page {entity_id!r}.")
+    row = store.one(
+        "SELECT w.identifier, w.name, g.status AS register_status "
+        "FROM register_rows w JOIN registers g ON g.register_id = w.register_id "
+        "WHERE w.register_id = ? AND w.row_no = ?", (register_id, row_no))
+    if row is None:
+        raise NotFound(f"No row {row_no} in register {register_id!r}.")
+    if status == "confirmed" and row["register_status"] != "active":
+        # A staged register is present and not vouched for. Linking a page to
+        # one would rest every later comparison on reference data nobody has
+        # promoted.
+        raise OrpheusError(
+            f"Register {register_id!r} is {row['register_status']}, not active. "
+            "Promote it before linking pages to its rows.")
+
+    with store.transaction():
+        store.execute(
+            "INSERT INTO entity_register_links (entity_id, register_id, row_no, "
+            "basis, status, note, decided_by, decided_at, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(entity_id, register_id, row_no) DO UPDATE SET "
+            "status = excluded.status, note = excluded.note, "
+            "decided_by = excluded.decided_by, decided_at = excluded.decided_at",
+            (entity_id, register_id, row_no, basis, status, note, actor_id,
+             now(), now()))
+        record_edit(store, "entity_register_links", entity_id, None,
+                    f"register_link_{status}",
+                    new={"register_id": register_id, "row_no": row_no,
+                         "identifier": row["identifier"]},
+                    actor_id=actor_id, note=note)
+
+    return {"entity_id": entity_id, "canonical_name": page["canonical_name"],
+            "register_id": register_id, "row_no": row_no, "status": status,
+            "identifier": row["identifier"] if status == "confirmed" else None}
+
+
 def bearing_on(store: Store, a: dict, b: dict) -> dict:
     """What the registers say about whether two pages are one thing.
 
@@ -534,8 +714,15 @@ def bearing_on(store: Store, a: dict, b: dict) -> dict:
     It says what it found and draws no conclusion, like everything else a
     person is asked to decide on.
     """
-    left = matches_for(store, a["canonical_name"], a.get("type_id"))
-    right = matches_for(store, b["canonical_name"], b.get("type_id"))
+    # A confirmed link is a person saying this row is about this page. It
+    # outranks a name match completely, and is the whole point of having
+    # links: without them every reading below rests on two normalised names
+    # happening to agree, which is the basis this evidence exists to improve on.
+    linked_a = links_for(store, a.get("entity_id") or "")
+    linked_b = links_for(store, b.get("entity_id") or "")
+    left = linked_a or matches_for(store, a["canonical_name"], a.get("type_id"))
+    right = linked_b or matches_for(store, b["canonical_name"], b.get("type_id"))
+    checked = bool(linked_a) and bool(linked_b)
 
     shared_rows = [
         {"register_id": x["register_id"], "register": x["register_name"],
@@ -550,10 +737,22 @@ def bearing_on(store: Store, a: dict, b: dict) -> dict:
     shared_ids = sorted(ids_a & ids_b)
     conflicting = sorted(ids_a - ids_b) and sorted(ids_b - ids_a)
 
-    if shared_ids:
+    if shared_ids and checked:
+        reading = ("A register gives both pages the same identifier, and "
+                   "somebody has confirmed that both rows are about these "
+                   "pages. There is nothing stronger this store can hold short "
+                   "of a person saying the two pages are one thing.")
+    elif shared_ids:
         reading = ("A register gives both pages the same identifier. That is "
                    "the strongest evidence for one thing this store can hold "
-                   "short of a person saying so.")
+                   "short of a person saying so -- though the match into the "
+                   "register is still on a normalised name. Confirming the two "
+                   "links would settle that half of it.")
+    elif ids_a and ids_b and not shared_ids and checked:
+        reading = ("A register gives these pages different identifiers, and "
+                   "somebody has confirmed both rows. That is a register "
+                   "saying, on evidence a person has checked, that these are "
+                   "two organisations.")
     elif ids_a and ids_b and not shared_ids:
         reading = ("A register gives these pages different identifiers, which "
                    "says they are two organisations. Check that both rows are "
@@ -578,5 +777,10 @@ def bearing_on(store: Store, a: dict, b: dict) -> dict:
         "shared_rows": shared_rows,
         "shared_identifiers": shared_ids,
         "identifiers_conflict": bool(conflicting) and not shared_ids,
+        # Which basis the reading rests on, said plainly. Two names that
+        # normalise the same and two rows a person checked are not the same
+        # quality of evidence, and a reader deciding a merge is entitled to
+        # know which they are looking at.
+        "basis": "confirmed_links" if checked else "naive_key",
         "reading": reading,
     }

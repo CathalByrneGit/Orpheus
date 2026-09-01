@@ -837,6 +837,55 @@ MIGRATIONS: list[dict] = [
             "ON documents (redacted_at)",
         ],
     },
+    {
+        "version": 15,
+        "name": "entity_register_links",
+        # A page, linked to the register row that is about it -- by a person.
+        #
+        # `registers.matches_for` already finds register rows for a page, on a
+        # normalised name, which is the same weak basis the wiki itself is
+        # built on. That was enough for its one job: telling a reviewer
+        # deciding a merge that two pages land on rows with different
+        # identifiers. It is not enough to *keep*, because a wrong name match
+        # would then argue confidently for the wrong answer everywhere, for
+        # good, instead of once in front of somebody looking at it.
+        #
+        # So the match stays a proposal and this table holds the decision. What
+        # it buys is the thing `registers.py` says the corpus never gets: "only
+        # 2 of 74 companies in the calibration corpus state a registered
+        # number, and a shared registered number is the decisive, rare value
+        # that resolution otherwise never gets". A checked link gives every
+        # linked page one.
+        #
+        # The identifier is deliberately *not* copied onto the page or onto any
+        # instance. A register row is not a fact a document states, and writing
+        # its number into the corpus would give it a provenance it has not got.
+        # The link is the join; the register keeps its own rows.
+        "statements": [
+            """
+            CREATE TABLE IF NOT EXISTS entity_register_links (
+                entity_id   TEXT NOT NULL REFERENCES entities(entity_id),
+                register_id TEXT NOT NULL REFERENCES registers(register_id),
+                row_no      INTEGER NOT NULL,
+                -- How the pair was put in front of somebody. Kept because a
+                -- link proposed on a normalised name and one proposed on a
+                -- number the document itself stated are not equally safe, and
+                -- a later reader deserves to know which they are looking at.
+                basis       TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'proposed',
+                note        TEXT,
+                decided_by  TEXT REFERENCES actors(actor_id),
+                decided_at  TEXT,
+                created_at  TEXT NOT NULL,
+                PRIMARY KEY (entity_id, register_id, row_no)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_entity_register_entity "
+            "ON entity_register_links (entity_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_entity_register_row "
+            "ON entity_register_links (register_id, row_no)",
+        ],
+    },
 ]
 
 

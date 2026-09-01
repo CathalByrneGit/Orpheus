@@ -887,6 +887,38 @@ def post_hide_column(store, actor, body, **_):
         note=body.get("note"))
 
 
+@route("GET", "/registers/identifiers")
+def get_identifier_candidates(store, actor, body, **_):
+    """Pages an active register could give an identifier to, if somebody agreed.
+
+    Administrator-only: it reads every page in the corpus, and reference data
+    everybody's answers rest on is an administrator's to settle.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Linking pages to reference data settles what every later "
+            "comparison rests on, so it is an administrator view.")
+    return registers_mod.identifier_candidates(
+        store, type_id=body.get("type_id"), limit=_int(body, "limit", 50))
+
+
+@route("POST", r"/entities/(?P<entity_id>[^/]+)/register-link")
+def post_register_link(store, entity_id, actor, body, **_):
+    """Record that a register row is, or is not, about this page."""
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Reference data everybody's answers rest on is an administrator's "
+            "to settle.")
+    register_id = body.get("register_id")
+    row_no = body.get("row_no")
+    if not register_id or row_no in (None, ""):
+        raise ApiError(400, "Give a `register_id` and a `row_no`.")
+    return registers_mod.link_row(
+        store, entity_id, register_id, int(row_no),
+        body.get("status", "confirmed"), actor_id=_actor_id(actor),
+        note=body.get("note"), basis=body.get("basis", "naive_key"))
+
+
 @route("GET", r"/registers/(?P<register_id>[^/]+)")
 def get_register(store, register_id, actor, body, **_):
     return {"register": registers_mod.get_register(store, register_id),

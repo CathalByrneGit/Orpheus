@@ -971,6 +971,67 @@ def cmd_register(args) -> int:
     """
     from . import registers as registers_mod
 
+    if args.fetch:
+        from . import registry
+        result = registry.fetch(args.fetch, source=args.source,
+                                limit=args.limit or 5)
+        csv_text = registry.to_csv(result["rows"])
+        if args.json:
+            emit({**result, "csv": csv_text}, True)
+            return 0
+        if not result["rows"]:
+            print(f"{args.source} had nothing for {args.fetch!r}.")
+            return 1
+        # Printed rather than loaded. A fetch that wrote straight into the
+        # store would skip the column guess, the staging and the promotion --
+        # and the thing skipped is the review.
+        print(csv_text, end="")
+        print(f"\n  {len(result['rows'])} row(s) from {args.source}. Save this "
+              f"and load it:\n    orpheus register --add rows.csv --name "
+              f"'{args.source}' --type-id Company", file=sys.stderr)
+        return 0
+
+    if args.identifiers:
+        store = open_store(args, mode="read")
+        try:
+            found = registers_mod.identifier_candidates(
+                store, type_id=args.type_id, limit=args.limit or 50)
+        finally:
+            store.close()
+        if args.json:
+            emit(found, True)
+            return 0
+        print(found["headline"])
+        for entry in found["proposals"]:
+            match = entry["matches"][0]
+            print(f"\n  {entry['canonical_name']}")
+            print(f"    {entry['entity_id']}")
+            print(f"    -> {match['identifier']}  {match['name']}  "
+                  f"({match['register']} row {match['row_no']})")
+        for entry in found["ambiguous"]:
+            print(f"\n  {entry['canonical_name']}  -- not proposed")
+            print(f"    {entry['reading']}")
+        if found["proposals"]:
+            first = found["proposals"][0]
+            print(f"\n  Confirm one with:\n    orpheus register "
+                  f"--link {first['entity_id']} "
+                  f"--row {first['matches'][0]['row_no']} "
+                  f"{first['matches'][0]['register_id']} --actor-id act_...")
+        return 0
+
+    if args.link:
+        if args.row is None or not args.register_id:
+            raise OrpheusError("--link needs a register_id and a --row.")
+        store = open_store(args)
+        try:
+            result = registers_mod.link_row(
+                store, args.link, args.register_id, args.row,
+                args.link_status, actor_id=args.actor_id, note=args.note)
+        finally:
+            store.close()
+        emit(result, args.json)
+        return 0
+
     if args.list:
         store = open_store(args)
         try:
@@ -1773,6 +1834,20 @@ def build_parser() -> argparse.ArgumentParser:
                                "values_json and nothing is lost")
     register.add_argument("--where", metavar="COLUMN",
                           help="filter rows on an exposed column")
+    register.add_argument("--fetch", metavar="NAME",
+                          help="ask a public register about one name and print "
+                               "the rows as CSV; load them with --add")
+    register.add_argument("--source", default="gleif",
+                          help="which public register --fetch asks")
+    register.add_argument("--identifiers", action="store_true",
+                          help="pages an active register could give an "
+                               "identifier to, if somebody agreed")
+    register.add_argument("--link", metavar="ENTITY_ID",
+                          help="record that a register row is about this page")
+    register.add_argument("--row", type=int, metavar="ROW_NO",
+                          help="which row, for --link")
+    register.add_argument("--link-status", default="confirmed",
+                          choices=("confirmed", "rejected", "proposed"))
     register.add_argument("--equals", metavar="VALUE",
                           help="the value --where must match")
     register.add_argument("--limit", type=int, default=20)

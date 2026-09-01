@@ -284,6 +284,78 @@ row stays readable and stops counting; a withdrawn register stops counting and
 stays readable, because one somebody relied on is part of how a decision was
 reached.
 
+#### Getting the identifier as far as the page
+
+For a long time the register's number reached a *comparison* and never reached
+a page. `bearing_on` could tell a reviewer that two pages landed on rows with
+different identifiers; nothing recorded that a given row was about a given page,
+so every later comparison started again from two normalised names happening to
+agree.
+
+```bash
+orpheus register --identifiers
+```
+
+```
+0 of 10 page(s) are linked to a register row. 8 more could be, if somebody
+agrees the row is the right one.
+
+  Ardmore Digital Limited
+    ent_9c4f…
+    -> 900000  Ardmore Digital Limited  (CRO extract row 1)
+```
+
+Confirming a row records the link, and from then on the merge evidence rests on
+a number a person checked rather than on a name:
+
+```bash
+orpheus register --link ent_9c4f… reg_… --row 1 --actor-id act_…   --note "Address matches the signature block."
+```
+
+Measured on a ten-company store with a register covering eight of them: **2 of
+10 companies stated a registered number, and 8 of 10 pages ended up resting on a
+checked identifier.** The two left over are genuinely absent from the register,
+which is the absence of evidence and reported as such.
+
+**It proposes and never applies.** The match into the register is on a
+normalised name — the same weak basis the wiki is built on — and `bearing_on`
+already warns that a wrong match there "argues confidently for the wrong
+answer". Applied automatically that warning becomes the design: every page gets
+a number, some of them wrong, and the wrong ones are indistinguishable from the
+right ones for good.
+
+**A name matching two identifiers is reported and not proposed at all.** That is
+a name meaning two organisations, and a coin toss between them is worse than
+leaving the page unidentified — an absent identifier is missing evidence, a
+wrong one is evidence pointing the wrong way.
+
+**The number is never copied onto the page.** A register row is not a fact a
+document states, and writing its number into an instance would give it a
+provenance it has not got. The link is the join; the register keeps its rows.
+A rejected link is kept too, so the same wrong pair is not offered again
+tomorrow.
+
+#### Where the register comes from
+
+Every public register publishes a file: the Irish CRO publishes company data as
+CSV, Companies House a monthly bulk product, GLEIF a daily concatenated golden
+copy. A file needs no API key to procure, no rate limit to respect and no
+network at lookup time, all of which matter more in a public body than in a
+startup — and `load_csv` has read one since registers were built. **Use the
+file where one is published.**
+
+`orpheus register --fetch "Ardmore Digital"` asks a register over HTTP for the
+case where a file is not practical, and prints CSV rather than writing to the
+store, so the rows still go through the column guess, the staging and the
+promotion. The thing that would be skipped is the review.
+
+The shipped adapter is GLEIF, chosen because it needs no API key. It is written
+to the documented shape of that API and **has not been run against the live
+service** — the environment this was built in denies egress to `api.gleif.org`
+— so its tests establish that the parser does what a recorded-shape fixture
+says, not that the fixture is what GLEIF sends. `fetch()` returns the raw
+payload beside the rows so the first person to wire it up can check by hand.
+
 #### Only three of its columns can be queried, until you say otherwise
 
 `load_csv` lifts `name`, `naive_key` and `identifier` into real indexed columns,
