@@ -1,129 +1,50 @@
 # Orpheus
 
-A document intelligence platform for public servants. **Phase 1: ingest and
-extraction quality.**
+**Point it at a folder of documents. Get back a set of facts you can query,
+where every fact links to the sentence it came from and says whether a person
+has checked it.**
 
-Orpheus takes a document and turns it into structured, human-reviewable facts in
-an ontology store, with enough provenance on every fact to know where it came
-from and whether a person has checked it.
+Built for public servants who have four hundred contracts, or ten years of
+minutes, and need to answer questions about them without reading all of them —
+and without a tool that sounds confident when it is guessing.
 
-**The domain lives in the ontology bundle, not in the code.** The bundle shipped
-here describes public-sector contracts — that is the worked example, and the one
-the documentation uses throughout. A bundle describing planning applications,
-inspection reports or grant awards runs the same pipeline with no code changes;
-the test suite includes one, to keep that honest rather than aspirational.
+![A contract, read into 31 findings](docs/images/hero-document.png)
 
-Entity resolution, the relation graph and the reading companion are built —
-each was deferred once, and each turned out to be the thing that made the layer
-below it honest rather than a layer on top of it. Conflict-of-interest views
-are still out: the store has no notion of ownership, directorships or donations,
-and a graph join is not an accusation. What it offers instead is
-`orpheus questions`, which reports a chain and how much of it anybody has
-checked.
+*A real SEC contract exhibit, read by a model and shown as it comes out: every
+row is `unconfirmed` until a person says otherwise, every row carries the
+sentence it came from and the page it is on, and the original file is one click
+away — checked against the hash every excerpt was measured from.*
 
 ---
 
-## What it does
+## What you get
 
-```
-a corpus nobody has modelled
-  → survey        propose object types, properties and links; a person decides
-  → draft         a bundle out of what was accepted, registered deliberately
+Point it at eight commercial contracts and you get, with no configuration:
 
-document.pdf
-  → ingest        hash, page text, OCR fallback for scans
-  → classify      doc type, sector, jurisdiction — each from a closed list, or not asked
-  → populate      dates and amounts by pattern; entities by model, against the bundle
-  → review        confirm / amend / reject, nothing overwritten
-  → analyse       versioned rule concepts + optional narrative reading
-  → escalate      opt-in comparison against the rest of the corpus
-  → read          a passage at a time, offering what seems worth recording
-  → graph         relations between pages, with every source behind each one
-  → export        the wiki as a portable markdown bundle
-```
+- **Structured facts** — parties, dates, amounts, obligations, clauses — each
+  with the excerpt it came from, the page it is on, and a status of
+  `unconfirmed` until somebody says otherwise.
+- **A wiki**: one page per company and person, gathering every mention across
+  every document, with the sources listed underneath.
+- **A relation graph** — who supplies whom, who signed what — projected up from
+  individual mentions to those pages.
+- **A calendar** of what expires, renews or falls due, and what is already past.
+- **An adversarial pass** that hunts for the ways the store could be misleading
+  you: quotations that are not in the document, pages asserting things no
+  document says, conflicts smoothed into agreement.
+- **The original file back**, checked byte for byte against the hash recorded
+  when it was ingested.
 
-Every fact carries `source` (`ai_local` / `ai_cloud` / `human`), a `confidence`
-from a five-level rubric, a review `status`, and a row in an append-only audit
-trail.
+All of it in one SQLite file you can copy, and a browser UI that runs on top of
+it.
 
-Because corrections preserve the machine's value beside the human's, the store
-answers the question Phase 1 actually turns on: **is extraction good enough to
-build on yet?** `orpheus report` computes it — accuracy by confidence level,
-whether the rubric ranks reliability at all, which rule concepts over-fire, and
-which fields people keep fixing.
-
-`confirm / amend / reject` all resolve towards one answer, which is right for
-grading an extraction and wrong for a corpus, because a corpus is full of
-documents that disagree and are both correct. So there is a fourth verb.
-`orpheus tension` records a conflict two sources really are in — cited on both
-sides, and **accepted** is a place a reviewer can stop. `orpheus lint` hunts for
-the ones nobody recorded, along with the other ways the store can mislead a
-reader; it reports located rows, never general observations, and it will not
-give a clean bill of health it has not earned.
-
-`orpheus read <id> --page N` — or the reading page in the browser — goes through
-a document a passage at a time, offering what it seems to hold. **Nothing it
-offers is in the store until you say so.** That is not politeness: proposals
-nobody asked for, landed as unconfirmed instances, would pour into the number
-extraction quality is measured by. Accepting writes through the same path a
-batch pass uses, carrying the page, the excerpt and the span; dismissing is kept,
-because it is the only evidence there is about whether the suggestions are worth
-reading.
-
-The mirror case is agreement, and it is counted in **distinct wordings across
-distinct documents** rather than in rows. Six call-off contracts carrying one
-framework's boilerplate is one source wearing six hats;
-`orpheus corroboration` says so instead of reporting six agreeing sources, and
-changes no confidence value doing it.
-
-`orpheus questions` asks what the shape is worth looking at — two suppliers
-connected only through one shared subcontractor, a party recorded on two sides
-of one agreement, a chain of subcontracts that comes back round. **None of it is
-a finding.** A shared subcontractor is usually a small market; what the corpus
-can honestly say is that two parties are closer than they look, here is the
-chain, and here is how much of it anybody has checked. Chains somebody has
-confirmed sort first, because one built from unreviewed guesses is a reason to
-check the extraction rather than to act.
-
-And a person's judgement lives in the store. `standing` means *this is real and
-it stays on the list* — a finished piece of review, sorted above the unruled,
-with the reason required and kept. If the evidence behind a question changes
-afterwards, it reopens and says so rather than letting an old decision quietly
-stand.
-
-`orpheus graph topology` reads the corpus as a network — islands, the pages
-holding it together, clusters that never touch. It leads with how much of the
-corpus reached the graph, because a sparse-looking network over 30% coverage
-means a half-built wiki rather than a thin corpus, and no structural number
-tells those apart. `orpheus graph path A --to B` answers *how are these two
-connected*, and names the weakest hop in the chain: one running through a
-relation nobody has checked is not the same finding as one vouched for end to
-end.
-
-Structure that must hold up is deterministic and needs nothing installed.
-`pip install 'orpheus[graph]'` swaps label propagation for Louvain and adds
-betweenness centrality; without it both degrade and say which ran.
-
-`orpheus ontology survey` is the step before all of it, for a corpus nobody has
-modelled. It proposes object types, properties and links — each with a
-quotation `align.py` located and a count of how many documents show it, counted
-rather than claimed — and **writes no bundle**. A person goes through the queue
-at `/-/orpheus/ontology`, and `orpheus ontology draft` assembles a bundle out of
-what they accepted. The machine is good at noticing that something recurs and
-bad at deciding whether two of them are one type with a role; a wrong extraction
-is one row to amend, and a wrong object type is every row that will ever be
-filed under it.
-
----
-
-## Quick start
+## Try it
 
 ```bash
 pip install -e '.[server]'
 
 orpheus --db data/orpheus.sqlite init --admin "Ada"
-orpheus --db data/orpheus.sqlite ingest contract.pdf --actor-id act_... --extract
-orpheus --db data/orpheus.sqlite report
+orpheus --db data/orpheus.sqlite ingest contract.pdf --actor-id act_… --extract
 ```
 
 `init` prints the command that serves what it just built:
@@ -134,98 +55,101 @@ datasette serve data/orpheus.sqlite \
   --plugins-dir plugins --template-dir templates --port 8001
 ```
 
+Open `/-/orpheus`. Upload, review row by row, read a document a passage at a
+time, browse the wiki and the graph. The same routes are JSON under
+`/-/orpheus/api/`, and everything the browser can do the CLI can do.
+
 Or `cd deploy && docker compose up -d`, which runs that plus Ollama.
 
-The browser page at `/-/orpheus` adds upload and per-row confirm/amend/reject.
-The same routes are available as JSON under `/-/orpheus/api/`.
+**The [user guide](docs/user-guide.md) walks two real corpora end to end with
+screenshots** — eight SEC contract exhibits, and sixteen governance minutes for
+which no ontology existed until the machine proposed one.
 
 ---
 
-## Documentation
+## It is not only for contracts
 
-Start at the **[user guide](docs/user-guide.md)** — two corpora run end to end
-with screenshots of the real thing: eight commercial contracts on the shipped
-bundle, and sixteen governance minutes on an ontology the machine proposed
-because none existed. Then [docs/index.md](docs/index.md) for everything else.
+The shipped ontology describes public-sector contracts. That is a JSON file, not
+code: a bundle describing planning applications, inspection reports or grant
+awards runs the same pipeline with nothing recompiled.
 
-| Page | What it covers |
-|---|---|
-| [User guide](docs/user-guide.md) | Two worked cases, photographed as they came out |
-| [Data model](docs/data-model.md) | Tables, the ontology bundle, the confidence rubric |
-| [Pipeline walkthrough](docs/pipeline-walkthrough.md) | The nine steps, with the function that runs each |
-| [Entities: the wiki](docs/entities.md) | Mentions vs entities, and why a page is a projection |
-| [Reading with the machine](docs/reading-companion.md) | A passage at a time, and why a suggestion is not an extraction |
-| [Conflicts and lint](docs/conflicts-and-lint.md) | The fourth review verb, the adversarial pass, and the markdown export |
-| [Network and corroboration](docs/network-and-corroboration.md) | The relation graph, counting agreement honestly, and what a budget is denominated in |
-| [Questions the corpus raises](docs/questions.md) | Where the shape is worth asking about, and why none of it is a finding |
-| [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
-| [Where an ontology comes from](docs/ontology.md) | Surveying a corpus with no bundle, and why the machine proposes but never authors |
-| [Extraction engines](docs/extraction-engines.md) | Four ways to run the model pass, and when each is right |
-| [Datasette ecosystem](docs/datasette-ecosystem.md) | Which plugins are worth adopting, and why the agent must not be the writer |
-| [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
-| [Deployment](docs/deployment.md) | Running it, and the WAL trap that catches people |
-| [Developer guide](docs/developer-guide.md) | Setup, tests, troubleshooting |
-| [The corpus run](docs/corpus-run.md) | What real models on real corpora found, and how to run one |
-| [Open decisions](docs/open-decisions.md) | What is still undecided, and what the build corrected |
-| [Prior art](docs/prior-art.md) | Open-source tools that already do parts of this |
-| [OCDS alignment](docs/ocds-alignment.md) | Mapping the contract bundle onto the Open Contracting Data Standard |
+And when there is no bundle for your documents, `orpheus ontology survey` reads
+a sample and proposes one — object types, properties and links, each with
+quotations and a count of how many documents show it. It **writes no bundle**. A
+person goes through the queue and `orpheus ontology draft` assembles one out of
+what they accepted. The machine is good at noticing that something recurs and
+bad at deciding whether two of them are one type with a role; a wrong extraction
+is one row to amend, and a wrong object type is every row that will ever be
+filed under it.
 
-An agent working with a store should read `.claude/skills/orpheus/SKILL.md`
-first. Its load-bearing rule is *never assert something the store does not hold,
-and never assert it more firmly than the store does* — the four review states
-are not interchangeable, and a summary that flattens them is the failure mode
-this whole design exists to prevent.
+The guide's second case is exactly this, on Python Steering Council minutes.
 
 ---
 
-## Three things worth knowing before reading the code
+## What it will not do
 
-**Datasette is the writer, and the core is a library it imports.** SQLite
-permits one writer, and with multiple concurrent users that is a real constraint
-rather than a theoretical one. There is one process: the plugin calls
-`orpheus.api.handle()` on Datasette's own write thread, so Datasette's write
-queue serialises every change. The invariant is *nothing writes except through
-`orpheus` core functions* — no SQL is written in the plugin. An advisory lock
-stops a second process (the CLI, a script) opening the same store for writing
-while the server holds it.
+Worth knowing before you start, because these are deliberate:
 
-**Do not serve the store with `--immutable`.** It is the obvious flag for a
-database you think nothing writes to, and combined with WAL mode it silently
-shows a site missing rows. [Why](docs/deployment.md#the-wal-and-immutable-mode-trap).
+- **It will not tell you a corpus is sound.** Every summary that could read as
+  an all-clear is qualified with what it did not check.
+- **It will not turn a machine reading into a fact.** Nothing is confirmed
+  without a person, and every screen says which state a row is in.
+- **It will not pick a winner between disagreeing documents.** Both are shown.
+- **It will not ask a model how confident it is.** Confidence is computed from
+  whether the excerpt is really in the document, not from the model's opinion of
+  itself.
+- **It does not do conflict-of-interest findings.** The store has no notion of
+  ownership, directorships or donations, and a graph join is not an accusation.
+  What it offers instead is `orpheus questions`: here is a chain, and here is
+  how much of it anybody has checked.
+
+---
+
+## Four commitments, if you are reading the code
 
 **Nothing is destructively overwritten.** Corrections insert into `edit_history`
 and update the row's status; rejected rows are excluded, never deleted. That is
-both the audit story and the only way to measure whether extraction is improving.
+both the audit story and the only way to measure whether extraction is
+improving. [Provenance and amendment](docs/provenance-and-amendment.md).
 
 **Disagreement is a finding, not a defect.** Two confirmed extractions that
 contradict each other are usually both right about the moment each document was
-written. Rendered in the same voice one under the other, they read as though
-they agree — so a verified conflict gets its own record, its own state, and the
-top of the page. [Why](docs/conflicts-and-lint.md).
+written. Rendered one under the other in the same voice they read as agreement,
+so a verified conflict gets its own record, its own state and the top of the
+page. [Conflicts and lint](docs/conflicts-and-lint.md).
+
+**Datasette is the writer, and the core is a library it imports.** SQLite
+permits one writer, and with several concurrent users that is a real constraint.
+There is one process: the plugin calls `orpheus.api.handle()` on Datasette's own
+write thread. No SQL is written in the plugin.
+[Deployment](docs/deployment.md).
+
+**Do not serve the store with `--immutable`.** It is the obvious flag for a
+database you think nothing writes to, and with WAL mode it silently shows a site
+missing rows.
+[Why](docs/deployment.md#the-wal-and-immutable-mode-trap).
 
 ---
 
 ## Status
 
-820 tests:
+995 tests, no third-party dependencies in the core.
 
 ```bash
 pip install -e '.[dev]'
 python3 -m pytest
 ```
 
-They call the core directly, which cannot catch what only goes wrong with a real
-server in the middle. `tests/e2e/browser_loop.sh` drives the whole loop over
-HTTP against a live Datasette — multipart limits, CSRF, upload, extraction,
-grounding, confirm/amend/reject, rollback, reading a passage and recording from
-it, the lint page, the network page and the markdown export — and checks the store agrees with what the browser was told.
+Every extraction engine, the PDF backends and OCR are optional installs, and the
+code names the missing one when you reach for it.
 
-The core has no third-party dependencies. Every extraction engine, the PDF
-backends and OCR are optional installs, and the code says which one is missing
-when you reach for it.
+The unit suite calls the core directly, which cannot catch what only breaks with
+a real server in the middle — so `tests/e2e/browser_loop.sh` drives the whole
+loop over HTTP against a live Datasette and checks the store agrees with what
+the browser was told.
 
-**Real models have now run against real corpora**, and almost everything
-worth knowing came from that rather than from the suite:
+**Real models have run against real corpora**, and most of what is worth knowing
+came from that rather than from the suite:
 
 | Corpus | Documents | What it was for |
 |---|---|---|
@@ -233,12 +157,47 @@ worth knowing came from that rather than from the suite:
 | Python Enhancement Proposals | 40 | A second domain, with a documented ontology to score a survey against |
 | Steering Council minutes | 48 | Narrative prose with no structure at all for the pattern pass to read |
 
-See [the corpus run](docs/corpus-run.md) and
-[where an ontology comes from](docs/ontology.md) for what each found — including
-the defects, which is most of the value.
+See [the corpus run](docs/corpus-run.md) for what each found, including the
+defects, which is most of the value.
 
 **What is still open is the human half.** Extraction quality is measured by
 comparing what a person decided against what the machine said, and nobody has
 reviewed a corpus yet: `orpheus report` correctly answers
-`insufficient_evidence`. That number needs a reviewer, not a bigger corpus. See
-[open decisions](docs/open-decisions.md).
+`insufficient_evidence`. That number needs a reviewer, not a bigger corpus.
+[Open decisions](docs/open-decisions.md).
+
+---
+
+## Documentation
+
+Start with the **[user guide](docs/user-guide.md)**. Everything else is indexed
+at [docs/index.md](docs/index.md):
+
+| | |
+|---|---|
+| [User guide](docs/user-guide.md) | Two worked cases, photographed as they came out |
+| [Data model](docs/data-model.md) | Tables, the ontology bundle, the confidence rubric |
+| [Pipeline walkthrough](docs/pipeline-walkthrough.md) | The nine steps, with the function that runs each |
+| [Entities: the wiki](docs/entities.md) | Mentions vs entities, and why a page is a projection |
+| [Reading with the machine](docs/reading-companion.md) | A passage at a time, and why a suggestion is not an extraction |
+| [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
+| [Conflicts and lint](docs/conflicts-and-lint.md) | The fourth review verb and the adversarial pass |
+| [What falls due](docs/calendar.md) | The calendar, and the four things it refuses to do |
+| [Network and corroboration](docs/network-and-corroboration.md) | The relation graph, and counting agreement honestly |
+| [Questions the corpus raises](docs/questions.md) | Where the shape is worth asking about, and why none of it is a finding |
+| [Where an ontology comes from](docs/ontology.md) | Surveying a corpus with no bundle |
+| [Two different pasts](docs/two-pasts.md) | What was true then, and what we believed then |
+| [Redaction](docs/redaction.md) | Taking a document out without breaking the audit trail |
+| [Extraction engines](docs/extraction-engines.md) | Four ways to run the model pass, and when each is right |
+| [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
+| [Deployment](docs/deployment.md) | Running it, and the WAL trap that catches people |
+| [Developer guide](docs/developer-guide.md) | Setup, tests, troubleshooting |
+| [The corpus run](docs/corpus-run.md) | What real models on real corpora found |
+| [Open decisions](docs/open-decisions.md) | What is still undecided, and what the build corrected |
+| [Prior art](docs/prior-art.md) | Open-source tools that already do parts of this |
+| [OCDS alignment](docs/ocds-alignment.md) | Mapping the contract bundle onto the Open Contracting Data Standard |
+| [Datasette ecosystem](docs/datasette-ecosystem.md) | Which plugins are worth adopting |
+
+An agent working with a store should read `.claude/skills/orpheus/SKILL.md`
+first. Its load-bearing rule is *never assert something the store does not hold,
+and never assert it more firmly than the store does.*

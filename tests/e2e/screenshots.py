@@ -11,6 +11,16 @@ is the one who was following it step by step.
 
 It starts a real Datasette with the real plugin, signs in the way `--root`
 does, and photographs the pages. Nothing is stubbed.
+
+Shots are 1280 wide at 1x, and full-page unless the entry says otherwise. These
+land in a repository, so afterwards they are worth putting through a palette
+squeeze -- they are pictures of text, and 192 colours is lossless to the eye:
+
+    from PIL import Image
+    image = Image.open(path).convert("RGB")
+    image.convert("P", palette=Image.ADAPTIVE, colors=192).save(path, optimize=True)
+
+which took this directory from 7.5 MB to 2.6 MB.
 """
 from __future__ import annotations
 
@@ -26,6 +36,10 @@ ROOT = Path(__file__).resolve().parents[2]
 #: (filename, path, full page?). Ordered as the guide walks through them.
 SHOTS = {
     "contracts": [
+        # The README hero: the top of a document page, not the whole thing. A
+        # full-page shot of a 31-finding document is 10,000px tall and renders
+        # in a README as an unreadable strip.
+        ("hero-document", "{document}", False),
         ("index", "/-/orpheus", True),
         ("document", "{document}", True),
         ("read", "/-/orpheus/read/{document_id}?page=1", True),
@@ -129,7 +143,9 @@ def main() -> int:
                 # The map draws on a canvas after load; everything else is
                 # server-rendered and settled by `networkidle`.
                 page.wait_for_timeout(1200)
-                shot = out / f"{case}-{name}.png"
+                # `hero-*` names are shared across cases and keep their own.
+                shot = out / (f"{name}.png" if name.startswith("hero-")
+                              else f"{case}-{name}.png")
                 page.screenshot(path=str(shot), full_page=full)
                 print(f"  {shot.name:34} {target}")
             browser.close()

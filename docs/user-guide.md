@@ -75,7 +75,10 @@ so it cannot invent a thirteenth spelling of one answer.
 
 ## What the machine proposed
 
-![A document page](images/contracts-document.png)
+![A document page](images/hero-document.png)
+
+*(the top of the page — [the whole thing](images/contracts-document.png) runs to
+all 31 findings)*
 
 A strategic alliance agreement, read into **31 findings**: 13 clauses, 10
 obligations, 2 people, 2 key dates, 2 companies, a flag and the contract itself.
