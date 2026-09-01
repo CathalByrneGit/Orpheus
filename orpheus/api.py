@@ -22,7 +22,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
-from . import analysis, auth, bundle as bundle_mod, classify, concepts
+from . import analysis, asof as asof_mod, auth
+from . import bundle as bundle_mod, classify, concepts
 from . import entities as entities_mod
 from . import engines, extract as extract_mod, ingest as ingest_mod
 from . import export_md
@@ -1231,6 +1232,47 @@ def post_export(store, actor, body, **_):
     return export_md.export(
         store, body["out"], type_id=body.get("type_id"),
         confirmed_only=body.get("confirmed_only") in ("1", "true", "True", True))
+
+
+@route("GET", "/as-of")
+def get_as_of(store, actor, body, **_):
+    """Both pasts for one date, and the sentence that keeps them apart.
+
+    `?axis=believed` for transaction time alone, `?axis=in_force` for valid
+    time alone; omit it for both, which is what somebody asking "what about
+    June" usually wants and rarely knows to ask for.
+    """
+    document_id = body.get("document_id")
+    if document_id:
+        if not auth.can(store, actor, document_id, "view"):
+            raise PermissionDenied(f"Not permitted to view {document_id}.")
+    elif not actor.get("is_admin"):
+        raise PermissionDenied(
+            "A corpus-wide view of the past spans documents you may not be "
+            "able to read. Pass `document_id` for one you can.")
+    when = body.get("date") or body.get("as_of")
+    if not when:
+        raise ApiError(400, "Give a `date` to ask about, as YYYY-MM-DD.")
+    axis = body.get("axis")
+    if axis == "believed":
+        return asof_mod.believed_at(store, when, document_id=document_id)
+    if axis == "in_force":
+        return asof_mod.in_force_on(store, when, document_id=document_id)
+    if axis:
+        raise ApiError(400, "`axis` is `believed` (what this store held then) "
+                            "or `in_force` (what the documents say was running "
+                            "then). Omit it for both.")
+    return asof_mod.compare(store, when, document_id=document_id)
+
+
+@route("GET", r"/instances/(?P<instance_id>[^/]+)/values")
+def get_value_history(store, instance_id, actor, body, **_):
+    """What one extracted value has said, and from when."""
+    # `view`, not `edit`: reading what a value used to say is reading.
+    location = review.locate_instance(store, instance_id)
+    auth.require(store, actor, location["document_id"], "view")
+    return asof_mod.value_history(store, instance_id,
+                                  property_id=body.get("property_id"))
 
 
 @route("GET", "/calendar")

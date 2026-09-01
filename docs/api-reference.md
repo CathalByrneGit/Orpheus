@@ -90,6 +90,7 @@ uploads something the server cannot read.
 | `GET` | `/documents/<id>/original` | view | The file as uploaded; `?metadata=1` for its size and digest, `?download=1` to force a save |
 | `GET` | `/documents/<id>/instances` | view | `?type_id=`, `?include_rejected=` |
 | `GET` | `/documents/<id>/history` | view | The document's audit trail |
+| `GET` | `/instances/<id>/values` | view | What one value has said, and from when |
 | `POST` | `/documents/<id>/redact` | **delete** | Destroy everything read from it, keep the row; `?dry_run=1` counts first |
 
 #### Getting the original back
@@ -317,6 +318,7 @@ decided then stays readable. See [Conflicts and lint](conflicts-and-lint.md).
 | Method | Path | Permission | Notes |
 |---|---|---|---|
 | `GET` | `/calendar` | **administrator** | What falls due; `?within_days=`, `?as_of=`, `?document_id=` |
+| `GET` | `/as-of` | **administrator** | Both pasts for a `date`; `?axis=believed` or `?axis=in_force` for one |
 | `GET` | `/review/triage` | **administrator** | What to review first, and what it would settle; `?document_id=` for one |
 | `GET` | `/lint` | **administrator** | `?deep=0` for the cheap checks, `?checks=a,b` |
 | `GET` | `/storage/audit` | **administrator** | Are the originals still there; `?verify=1` with a `document_id` re-reads one |

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from . import analysis, auth, bundle as bundle_mod, classify, concepts
 from . import datasette_config, extract as extract_mod, ingest as ingest_mod
+from . import asof as asof_mod
 from . import obligations as obligations_mod
 from . import quality, redact, review, textract
 from .store import Store
@@ -281,6 +282,35 @@ def cmd_original(args) -> int:
     emit({"document_id": args.document_id, "written": str(destination),
           "byte_size": located["byte_size"], "file_hash": located["file_hash"],
           "verified": True}, args.json)
+    return 0
+
+
+def cmd_as_of(args) -> int:
+    """Two different pasts for one date, never merged into one answer."""
+    store = open_store(args, mode="read")
+    try:
+        result = asof_mod.compare(store, args.date, document_id=args.document_id)
+    finally:
+        store.close()
+    if args.json:
+        emit(result, True)
+        return 0
+
+    print(f"  what this store believed on {args.date}")
+    print(f"    {result['believed']['headline']}")
+    print(f"    calibration then: {result['believed']['verdict']}")
+    for level in result["believed"]["by_confidence"]:
+        print(f"      {level['confidence_label']:12} {level['n_reviewed']:>4}"
+              f"/{level['n_total']:<4} reviewed"
+              + (f", {level['accuracy']:.0%} correct" if level["accuracy"]
+                 is not None else ""))
+    print(f"\n  what the documents say was running on {args.date}")
+    print(f"    {result['in_force']['headline']}")
+    for entry in result["in_force"]["in_force"]:
+        mark = " " if entry["reviewed"] else "?"
+        print(f"      {mark} {entry['started']} to {entry['ended'] or 'no end date'}"
+              f"  {entry['filename'] or entry['document_id']}")
+    print(f"\n  {result['note']}")
     return 0
 
 
@@ -1501,6 +1531,11 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--tier", default="local", choices=("local", "cloud"))
     ingest.add_argument("--engine")
     ingest.add_argument("--cloud-opt-in", action="store_true")
+
+    as_of = add("as-of", cmd_as_of,
+                "what this store believed, and what was running, on a date")
+    as_of.add_argument("date", help="an ISO date")
+    as_of.add_argument("--document-id")
 
     calendar = add("calendar", cmd_calendar, "what falls due, and when")
     calendar.add_argument("--within-days", type=int,
