@@ -24,8 +24,17 @@ from .utils import NotFound, OrpheusError, new_id, now, require_choice
 
 def storage_path_for(root: str | Path, file_hash: str, extension: str) -> Path:
     """Where an original lives. Fanned out by hash prefix so no one directory
-    accumulates every document ever ingested."""
-    directory = Path(root) / "documents" / file_hash[:2]
+    accumulates every document ever ingested.
+
+    Resolved to an absolute path, because the result is written into a database
+    column and a relative path in a database is a path that means different
+    things to different processes. `orpheus ingest --storage-root storage` run
+    from one directory and `orpheus verify` run from another would otherwise
+    disagree about where every document is -- which showed up as a lint
+    reporting every original in the corpus missing, from a store where nothing
+    was wrong.
+    """
+    directory = Path(root).resolve() / "documents" / file_hash[:2]
     directory.mkdir(parents=True, exist_ok=True)
     suffix = f".{extension}" if extension else ""
     return directory / f"{file_hash}{suffix}"

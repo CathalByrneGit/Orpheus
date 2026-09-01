@@ -415,11 +415,19 @@ def _triage_headline(n_unreviewed: int, over_the_line: list, unblocking: list,
         return (f"{n_unreviewed} unreviewed. The rubric already has two levels "
                 "with enough behind them, so the report will answer; what is "
                 "left is depth, weakest level first.")
-    if not unblocking:
-        return (f"{n_unreviewed} unreviewed, and no confidence level can reach "
-                f"{min_reviewed} reviewed instances even if you review every "
-                "one of them. The report cannot rank this rubric on this "
-                "corpus -- it needs more documents, not more review.")
+    # Not "can any level qualify" but "can *two*". A corpus where one level is
+    # reachable and no other can ever get there is still a corpus the report
+    # will never speak about, and telling somebody five reviews is "the
+    # shortest way to an answer" when there is no way to an answer is the worst
+    # thing this could say -- they would do the work and get the same silence.
+    if len(over_the_line) + len(unblocking) < 2:
+        return (f"{n_unreviewed} unreviewed, and no amount of review will make "
+                f"the report speak: it needs two confidence levels with "
+                f"{min_reviewed} reviewed instances each, and this corpus has "
+                f"{len(over_the_line) + len(unblocking)} level(s) that can "
+                "ever get there. That is a corpus too uniform to calibrate "
+                "against -- it needs more documents, or more variety in them, "
+                "not more review.")
     first = unblocking[0]
     needed = min_reviewed - reviewed_at[first]
     return (f"{n_unreviewed} unreviewed, and the report is silent because "

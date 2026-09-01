@@ -35,6 +35,7 @@ out would have made the wiki misleading rather than merely incomplete:
 - **A verified disagreement has somewhere to live.** Every other review verb
   resolves towards a single answer, so without it two confirmed and
   contradictory facts render in the same voice and read as agreement. See
+  **[User guide](user-guide.md)** — two corpora, run end to end, with screenshots.
   [What falls due](calendar.md).
   [Two different pasts](two-pasts.md).
   [Conflicts and lint](conflicts-and-lint.md).

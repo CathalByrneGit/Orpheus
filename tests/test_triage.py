@@ -151,6 +151,34 @@ def test_once_the_report_can_answer_it_deepens_the_thinnest_level(extracted):
 
 # -- what it will not claim ---------------------------------------------------
 
+def test_one_reachable_level_is_still_no_way_to_an_answer(extracted):
+    """Found by running it on eight real contracts, where the model quoted so
+    well that 184 of 189 extractions landed `explicit` and the other two levels
+    held 1 and 4 -- neither able to reach five however much anybody reviewed.
+
+    The first version said "reviewing 5 at `explicit` is the shortest way to an
+    answer". It is not a way to an answer at all: the report needs *two*
+    qualifying levels, and telling somebody otherwise means they do the work
+    and get the same silence.
+    """
+    store = extracted
+    # Leave one level with too few waiting to ever qualify.
+    store.execute(
+        f"DELETE FROM instances_{TYPE} WHERE confidence = ? "
+        f"AND instance_id NOT IN (SELECT instance_id FROM instances_{TYPE} "
+        f"WHERE confidence = ? LIMIT 2)",
+        (CONFIDENCE["named"], CONFIDENCE["named"]))
+    store.execute(f"DELETE FROM instances_{TYPE} WHERE confidence = ?",
+                  (CONFIDENCE["implied"],))
+    store.execute(f"DELETE FROM instances_{TYPE} WHERE confidence = ?",
+                  (CONFIDENCE["inferred"],))
+
+    result = review.triage(store)
+    assert "no amount of review will make the report speak" in result["headline"]
+    assert "1 level(s) that can ever get there" in result["headline"]
+    assert "not more review" in result["headline"]
+
+
 def test_a_level_that_can_never_reach_the_threshold_is_not_offered(store):
     """Offering work that cannot achieve the thing it is offered for is worse
     than offering nothing: the reviewer does it, and the report stays silent."""
@@ -178,7 +206,8 @@ def test_a_level_that_can_never_reach_the_threshold_is_not_offered(store):
             "confidence": 1.0, "created_at": "2026-01-01T00:00:00Z"})
 
     result = review.triage(store)
-    assert "needs more documents, not more review" in result["headline"]
+    assert "no amount of review will make the report speak" in result["headline"]
+    assert "not more review" in result["headline"]
 
 
 def test_an_empty_store_says_so_rather_than_ranking_nothing(store):

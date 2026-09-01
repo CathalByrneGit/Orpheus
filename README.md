@@ -143,10 +143,14 @@ The same routes are available as JSON under `/-/orpheus/api/`.
 
 ## Documentation
 
-Start at **[docs/index.md](docs/index.md)**.
+Start at the **[user guide](docs/user-guide.md)** — two corpora run end to end
+with screenshots of the real thing: eight commercial contracts on the shipped
+bundle, and sixteen governance minutes on an ontology the machine proposed
+because none existed. Then [docs/index.md](docs/index.md) for everything else.
 
 | Page | What it covers |
 |---|---|
+| [User guide](docs/user-guide.md) | Two worked cases, photographed as they came out |
 | [Data model](docs/data-model.md) | Tables, the ontology bundle, the confidence rubric |
 | [Pipeline walkthrough](docs/pipeline-walkthrough.md) | The nine steps, with the function that runs each |
 | [Entities: the wiki](docs/entities.md) | Mentions vs entities, and why a page is a projection |

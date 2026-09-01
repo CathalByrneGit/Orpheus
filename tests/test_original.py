@@ -440,3 +440,27 @@ def test_the_audit_is_an_administrators_view(three):
     status, _ = api.handle(three["store"], "GET", "/storage/audit",
                            actor=_actor(three["store"], "act_other"))
     assert status == 403
+
+
+def test_a_relative_storage_root_still_resolves_from_anywhere(store, tmp_path,
+                                                             monkeypatch):
+    """A relative path in a database column means different things to different
+    processes. Ingesting with `--storage-root storage` from one directory and
+    verifying from another reported every original in the corpus missing, from
+    a store where nothing was wrong."""
+    store.insert("actors", {"actor_id": "act_test", "display_name": "Ada",
+                            "is_admin": 1, "created_at": "2026-01-01T00:00:00Z"})
+    source = tmp_path / "a.txt"
+    source.write_text(CONTENT)
+
+    monkeypatch.chdir(tmp_path)
+    result = ingest_file(store, source, actor_id="act_test",
+                         storage_root="storage")
+
+    recorded = store.one("SELECT storage_path FROM documents WHERE "
+                         "document_id = ?", (result["document_id"],))
+    assert Path(recorded["storage_path"]).is_absolute()
+
+    # Somewhere else entirely, which is where `orpheus verify` usually runs.
+    monkeypatch.chdir(Path(__file__).parent)
+    assert original(store, result["document_id"])["path"].read_text() == CONTENT
