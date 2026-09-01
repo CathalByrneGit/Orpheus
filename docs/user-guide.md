@@ -13,7 +13,7 @@ The two cases are chosen to be as unlike each other as possible:
 | Documents | 8 commercial contracts from [CUAD](https://www.atticusprojectai.org/cuad) — real SEC filings | 16 [Python Steering Council](https://github.com/python/steering-council) monthly updates |
 | Shape | legal prose, clause-numbered, dated | governance minutes, no headers, no schema |
 | Ontology | `contract-core` — shipped | none at the start; **the machine proposes one** |
-| What came out | 189 findings, 55 pages, 205 relations | 322 findings, 193 pages, 264 relations |
+| What came out | 200 findings, 54 pages, 209 relations | 322 findings, 193 pages, 264 relations |
 
 The point of running both is the last row of this guide: the same engine
 produces a sparse graph on one and a dense one on the other, and **says which
@@ -78,10 +78,11 @@ so it cannot invent a thirteenth spelling of one answer.
 ![A document page](images/hero-document.png)
 
 *(the top of the page — [the whole thing](images/contracts-document.png) runs to
-all 31 findings)*
+all 33 findings)*
 
-A strategic alliance agreement, read into **31 findings**: 13 clauses, 10
-obligations, 2 people, 2 key dates, 2 companies, a flag and the contract itself.
+An amendment terminating a joint venture, classified `amendment` and read into
+**33 findings**: 14 companies, 6 people, 5 key dates, 5 clauses, 2 contracts and
+an obligation.
 
 Read the page in this order, because it is the order that matters:
 
@@ -119,7 +120,7 @@ orpheus wiki propose --db contracts.sqlite --actor-id act_…
 
 ![The wiki](images/contracts-wiki.png)
 
-**55 pages** from 189 findings. Grouping is on a normalised name — legal-form
+**54 pages** from 200 findings. Grouping is on a normalised name — legal-form
 suffixes trimmed, case folded — and the page says so on every screen, because
 that is a candidate and not resolution.
 
@@ -142,11 +143,11 @@ made before the merge still resolves.
 
 ![The network](images/contracts-network.png)
 
-55 pages, 58 canonical relations, 8 components — and the number that matters
+54 pages, 54 canonical relations, 8 components — and the number that matters
 most on this page:
 
-> **29% of extracted relations reached the graph.** Every relation between two
-> named things is drawn; the other 146 link to a clause, a date or a document,
+> **26% of extracted relations reached the graph.** Every relation between two
+> named things is drawn; the other 154 link to a clause, a date or a document,
 > which never gets a page. **This is the shape of the corpus, not an unbuilt
 > wiki.**
 
@@ -154,6 +155,93 @@ A graph view without that sentence is a confident picture of whatever happened
 to be linked. Contracts are mostly assertions *about clauses*, so most of their
 relations have nowhere to land — which is a fact about contracts, and the page
 says so rather than letting you read it as missing work.
+
+## The same graph, drawn
+
+`/-/orpheus/map` draws what the network page lists.
+
+![The corpus as a map](images/contracts-map.png)
+
+**Not a second source of truth.** It reads the same `/graph/map` payload, with
+no separate projection, so the picture cannot show a relation the text views
+would not — and the coverage banner leads here for the same reason it does
+there, and more so: a diagram is more persuasive than a table and says exactly
+as much.
+
+Eight contracts, and **eight islands**. Nothing joins them, because these are
+unrelated commercial filings with no party in common — the map is telling you
+about the corpus, not failing to draw. (The council corpus in case 2 is one
+connected mass for the opposite reason.)
+
+Two things in the legend do real work:
+
+- **faded = nobody has confirmed the page; dashed = nobody has confirmed the
+  relation.** On this corpus everything is faded and dashed, which is the
+  honest look of a store nobody has reviewed. A map that drew reviewed and
+  unreviewed identically would be the most confident lie in the product.
+- **`only relations somebody confirmed`** redraws it with the unchecked removed.
+  On this store that is an empty canvas, and that is the point of offering it.
+
+Drag to pan, scroll to zoom, click a node for what the store holds about it.
+When `frontend/` has not been built a template with a hand-written relaxation
+draws the same payload instead — the bundle is a build artefact and is not
+committed, so a fresh checkout gets the fallback, and both read the same JSON.
+
+## Asking about the page you are on
+
+The reading companion proposes; the chat answers. They are alternatives rather
+than a stack, side by side on the same page.
+
+![Asking the chat about this page](images/contracts-chat.png)
+
+The question typed here was *"Who are the parties on this page, and has anybody
+confirmed them yet?"* — chosen because a model reading the passage alone could
+guess at the parties and could not possibly know the second half. The answer:
+
+> **Autoliv ASP, Inc.** — unconfirmed page
+> **Autoliv AB** — unconfirmed page
+> **Autoliv Holding, Inc.** — unconfirmed page
+>
+> The store has pages for all except Nissin Kogyo Holdings USA, Inc., but
+> **nobody has confirmed any of these pages yet** — they are all still in
+> unconfirmed status. Nissin Kogyo Holdings USA, Inc. was named in the document
+> but never extracted into a separate entity page, so it would need to be added
+> via `orpheus_record` if you want to capture it formally.
+
+Four things in one answer, and none of them is the chat being clever:
+
+1. It **answered from the store**, not from the passage — the pages, and their
+   status.
+2. It **reported the review state** without being asked to. Every Orpheus tool
+   returns it, so an answer that omitted it would take extra work.
+3. It **found a gap**: one party the extractor missed entirely.
+4. It **named the tool** that would fix the gap rather than fixing it. Writing
+   through the chat goes through `orpheus_record`, which raises an approval
+   prompt first, and what it writes lands as a *suggestion* in the same queue
+   the reading companion feeds — never as an extraction, because proposals
+   nobody asked for would pour into the number extraction quality is measured
+   by.
+
+It is `datasette-agent`'s own conversation view in a frame, so the streaming,
+the tool rendering and the approval prompt are its code rather than a second
+implementation here. What this page adds is the one thing that view cannot know:
+which document and page you are looking at.
+
+**Turning it on** takes two things, and Orpheus checks for both before offering
+the panel — installed is not enough, because a chat that opens and then fails on
+the first message is a worse offer than none:
+
+```bash
+pip install -e '.[agent]'
+orpheus search --build --db contracts.sqlite   # the chat's tools search this
+```
+
+```yaml
+# datasette.yml
+plugins:
+  datasette-llm:
+    default_model: "claude-haiku-4.5"
+```
 
 ## What falls due
 
@@ -164,8 +252,8 @@ orpheus calendar --db contracts.sqlite --within-days 3650
 ![The calendar](images/contracts-calendar.png)
 
 ```
-6 past its date. 0 of 6 shown have been checked by a person; the other 6 are
-machine readings nobody has confirmed. 4 of 8 document(s) have no date that
+7 past its date. 0 of 7 shown have been checked by a person; the other 7 are
+machine readings nobody has confirmed. 3 of 8 document(s) have no date that
 falls due at all. An empty stretch in this calendar may be that rather than a
 quiet quarter.
 ```
@@ -205,7 +293,7 @@ letting you read that as sound.
 
 ## Where to start reviewing
 
-189 unreviewed findings and no order on them is a corpus nobody reviews. So the
+200 unreviewed findings and no order on them is a corpus nobody reviews. So the
 queue is ranked off the thing the quality report is actually waiting for:
 
 ```bash
@@ -213,15 +301,15 @@ orpheus triage --db contracts.sqlite
 ```
 
 ```
-189 unreviewed, and no amount of review will make the report speak: it needs
+200 unreviewed, and no amount of review will make the report speak: it needs
 two confidence levels with 5 reviewed instances each, and this corpus has 1
 level(s) that can ever get there. That is a corpus too uniform to calibrate
 against — it needs more documents, or more variety in them, not more review.
 ```
 
 Which is the honest answer here, and worth dwelling on. The model quoted so
-well that 184 of 189 extractions landed `explicit`; the other two levels hold 1
-and 4. No amount of reviewing makes a rubric rank when almost everything sits at
+well that 198 of 200 extractions landed `explicit`; the other two levels hold
+one apiece. No amount of reviewing makes a rubric rank when almost everything sits at
 one level. **Telling you to review five things would have been a lie that cost
 you an afternoon** — this guide's own corpus is where that message came from.
 
@@ -317,10 +405,10 @@ Set the two side by side:
 
 | | Contracts | Minutes |
 |---|---|---|
-| Pages | 55 | 193 |
-| Canonical relations | 58 | 157 |
-| Largest component | 18 pages | 87 pages |
-| Relations reaching the graph | **29%** | **63%** |
+| Pages | 54 | 193 |
+| Canonical relations | 54 | 157 |
+| Largest component | 16 pages | 87 pages |
+| Relations reaching the graph | **26%** | **63%** |
 
 The council page has enough structure to say something about it: 12 clusters by
 Louvain at modularity 0.67, and `Łukasz` sitting on more shortest paths between

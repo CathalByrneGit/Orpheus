@@ -8,7 +8,7 @@ Built for public servants who have four hundred contracts, or ten years of
 minutes, and need to answer questions about them without reading all of them —
 and without a tool that sounds confident when it is guessing.
 
-![A contract, read into 31 findings](docs/images/hero-document.png)
+![A contract, read into 33 findings](docs/images/hero-document.png)
 
 *A real SEC contract exhibit, read by a model and shown as it comes out: every
 row is `unconfirmed` until a person says otherwise, every row carries the
@@ -27,7 +27,10 @@ Point it at eight commercial contracts and you get, with no configuration:
 - **A wiki**: one page per company and person, gathering every mention across
   every document, with the sources listed underneath.
 - **A relation graph** — who supplies whom, who signed what — projected up from
-  individual mentions to those pages.
+  individual mentions to those pages, [as a list or drawn](docs/user-guide.md#the-same-graph-drawn).
+- **A chat that answers from the store**, not from the page: ask who the parties
+  are and it tells you, and tells you whether anybody has confirmed them.
+  [What that looks like](docs/user-guide.md#asking-about-the-page-you-are-on).
 - **A calendar** of what expires, renews or falls due, and what is already past.
 - **An adversarial pass** that hunts for the ways the store could be misleading
   you: quotations that are not in the document, pages asserting things no
