@@ -417,7 +417,7 @@ For a corpus that has no bundle yet. See
 | Method | Path | Permission | Notes |
 |---|---|---|---|
 | `POST` | `/ontology/survey` | **administrator** | `engine`, `sample`, `min_support`, `document_ids`, `primary_type`, `chars_per_document`, `tier`, `cloud_opt_in` |
-| `GET` | `/ontology/candidates` | actor | `?status=proposed`, `?kind=object_type\|property\|link_type` |
+| `GET` | `/ontology/candidates` | actor | `?status=proposed`, `?kind=…`, `?limit=` (25; `0` for all). Returns `n_total` |
 | `POST` | `/ontology/candidates/<id>/review` | **administrator** | `decision`, `accepted_as`, `note` |
 | `POST` | `/ontology/draft` | **administrator** | `bundle_id`, `bundle_version`, `name`, `primary_type`, `document_types`, `document_scoped`, `sectors`, `jurisdictions` |
 
@@ -449,7 +449,7 @@ never asked for one.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| `GET` | `/graph/topology` | **administrator** | `?seed=`, `?reviewed_only=1` |
+| `GET` | `/graph/topology` | **administrator** | `?seed=`, `?reviewed_only=1`, `?list_cap=` (20; `0` for all), `?exact=1` for exact betweenness |
 | `GET` | `/graph/edges` | actor | `?link_type_id=`, `?reviewed_only=1` |
 | `GET` | `/graph/map` | **administrator**, or actor with `?entity_id=` | `?depth=2` (1–4), `?reviewed_only=1` |
 | `GET` | `/graph/entities/<entity_id>` | actor | `?depth=1` — one page and its neighbours |

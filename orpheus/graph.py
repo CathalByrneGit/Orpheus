@@ -55,6 +55,27 @@ EXCLUDED = ("rejected",)
 # by default, so two people reading the same store see the same communities.
 DEFAULT_SEED = 20260824
 
+#: How many rows of a ranked list a structural report carries.
+#:
+#: Every capped list here is sorted so the first rows are the ones worth
+#: reading -- islands by size, cut vertices by degree -- and every cap is
+#: reported beside the total it was taken from. A page that renders "20 of
+#: 1,225" is shorter *and* says more than one that renders 1,225 rows, because
+#: the total is the finding and the rows are the illustration.
+LIST_CAP = 20
+
+#: Sources to sample when estimating betweenness.
+#:
+#: Brandes' algorithm is O(nm), and on a corpus-sized graph that is not a
+#: constant factor: measured here, betweenness on 3,000 pages and 8,000 edges
+#: took 51 seconds against 1.3 seconds for every other computation on the page
+#: combined. Sampling 100 sources brings it to 1.7s -- the same order as
+#: everything else -- and the result is approximate, which `method` says.
+#:
+#: Exact is still available and still correct; it is one request away rather
+#: than the thing everybody waits for by default.
+DEFAULT_BETWEENNESS_SAMPLE = 100
+
 
 # ---------------------------------------------------------------------------
 # Projecting mentions up to pages
@@ -594,12 +615,19 @@ def bridges(graph: dict, found: list[dict] | None = None,
 
 
 def community_connections(graph: dict, found: list[dict] | None = None,
-                          seed: int = DEFAULT_SEED) -> list[dict]:
+                          seed: int = DEFAULT_SEED,
+                          limit: int | None = None) -> list[dict]:
     """Which clusters are joined, and how weakly.
 
     The pairs with **no** shared edge are the point. Two clusters that never
     touch are two things the corpus knows about and has never connected, and
     that is a question worth asking rather than a gap to fill in silently.
+
+    `limit` caps the *disconnected* rows only, and exists because there are
+    quadratically many of them: a hundred clusters make 4,950 pairs, and in a
+    corpus that has not been linked up almost all of them never touch. The
+    pairs that *do* share an edge are as sparse as the graph and are always
+    returned in full. Use `n_community_pairs` for the true total.
     """
     found = communities(graph, seed=seed) if found is None else found
     membership = {entity_id: c["community"]
@@ -614,18 +642,43 @@ def community_connections(graph: dict, found: list[dict] | None = None,
             continue
         shared[tuple(sorted((left, right)))] += 1
 
-    out = []
+    def row(left, right, n):
+        return {"communities": [left, right],
+                "labels": [names[left], names[right]],
+                "shared_edges": n,
+                "disconnected": n == 0,
+                "basis": "heuristic"}
+
+    connected = [row(left, right, n) for (left, right), n in shared.items() if n]
+    connected.sort(key=lambda c: (c["shared_edges"], c["communities"]))
+
+    # Generated rather than filtered out of the full cross product, and
+    # stopped at `limit`. Building 4,950 dictionaries to show twenty of them is
+    # the cost this avoids.
+    apart: list[dict] = []
     identifiers = sorted(names)
     for index, left in enumerate(identifiers):
+        if limit is not None and len(apart) >= limit:
+            break
         for right in identifiers[index + 1:]:
-            n = shared.get((left, right), 0)
-            out.append({"communities": [left, right],
-                        "labels": [names[left], names[right]],
-                        "shared_edges": n,
-                        "disconnected": n == 0,
-                        "basis": "heuristic"})
-    out.sort(key=lambda c: (c["shared_edges"], c["communities"]))
-    return out
+            if not shared.get((left, right), 0):
+                apart.append(row(left, right, 0))
+                if limit is not None and len(apart) >= limit:
+                    break
+    apart.sort(key=lambda c: c["communities"])
+    # Disconnected first, which is the order the old full sort produced and the
+    # order a reader wants: the pairs that never touch are the finding.
+    return apart + connected
+
+
+def n_community_pairs(found: list[dict]) -> int:
+    """How many cluster pairs exist at all, computed rather than counted.
+
+    The denominator for a capped list of pairs that never touch. Materialising
+    them to count them is the thing the cap exists to avoid.
+    """
+    n = len(found)
+    return n * (n - 1) // 2
 
 
 def _describe(graph: dict, members: set) -> dict:
@@ -800,19 +853,45 @@ def neighbourhood(store: Store, entity_id: str, depth: int = 1,
 # ---------------------------------------------------------------------------
 
 def topology(store: Store, seed: int = DEFAULT_SEED,
-             reviewed_only: bool = False) -> dict:
+             reviewed_only: bool = False, list_cap: int | None = LIST_CAP,
+             exact_betweenness: bool = False) -> dict:
     """The whole structural picture, with its own reliability attached.
 
     Ordered deliberately: `coverage` first, because every number after it is
     conditional on how much of the corpus reached the graph, and a reader who
     skips it will draw confident conclusions from a fraction of the evidence.
+
+    **Every list here is capped and every cap reports its total.** Four of them
+    have no natural ceiling -- islands, cut vertices, isolates, and pairs of
+    clusters that never touch, the last of which is quadratic in the number of
+    clusters. Rendering all of them was never more informative than rendering
+    the first twenty and the count: the total is the finding and the rows are
+    the illustration. Pass `list_cap=None` for everything, which is what a
+    script wants and a page does not.
+
+    Betweenness is sampled unless `exact_betweenness`, for the reason
+    `DEFAULT_BETWEENNESS_SAMPLE` gives: it is the only computation here that
+    does not finish in about a second on a corpus-sized graph.
     """
     graph = build(store, reviewed_only=reviewed_only)
     found = communities(graph, seed=seed)
-    important = centrality(graph)
+    # `k` must not exceed the node count, and on a small graph sampling buys
+    # nothing anyway -- so the exact answer is what a small corpus gets, and
+    # `method` says which ran rather than leaving it to be inferred.
+    sample = (None if exact_betweenness
+              or len(graph["nodes"]) <= DEFAULT_BETWEENNESS_SAMPLE
+              else DEFAULT_BETWEENNESS_SAMPLE)
+    important = centrality(graph, k=sample)
     islands = components(graph)
     stranded = isolates(graph)
-    connections = community_connections(graph, found)
+    cut_points = articulation_points(graph)
+    connections = community_connections(graph, found, limit=list_cap)
+    apart = [c for c in connections if c["disconnected"]]
+    n_pairs = n_community_pairs(found)
+    n_touching = sum(1 for c in connections if not c["disconnected"])
+
+    def capped(rows):
+        return rows if list_cap is None else rows[:list_cap]
 
     linked = [n for n in graph["nodes"].values() if n["degree"]]
     return {
@@ -824,14 +903,23 @@ def topology(store: Store, seed: int = DEFAULT_SEED,
             "canonical_edges": len(graph["edges"]),
             "components": len(islands),
             "communities": len(found),
+            "articulation_points": len(cut_points),
+            # Computed, not counted: the pairs that never touch are generated
+            # only up to the cap, so this is the arithmetic total minus the
+            # sparse set that do share an edge.
+            "disconnected_pairs": n_pairs - n_touching,
+            "community_pairs": n_pairs,
         },
-        "components": islands,
-        "articulation_points": articulation_points(graph),
+        # What each list was cut to, so a reader can tell a short list from a
+        # truncated one without counting rows.
+        "list_cap": list_cap,
+        "components": capped(islands),
+        "articulation_points": capped(cut_points),
         "communities": found,
         "bridges": bridges(graph, found),
         "community_connections": connections,
-        "disconnected_pairs": [c for c in connections if c["disconnected"]],
-        "isolates": stranded,
+        "disconnected_pairs": apart,
+        "isolates": capped(stranded),
         "most_connected": important["by_degree"][:20],
         # A different question from degree: who sits on the paths between other
         # pages. An intermediary with three links can matter more than a buyer

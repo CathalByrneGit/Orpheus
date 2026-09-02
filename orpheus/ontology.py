@@ -799,21 +799,54 @@ def evidence_for(store: Store, candidate_id: str) -> list[dict]:
         "WHERE e.candidate_id = ? ORDER BY e.rowid", (candidate_id,))
 
 
+#: How many candidates a queue hands over at once.
+#:
+#: A queue is not a listing. You decide the top item, it leaves the queue, and
+#: the next one appears -- so the useful thing is the front of it plus a count
+#: of what is behind, and paging through it fights the workflow: decide the
+#: third item on page two and everything shifts under you. Every candidate
+#: carries its excerpts, so an uncapped queue is also a screen nobody can read
+#: and a query per row for evidence nobody will look at.
+QUEUE_LIMIT = 25
+
+
+def _candidate_filter(status: str, kind: str | None) -> tuple[str, list]:
+    where, params = "WHERE status = ?", [status]
+    if kind:
+        require_choice(kind, CANDIDATE_KINDS, "kind")
+        where += " AND kind = ?"
+        params.append(kind)
+    return where, params
+
+
+def n_candidates(store: Store, status: str = "proposed",
+                 kind: str | None = None) -> int:
+    """How many are in the queue, whatever the page is showing."""
+    where, params = _candidate_filter(status, kind)
+    return store.scalar(
+        f"SELECT COUNT(*) FROM ontology_candidates {where}", tuple(params))
+
+
 def candidates(store: Store, status: str = "proposed",
-               kind: str | None = None) -> list[dict]:
+               kind: str | None = None,
+               limit: int | None = QUEUE_LIMIT) -> list[dict]:
     """The queue, most-supported first.
 
     Ordered by how many documents show it, because that is the order somebody
     reviewing an ontology wants: the types the corpus is really about come
-    first, and the tail is where the doubtful ones are.
+    first, and the tail is where the doubtful ones are. Which is also why a cap
+    costs nothing: it takes the front of that order, and `n_candidates` says
+    what is behind it.
+
+    `limit=None` for the whole queue, which is what `draft` needs and a screen
+    does not.
     """
-    sql = "SELECT * FROM ontology_candidates WHERE status = ?"
-    params: list = [status]
-    if kind:
-        require_choice(kind, CANDIDATE_KINDS, "kind")
-        sql += " AND kind = ?"
-        params.append(kind)
-    sql += " ORDER BY n_documents DESC, kind, type_id, IFNULL(property_id, '')"
+    where, params = _candidate_filter(status, kind)
+    sql = (f"SELECT * FROM ontology_candidates {where} "
+           "ORDER BY n_documents DESC, kind, type_id, IFNULL(property_id, '')")
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
     rows = store.query(sql, tuple(params))
     for row in rows:
         row["evidence"] = evidence_for(store, row["candidate_id"])

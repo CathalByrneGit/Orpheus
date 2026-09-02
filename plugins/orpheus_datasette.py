@@ -723,7 +723,15 @@ async def network_page(datasette, request):
     """The structural view. Administrator-only in the core, rendered as told."""
     if not request.actor:
         return Response.text("Sign in to use Orpheus.", status=403)
-    status, report = await _call(datasette, request, "GET", "/graph/topology")
+    # Passed through rather than fixed here: the page offers exact betweenness
+    # as a link, and the core decides what that costs.
+    query = {}
+    if request.args.get("exact"):
+        query["exact"] = "1"
+    if request.args.get("list_cap"):
+        query["list_cap"] = request.args["list_cap"]
+    status, report = await _call(datasette, request, "GET", "/graph/topology",
+                                 query)
     if status != 200:
         return _redirect(datasette, "/-/orpheus",
                          error=report["error"]["message"])
@@ -745,6 +753,7 @@ async def network_page(datasette, request):
         "paths": paths,
         "path_from": path_from,
         "path_to": path_to,
+        "exact": bool(request.args.get("exact")),
         "error": request.args.get("error") or path_error,
     })
 
@@ -864,10 +873,11 @@ async def ontology_page(datasette, request):
     """
     if not request.actor:
         return Response.text("Sign in to use Orpheus.", status=403)
+    query = {"status": request.args.get("status") or "proposed"}
+    if request.args.get("limit"):
+        query["limit"] = request.args["limit"]
     status, listed = await _call(datasette, request, "GET",
-                                 "/ontology/candidates",
-                                 {"status": request.args.get("status")
-                                  or "proposed"})
+                                 "/ontology/candidates", query)
     if status != 200:
         return _redirect(datasette, "/-/orpheus",
                          error=listed["error"]["message"])
@@ -877,10 +887,15 @@ async def ontology_page(datasette, request):
                              "/ontology/candidates", {"status": "amended"})
     accepted = ((decided or {}).get("candidates", [])
                 + (amended or {}).get("candidates", []))
+    n_accepted = ((decided or {}).get("n_total", 0)
+                  + (amended or {}).get("n_total", 0))
     return await _render(datasette, request, "orpheus_ontology.html", {
         "candidates": listed.get("candidates", []),
+        "n_candidates": listed.get("n_total", 0),
+        "limit": listed.get("limit"),
         "reading": listed.get("reading"),
         "accepted": accepted,
+        "n_accepted": n_accepted,
         # A bundle can only be drafted once something has been accepted, and
         # only from types -- a queue of accepted properties with no type is the
         # half-made decision the drafter refuses.

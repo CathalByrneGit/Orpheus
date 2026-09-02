@@ -283,6 +283,62 @@ to overwrite it. The graph's shape depends
 on that page, and a link's review status does not change the shape — so the
 topology gives no hint that a structural reading rests on an unchecked guess.
 
+## What the page can afford to compute
+
+Measured on synthetic graphs, with `networkx` already imported:
+
+| pages | edges | everything else combined | betweenness (exact) | betweenness (sampled) |
+|---|---|---|---|---|
+| 500 | 1,200 | 92 ms | 573 ms | 120 ms |
+| 1,500 | 4,000 | 399 ms | **11,070 ms** | 795 ms |
+| 3,000 | 8,000 | 1,289 ms | **51,026 ms** | 1,679 ms |
+
+Components, articulation points, isolates, communities, coverage and degree —
+all of it — costs about a second on a 3,000-page corpus. Betweenness costs
+fifty-one, because Brandes' algorithm is O(nm) and that is not a constant
+factor at this size. **It is the only computation here that does not finish
+quickly**, which is why it is the only one treated differently.
+
+So it is sampled by default and `centrality_method` says `betweenness_sampled`
+rather than leaving that to be inferred. The ranking is stable; the values are
+approximate. `?exact=1` on the route, `--exact` on the CLI, or the link on the
+page computes it properly. Sampling is skipped entirely on a graph smaller than
+the sample, where it would buy nothing and `k` may not exceed the node count
+anyway.
+
+Note what is *not* behind a button. Splitting the rest of the page into five
+pages would make somebody click four times for numbers that were already free,
+and it would be worse than that: the design insists coverage leads, because
+every number after it is conditional on how much of the corpus reached the
+graph. Put "most connected" alone on a page and a reader gets a ranking with no
+caveat attached.
+
+### Every list is capped, and every cap states its total
+
+Four lists here have no natural ceiling, and one of them is quadratic:
+
+| List | Grows with |
+|---|---|
+| Islands | components in the graph |
+| Pages holding the graph together | cut vertices |
+| Related to nothing | unlinked pages |
+| Clusters that never touch | **pairs of clusters** — 100 clusters make 4,950 |
+
+They are capped at `graph.LIST_CAP` (20), sorted so the first rows are the ones
+worth reading — islands by size, cut vertices by degree — and each says what it
+was cut from: *"Showing 20 of 1,770 pair(s) that never touch, of 1,770 pairs"*.
+On a 220-page store with 60 islands that took the page from 164 KB to 32 KB with
+nothing lost, because **the total is the finding and the rows are the
+illustration**.
+
+The pairs that never touch are now *generated* up to the cap rather than
+filtered out of a materialised cross product, and the total is arithmetic:
+`n*(n-1)/2` minus the sparse set that do share an edge. Building 1,770
+dictionaries to show twenty was the cost, not the rendering.
+
+`?list_cap=0`, or `--list-cap 0`, lifts every cap — which is what a script
+wants and a page does not.
+
 ## What a budget is denominated in
 
 sift-kg has `--max-cost`, which works because LiteLLM carries a pricing table.

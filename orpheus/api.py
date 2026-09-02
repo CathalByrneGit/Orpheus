@@ -824,15 +824,26 @@ def get_topology(store, actor, body, **_):
     Spans every document in the store, including ones this actor cannot read --
     the same reason `/quality` is administrator-only. A neighbourhood around one
     page is the scoped view and needs no such thing.
+
+    Every list comes back capped, with its total beside it; `?list_cap=0` lifts
+    the caps, which is what a script wants and a page does not.
+
+    Betweenness is sampled unless `?exact=1`. It is the only computation here
+    that does not finish in about a second on a corpus-sized graph -- measured
+    at 51 seconds on 3,000 pages against 1.3 for everything else combined --
+    and `centrality_method` says which ran.
     """
     if not actor.get("is_admin"):
         raise PermissionDenied(
             "The corpus topology spans documents you may not be able to read, "
             "so it is an administrator view. GET /graph/entities/<id> is scoped "
             "to one page and its neighbours.")
+    cap = _int(body, "list_cap", graph_mod.LIST_CAP)
     return graph_mod.topology(
         store, seed=_int(body, "seed", graph_mod.DEFAULT_SEED),
-        reviewed_only=body.get("reviewed_only") in ("1", "true", "True", True))
+        reviewed_only=body.get("reviewed_only") in ("1", "true", "True", True),
+        list_cap=cap or None,
+        exact_betweenness=body.get("exact") in ("1", "true", "True", True))
 
 
 # ---------------------------------------------------------------------------
@@ -976,13 +987,24 @@ def withdraw_register(store, register_id, actor, body, **_):
 
 @route("GET", "/ontology/candidates")
 def get_ontology_candidates(store, actor, body, **_):
-    """What a survey proposed, most-supported first."""
-    return {"candidates": ontology.candidates(
-        store, status=body.get("status", "proposed"),
-        kind=body.get("kind") or None),
-        "reading": ("`n_documents` of `n_sampled` is how many documents show "
-                    "this, counted rather than claimed. It is not a "
-                    "confidence: the model is never asked how sure it is.")}
+    """What a survey proposed, most-supported first.
+
+    Capped, with `n_total` beside it. A queue is not a listing: you decide the
+    top item, it leaves the queue, and the next appears -- so the front of it
+    plus a count of what is behind is what a reviewer needs, and every
+    candidate carries its excerpts, so an uncapped one is a screen nobody can
+    read. `?limit=0` for all of them.
+    """
+    status = body.get("status", "proposed")
+    kind = body.get("kind") or None
+    limit = _int(body, "limit", ontology.QUEUE_LIMIT)
+    return {"candidates": ontology.candidates(store, status=status, kind=kind,
+                                              limit=limit or None),
+            "n_total": ontology.n_candidates(store, status=status, kind=kind),
+            "limit": limit or None,
+            "reading": ("`n_documents` of `n_sampled` is how many documents show "
+                        "this, counted rather than claimed. It is not a "
+                        "confidence: the model is never asked how sure it is.")}
 
 
 @route("POST", "/ontology/survey")

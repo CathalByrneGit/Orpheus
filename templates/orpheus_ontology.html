@@ -62,6 +62,20 @@
   <a href="{{ urls.path('/-/orpheus/ontology') }}?status=rejected">rejected</a>
 </p>
 
+{% if limit and n_candidates > candidates | length %}
+{# A queue, not a listing: decide the top one and it leaves, so the front of it
+   plus a count of what is behind is what a reviewer needs. Paging through it
+   would shift everything under them the moment they decided anything. #}
+<p style="color:#888">
+  {{ candidates | length }} of <strong>{{ n_candidates }}</strong>
+  {{ showing }}, most-supported first. Decide these and the next
+  {{ candidates | length }} take their place.
+  <a href="{{ urls.path('/-/orpheus/ontology') }}?status={{ showing }}&amp;limit=0">Show all {{ n_candidates }}</a>
+</p>
+{% elif n_candidates %}
+<p style="color:#888">{{ n_candidates }} {{ showing }}, most-supported first.</p>
+{% endif %}
+
 {% if not candidates %}
 <p style="color:#666">Nothing {{ showing }}. A corpus of prose has no header
   block to read, and the pattern pass will honestly find nothing in it &mdash;

@@ -421,3 +421,51 @@ def test_drafting_returns_a_bundle_and_does_not_install_it(api):
     assert status == 200
     assert drafted["bundle"]["bundleId"] == "matters-core"
     assert bundle_mod.active(store)["bundleId"] == before
+
+
+def test_the_topology_route_caps_and_can_be_uncapped(api):
+    """`?list_cap=0` is what a script wants and a page does not."""
+    _, call, _, _ = api
+    status, capped = call("GET", "/graph/topology", {"list_cap": "2"},
+                          who="admin")
+    assert status == 200 and capped["list_cap"] == 2
+
+    status, everything = call("GET", "/graph/topology", {"list_cap": "0"},
+                              who="admin")
+    assert status == 200 and everything["list_cap"] is None
+    assert len(everything["isolates"]) >= len(capped["isolates"])
+    # Whatever is shown, the totals are the true ones.
+    assert everything["counts"]["components"] == capped["counts"]["components"]
+
+
+def test_exact_betweenness_is_asked_for_rather_than_waited_for(api):
+    """It is the only computation on that page that does not finish in about a
+    second on a corpus-sized graph -- 51 seconds on 3,000 pages against 1.3 for
+    everything else combined."""
+    _, call, _, _ = api
+    _, sampled = call("GET", "/graph/topology", who="admin")
+    _, exact = call("GET", "/graph/topology", {"exact": "1"}, who="admin")
+    assert exact["centrality_method"] in ("betweenness_exact", "degree_only")
+    assert sampled["centrality_method"] in ("betweenness_exact",
+                                            "betweenness_sampled",
+                                            "degree_only")
+
+
+def test_the_ontology_queue_hands_over_a_front_and_a_total(api):
+    """A queue is not a listing: the front of it plus a count of what is behind
+    is what a reviewer needs."""
+    store, call, document_id, _ = api
+    for i in range(6):
+        store.insert("ontology_candidates", {
+            "candidate_id": f"cnd_api{i}", "survey_id": "srv", "kind": "object_type",
+            "type_id": f"Type{i}", "n_documents": 6 - i, "n_sampled": 6,
+            "engine": "deterministic", "source": "ai_local", "status": "proposed",
+            "created_at": "2026-01-01T00:00:00Z"})
+    status, page = call("GET", "/ontology/candidates", {"limit": "2"},
+                        who="admin")
+    assert status == 200
+    assert len(page["candidates"]) == 2 and page["n_total"] == 6
+    assert page["limit"] == 2
+
+    _, whole = call("GET", "/ontology/candidates", {"limit": "0"}, who="admin")
+    assert len(whole["candidates"]) == 6 and whole["limit"] is None

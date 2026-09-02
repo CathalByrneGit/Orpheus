@@ -43,6 +43,17 @@ DOCUMENT_SUFFIXES = tuple(
 # Output
 # ---------------------------------------------------------------------------
 
+def _of(shown: int, total: int, noun: str) -> None:
+    """Say what a capped list was capped from.
+
+    Printing the first twenty of something is only honest if the reader is told
+    how many there were: the total is usually the finding and the rows are the
+    illustration.
+    """
+    if total > shown:
+        print(f"      ...{shown} of {total} {noun}. `--list-cap 0` for all.")
+
+
 def _clip(text: object, width: int) -> str:
     """Shorten a name for a column, but never silently.
 
@@ -611,8 +622,11 @@ def cmd_graph(args) -> int:
     store = open_store(args, mode="read")
     try:
         if args.action == "topology":
-            result = graph_mod.topology(store, seed=args.seed,
-                                        reviewed_only=args.reviewed_only)
+            cap = (graph_mod.LIST_CAP if args.list_cap is None
+                   else args.list_cap or None)
+            result = graph_mod.topology(
+                store, seed=args.seed, reviewed_only=args.reviewed_only,
+                list_cap=cap, exact_betweenness=args.exact)
         elif args.action == "edges":
             result = {"edges": graph_mod.canonical_edges(
                 store, link_type_id=args.link_type,
@@ -660,13 +674,19 @@ def cmd_graph(args) -> int:
             print("\n  pages holding the graph together (deterministic):")
             for point in result["articulation_points"]:
                 print(f"    {_clip(point['name'], 36):38} {point['degree']} link(s)")
+            _of(len(result["articulation_points"]),
+                result["counts"]["articulation_points"], "page(s)")
         if result["disconnected_pairs"]:
             print("\n  clusters that never touch (heuristic):")
-            for pair in result["disconnected_pairs"][:10]:
+            for pair in result["disconnected_pairs"]:
                 print(f"    {pair['labels'][0][:26]:28} <-> {pair['labels'][1][:26]}")
+            _of(len(result["disconnected_pairs"]),
+                result["counts"]["disconnected_pairs"], "pair(s)")
         if result["isolates"]:
             print(f"\n  related to nothing: "
-                  f"{', '.join(_clip(i['name'], 24) for i in result['isolates'][:8])}")
+                  f"{', '.join(_clip(i['name'], 24) for i in result['isolates'])}")
+            _of(len(result["isolates"]), result["counts"]["isolated_entities"],
+                "page(s)")
         print(f"\n  {result['note']}")
         return 0
 
@@ -1734,6 +1754,12 @@ def build_parser() -> argparse.ArgumentParser:
     grapher.add_argument("--max-paths", type=int, default=5)
     grapher.add_argument("--sample", type=int,
                          help="approximate betweenness from this many sources")
+    grapher.add_argument("--list-cap", type=int, default=None, metavar="N",
+                         help="rows per list in `topology`; 0 for all of them")
+    grapher.add_argument("--exact", action="store_true",
+                         help="compute betweenness exactly rather than from a "
+                              "sample -- correct, and much slower on a large "
+                              "corpus")
     grapher.add_argument("--depth", type=int, default=1,
                          help="hops out from the page, for `near`")
     grapher.add_argument("--max-length", type=int, default=6,

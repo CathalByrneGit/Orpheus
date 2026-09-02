@@ -583,3 +583,97 @@ def test_reviewed_only_draws_only_what_has_been_checked(corpus):
     # Every edge in the fixture is unconfirmed, so the reviewed map has none.
     assert _map(corpus, reviewed_only="1")[1]["edges"] == []
     assert _map(corpus)[1]["edges"] != []
+
+
+# -- what a page can afford --------------------------------------------------
+
+def test_betweenness_is_sampled_on_a_graph_big_enough_to_need_it(corpus):
+    """Brandes' algorithm is O(nm), and on a corpus-sized graph that is not a
+    constant factor: measured at 51 seconds on 3,000 pages against 1.3 for
+    every other computation on the page combined. Sampling brings it to the
+    same order as everything else, and `method` says which ran."""
+    from orpheus.graph import DEFAULT_BETWEENNESS_SAMPLE, LIST_CAP, topology
+
+    small = topology(corpus)
+    # A handful of pages needs no sampling, and `k` may not exceed the node
+    # count anyway -- so a small corpus gets the exact answer and says so.
+    assert small["centrality_method"] in ("betweenness_exact", "degree_only")
+
+    _grow(corpus, DEFAULT_BETWEENNESS_SAMPLE + 40)
+    big = topology(corpus)
+    if big["centrality_method"] != "degree_only":       # networkx installed
+        assert big["centrality_method"] == "betweenness_sampled"
+        assert "sampled from" in big["centrality_note"]
+        assert topology(corpus, exact_betweenness=True)["centrality_method"] \
+            == "betweenness_exact"
+
+
+def test_every_capped_list_reports_what_it_was_capped_from(corpus):
+    """Printing the first twenty of something is only honest if the reader is
+    told how many there were. The total is usually the finding."""
+    from orpheus.graph import LIST_CAP, topology
+
+    _grow(corpus, 60, connect=False)
+    report = topology(corpus, list_cap=5)
+    assert len(report["isolates"]) == 5
+    assert report["counts"]["isolated_entities"] > 5
+    assert report["list_cap"] == 5
+
+    everything = topology(corpus, list_cap=None)
+    assert len(everything["isolates"]) == everything["counts"]["isolated_entities"]
+    assert everything["list_cap"] is None
+
+
+def test_pairs_that_never_touch_are_counted_without_being_built(corpus):
+    """There are quadratically many: a hundred clusters make 4,950 pairs, and
+    in a corpus nobody has linked up almost all of them never touch. Building
+    4,950 dictionaries to show twenty is the cost the cap exists to avoid."""
+    from orpheus.graph import (build, communities, community_connections,
+                               n_community_pairs, topology)
+
+    _grow(corpus, 60, connect=False)
+    graph = build(corpus)
+    found = communities(graph)
+    capped = community_connections(graph, found, limit=3)
+    assert sum(1 for c in capped if c["disconnected"]) <= 3
+
+    report = topology(corpus, list_cap=3)
+    # Counted arithmetically from the cluster count, not from the rows.
+    assert report["counts"]["community_pairs"] == n_community_pairs(found)
+    assert (report["counts"]["disconnected_pairs"]
+            >= len(report["disconnected_pairs"]))
+
+
+def _grow(store, n, connect=True):
+    """Add `n` pages, optionally joined in a chain, so a graph has some size."""
+    for i in range(n):
+        store.execute(
+            "INSERT INTO entities (entity_id, type_id, canonical_name, "
+            "naive_key, source, confidence, status, created_at) "
+            "VALUES (?,?,?,?,?,?,?,datetime('now'))",
+            (f"ent_grow{i}", "Company", f"Grown {i}", f"grown{i}",
+             "ai_local", 1.0, "unconfirmed"))
+        store.execute(
+            'INSERT INTO instances_Company (instance_id, document_id, name, '
+            'source, confidence, status, created_at) '
+            "VALUES (?,?,?,?,?,?,datetime('now'))",
+            (f"ins_grow{i}", "doc_1", f"Grown {i}", "ai_local", 1.0,
+             "unconfirmed"))
+        store.execute(
+            "INSERT INTO instance_index (instance_id, document_id, type_id, "
+            "table_name, created_at) VALUES (?,?,?,?,datetime('now'))",
+            (f"ins_grow{i}", "doc_1", "Company", "instances_Company"))
+        store.execute(
+            "INSERT INTO entity_mentions (entity_id, instance_id, document_id, "
+            "basis, confidence, status, linked_by, linked_at) "
+            "VALUES (?,?,?,?,?,?,?,datetime('now'))",
+            (f"ent_grow{i}", f"ins_grow{i}", "doc_1", "naive_key", 1.0,
+             "confirmed", "act_a"))
+        if connect and i:
+            store.execute(
+                "INSERT INTO edges (edge_id, from_instance_id, to_instance_id, "
+                "link_type_id, document_id, source, confidence, status, "
+                "created_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))",
+                (f"edg_grow{i}", f"ins_grow{i-1}", f"ins_grow{i}", "party_to",
+                 "doc_1", "ai_local", 1.0, "unconfirmed"))
+    store.conn.commit()

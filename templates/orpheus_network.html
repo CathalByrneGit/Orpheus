@@ -44,6 +44,18 @@
 </p>
 {% endif %}
 
+{# Every list on this page is capped. The cap is only honest if the page says
+   what it was taken from -- "20 of 1,225" is shorter than 1,225 rows and says
+   more, because the total is the finding and the rows are the illustration. #}
+{% macro capped(shown, total, noun) %}
+  {%- if report.list_cap and total > shown %}
+  <p style="color:#888;margin:.3em 0 1em">Showing {{ shown }} of {{ total }}
+    {{ noun }}, most notable first.
+    <a href="?list_cap=0{% if exact %}&amp;exact=1{% endif %}">Show all</a>
+  </p>
+  {%- endif %}
+{% endmacro %}
+
 <h2>Islands</h2>
 <p style="color:#666">Deterministic &mdash; no seed, no threshold. Two islands
 mean the corpus knows about two worlds and has not connected them. That is
@@ -61,6 +73,7 @@ look.</p>
   </p>
 </div>
 {% endfor %}
+{{ capped(report.components | length, report.counts.components, "island(s)") }}
 {% if not report.components %}<p style="color:#666">No page is related to any other yet.</p>{% endif %}
 
 {% if report.articulation_points %}
@@ -74,6 +87,7 @@ single unconfirmed link.</p>
       <span style="color:#666">&middot; {{ point.type_id }} &middot; {{ point.degree }} link(s)</span></li>
   {% endfor %}
 </ul>
+{{ capped(report.articulation_points | length, report.counts.articulation_points, "page(s)") }}
 {% endif %}
 
 {% if report.disconnected_pairs %}
@@ -88,6 +102,8 @@ reproducible, but it is one defensible partition among several
   <li>{{ pair.labels[0] }} &nbsp;&harr;&nbsp; {{ pair.labels[1] }}</li>
   {% endfor %}
 </ul>
+{{ capped(report.disconnected_pairs | length, report.counts.disconnected_pairs,
+          "pair(s) that never touch, of " ~ report.counts.community_pairs ~ " pairs") }}
 {% endif %}
 
 <h2>How two pages are connected</h2>
@@ -145,6 +161,16 @@ twenty.</p>
   {% endfor %}
   </tbody>
 </table>
+{% if report.centrality_method == 'betweenness_sampled' %}
+<p style="color:#888">
+  Estimated from a sample of sources, because the exact answer is the only
+  computation on this page that does not finish in about a second on a corpus
+  of this size &mdash; on 3,000 pages it takes 51 seconds against 1.3 for
+  everything else here combined. The ranking is stable; the values are
+  approximate.
+  <a href="?exact=1{% if not report.list_cap %}&amp;list_cap=0{% endif %}">Compute it exactly</a>
+</p>
+{% endif %}
 {% elif report.centrality_method == 'degree_only' %}
 <p style="color:#666">{{ report.centrality_note }}</p>
 {% endif %}
@@ -174,6 +200,7 @@ the corpus has none.</p>
 <p>{% for node in report.isolates %}
    <a href="{{ urls.path('/-/orpheus/wiki/' + node.entity_id) }}">{{ node.name }}</a>{% if not loop.last %} &middot; {% endif %}
    {% endfor %}</p>
+{{ capped(report.isolates | length, report.counts.isolated_entities, "page(s)") }}
 {% endif %}
 
 <p style="color:#666;margin-top:2em">{{ report.note }}</p>

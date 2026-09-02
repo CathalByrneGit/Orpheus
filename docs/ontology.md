@@ -109,6 +109,30 @@ is how somebody says which.
 
 ---
 
+### The queue is a queue, not a listing
+
+`orpheus ontology candidates` and `/-/orpheus/ontology` hand over the front of
+the queue — 25 by default — with a count of what is behind it:
+
+```
+10 of 40 proposed, most-supported first. Decide these and the next 10 take
+their place.
+```
+
+Neither pagination nor a scrollbar, deliberately. You decide the top item, it
+leaves the queue, and the next appears — so page 2 holds different candidates
+than it did when you loaded it, and deciding the third item on it shifts
+everything under you. What a reviewer needs is the front and the remaining
+count, which is also the number that tells them how much is left.
+
+The cap costs nothing because the order already puts the best rows first: most
+documents showing it, which is exactly the order somebody reviewing an ontology
+wants. It also avoids a query per row for excerpts nobody was going to read.
+
+`limit=0` returns the whole queue, and `draft` reads every accepted candidate
+regardless — a bundle assembled from the first twenty-five would silently drop
+the rest.
+
 ## Two passes, and what each is for
 
 ### The header-block pass (`deterministic`, the default)

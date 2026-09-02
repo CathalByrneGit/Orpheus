@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 
 import orpheus.bundle as bundle_mod
+from orpheus import ontology
 from orpheus.ontology import (DEFAULT_PRIMARY_TYPE, candidates, draft_bundle,
                               get_candidate, header_fields, infer_data_type,
                               property_id_for, reopen_candidate,
@@ -710,3 +711,47 @@ def test_a_sector_vocabulary_is_supplied_and_never_proposed(corpus):
                                                           "release"]
     assert listed["extensions"]["orpheus"]["jurisdictions"] == ["upstream"]
     bundle_mod.validate(listed)
+
+
+def test_the_queue_is_capped_and_says_what_is_behind_it(store):
+    """A queue is not a listing. You decide the top item, it leaves, and the
+    next appears -- so the front of it plus a count of what is behind is what a
+    reviewer needs. Paging through it would shift everything under them the
+    moment they decided anything."""
+    _seed_candidates(store, 40)
+
+    front = ontology.candidates(store, limit=10)
+    assert len(front) == 10
+    assert ontology.n_candidates(store) == 40
+    # Most-supported first, which is why taking the front costs nothing.
+    assert [c["n_documents"] for c in front] == sorted(
+        (c["n_documents"] for c in front), reverse=True)
+
+    assert len(ontology.candidates(store, limit=None)) == 40
+
+
+def test_the_default_queue_does_not_hand_over_a_whole_survey(store):
+    _seed_candidates(store, ontology.QUEUE_LIMIT + 15)
+    assert len(ontology.candidates(store)) == ontology.QUEUE_LIMIT
+    assert ontology.n_candidates(store) == ontology.QUEUE_LIMIT + 15
+
+
+def test_drafting_still_reads_every_decision(store):
+    """The cap is a screen concern. A bundle assembled from the first
+    twenty-five accepted candidates would silently drop the rest."""
+    _seed_candidates(store, 40, status="accepted", kind="object_type")
+    store.insert("actors", {"actor_id": "act_d", "display_name": "D",
+                            "is_admin": 1, "created_at": "2026-01-01T00:00:00Z"})
+    drafted = ontology.draft_bundle(store, "wide-core")
+    assert len(drafted["bundle"]["objects"]) == 40
+
+
+def _seed_candidates(store, n, status="proposed", kind="object_type"):
+    for i in range(n):
+        store.insert("ontology_candidates", {
+            "candidate_id": f"cnd_{i:03}", "survey_id": "srv_1", "kind": kind,
+            "type_id": f"Type{i:03}", "data_type": None,
+            "n_documents": n - i, "n_sampled": n, "status": status,
+            "engine": "deterministic", "source": "ai_local",
+            "created_at": "2026-01-01T00:00:00Z",
+        })
