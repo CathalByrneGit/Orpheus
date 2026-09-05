@@ -298,6 +298,87 @@ def original(store: Store, document_id: str, *, verify: bool = True) -> dict:
     }
 
 
+def audit_document_ids(store: Store, *, document_id: str | None = None,
+                       limit: int | None = None) -> list[str]:
+    """Which documents an audit would cover, in the order it would cover them.
+
+    Split out from `audit_storage` so a caller that cannot afford one long pass
+    can take the list and hand it back in batches. That is not a hypothetical:
+    a verify inside Datasette runs on a connection the server also answers
+    pages on, and hashing a corpus takes minutes -- so the scheduled version
+    walks it a batch at a time and lets go of the connection between them.
+    """
+    rows = store.query(
+        "SELECT document_id FROM documents "
+        + ("WHERE document_id = ? " if document_id else "")
+        + "ORDER BY date_added" + (" LIMIT ?" if limit else ""),
+        tuple(p for p in (document_id, limit) if p is not None))
+    return [row["document_id"] for row in rows]
+
+
+def audit_entries(store: Store, document_ids, *, verify: bool = False) -> list[dict]:
+    """Check these documents, and say what was found about each.
+
+    The unit of work, and deliberately not a summary: a caller assembling a
+    pass out of batches has to be able to add the parts up itself, and a
+    partial summary is the one thing it must not be handed.
+    """
+    entries: list[dict] = []
+    for document_id in document_ids:
+        row = store.one("SELECT document_id, filename FROM documents "
+                        "WHERE document_id = ?", (document_id,))
+        if row is None:
+            continue
+        # The filename comes from the row rather than from the located
+        # file, so a finding about a document whose original is *gone*
+        # can still say which document it is.
+        entry = {"document_id": row["document_id"],
+                 "filename": row["filename"]}
+        try:
+            located = original(store, row["document_id"], verify=verify)
+        except OriginalUnavailable as exc:
+            entry.update(available=False, reason=exc.reason, message=str(exc))
+        else:
+            entry.update(available=True, reason=None,
+                         byte_size=located["byte_size"])
+        entries.append(entry)
+    return entries
+
+
+def summarise_audit(documents: list[dict], *, verify: bool) -> dict:
+    """Add the entries up. Pure, so a batched pass and a single pass agree.
+
+    Nothing here touches the store, which is the point: the totals a scheduled
+    run reports are computed from the same function the one-shot pass uses, so
+    the two cannot drift into disagreeing about what a corpus looks like.
+    """
+    # A redacted original is absent on purpose. Counting it as a fault would
+    # mean every store that ever removed a document failed its restore check
+    # for good, and a gate that is permanently red is a gate nobody reads.
+    redacted = [d for d in documents if d.get("reason") == "redacted"]
+    unavailable = [d for d in documents
+                   if not d["available"] and d.get("reason") != "redacted"]
+    reasons: dict[str, int] = {}
+    for entry in unavailable:
+        reasons[entry["reason"]] = reasons.get(entry["reason"], 0) + 1
+    checked_bytes = (sum(d.get("byte_size") or 0 for d in documents if d["available"])
+                     if verify else 0)
+    return {
+        "verified": verify,
+        "n_documents": len(documents),
+        "n_available": len(documents) - len(unavailable) - len(redacted),
+        "n_unavailable": len(unavailable),
+        "n_redacted": len(redacted),
+        "reasons": reasons,
+        "bytes_read": checked_bytes,
+        # A pass that only stat()ed cannot say a corpus is sound, and saying so
+        # is the difference between a report and a reassurance.
+        "headline": _audit_headline(len(documents), unavailable, verify,
+                                    len(redacted)),
+        "documents": documents,
+    }
+
+
 def audit_storage(store: Store, *, verify: bool = False,
                   document_id: str | None = None,
                   limit: int | None = None) -> dict:
@@ -319,53 +400,9 @@ def audit_storage(store: Store, *, verify: bool = False,
     row is there, every excerpt renders, and the offsets point into bytes
     nobody has compared to anything.
     """
-    rows = store.query(
-        "SELECT document_id, filename FROM documents "
-        + ("WHERE document_id = ? " if document_id else "")
-        + "ORDER BY date_added" + (" LIMIT ?" if limit else ""),
-        tuple(p for p in (document_id, limit) if p is not None))
-
-    documents: list[dict] = []
-    checked_bytes = 0
-    for row in rows:
-        # The filename comes from the row rather than from the located
-        # file, so a finding about a document whose original is *gone*
-        # can still say which document it is.
-        entry = {"document_id": row["document_id"],
-                 "filename": row["filename"]}
-        try:
-            located = original(store, row["document_id"], verify=verify)
-        except OriginalUnavailable as exc:
-            entry.update(available=False, reason=exc.reason, message=str(exc))
-        else:
-            entry.update(available=True, reason=None,
-                         byte_size=located["byte_size"])
-            checked_bytes += located["byte_size"] if verify else 0
-        documents.append(entry)
-
-    # A redacted original is absent on purpose. Counting it as a fault would
-    # mean every store that ever removed a document failed its restore check
-    # for good, and a gate that is permanently red is a gate nobody reads.
-    redacted = [d for d in documents if d.get("reason") == "redacted"]
-    unavailable = [d for d in documents
-                   if not d["available"] and d.get("reason") != "redacted"]
-    reasons: dict[str, int] = {}
-    for entry in unavailable:
-        reasons[entry["reason"]] = reasons.get(entry["reason"], 0) + 1
-    return {
-        "verified": verify,
-        "n_documents": len(documents),
-        "n_available": len(documents) - len(unavailable) - len(redacted),
-        "n_unavailable": len(unavailable),
-        "n_redacted": len(redacted),
-        "reasons": reasons,
-        "bytes_read": checked_bytes,
-        # A pass that only stat()ed cannot say a corpus is sound, and saying so
-        # is the difference between a report and a reassurance.
-        "headline": _audit_headline(len(documents), unavailable, verify,
-                                    len(redacted)),
-        "documents": documents,
-    }
+    ids = audit_document_ids(store, document_id=document_id, limit=limit)
+    return summarise_audit(audit_entries(store, ids, verify=verify),
+                           verify=verify)
 
 
 def _audit_headline(total: int, unavailable: list[dict], verify: bool,

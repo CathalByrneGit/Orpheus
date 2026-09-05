@@ -70,6 +70,7 @@ out would have made the wiki misleading rather than merely incomplete:
 | [Provenance and amendment](provenance-and-amendment.md) | The hardest part: how a machine guess becomes a checked fact, and how extraction quality gets measured |
 | [API reference](api-reference.md) | Every route, its permissions, and its response shape |
 | [Deployment](deployment.md) | Running it, and the WAL trap that catches people |
+| [Work on a clock](scheduled-tasks.md) | Scheduled tasks: why a crontab cannot host them, and the machine actor a write with nobody behind it is filed under |
 | [Developer guide](developer-guide.md) | Setup, tests, troubleshooting, project structure |
 | [The corpus run](corpus-run.md) | What real models on real corpora found, and how to run one |
 | [Open decisions](open-decisions.md) | What Phase 1 deliberately did not decide, and what the build corrected |

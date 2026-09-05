@@ -601,4 +601,55 @@ documents, pages and suggestions.
 
 ---
 
+## Fifth pass: somewhere for the jobs that write
+
+| Plugin | What it is | Verdict here |
+|---|---|---|
+| `datasette-cron` | Database-backed scheduled tasks, run in-process | **Adopt as an optional extra.** The only place a scheduled *write* can run, because the single-writer lock refuses a second process. Cloud passes are refused outright rather than scheduled |
+
+### `datasette-cron`
+
+**The gap it fills is not "scheduled jobs would be nice".** It is that a
+scheduled task which writes has no good home. The shipped container is one
+process on `python:3.11-slim` with no cron daemon in it; and where a crontab
+exists, `orpheus wiki propose` opens the store as an unsupervised second writing
+process that applies migrations under a live server and contends with it for the
+write lock.
+
+One correction to the first assessment, which asserted that the advisory lock
+refuses that outright. It does not: `Store(mode="write")` takes the lock, and
+Datasette never does, because `Store.adopt()` borrows a connection it already
+opened. Checked cross-process both ways — a CLI writer *is* refused while
+another CLI writer holds the lock, and is *not* refused while Datasette is
+serving. The argument survives the correction and is sharper for it: what stands
+between a crontab and the corpus is not a guard, it is nothing.
+
+The plugin runs in-process, so its handler reaches `execute_write_fn` — the same
+seam `plugins/orpheus_datasette.py` already routes every write through. Its task
+and run tables live in Datasette's **internal** database, so nothing pollutes
+the Orpheus schema or appears as corpus data.
+
+Four cautions were raised before any code was written, and each is answered in
+the build rather than left as a note. [Work on a clock](scheduled-tasks.md) is
+the full account; in short:
+
+| Caution | What was done |
+|---|---|
+| **The cloud gate.** The per-request opt-in exists because sending a document to a third party is a decision taken each time. A clock cannot take it | `llm.no_cloud()` refuses any cloud call inside a scheduled run, ahead of both of the gate's own conditions. Enforcement rather than convention: a task added later that reaches for a model is refused, not reviewed |
+| **Who is the actor?** Every write carries one, and a schedule has no person | A machine actor under `idp = 'orpheus-scheduled'`, never an administrator, and `auth.create_token` refuses to mint it a credential. So `orpheus report` can still tell human review from work a robot did |
+| **The scheduler starts on the first HTTP request** — a Datasette with no traffic runs no tasks | Their design, and not something this side can work around. The container turns out to solve it already: `deploy/Dockerfile` has carried a 30-second `HEALTHCHECK` against `/-/orpheus/api/health` since before this existed. Said in [Deployment](deployment.md) for the deployments that do not |
+| **It is `0.0.1a2`** | An optional `[cron]` extra alongside `[agent]`. Nothing registers when it is absent, and `orpheus scheduled run` runs every task by hand either way |
+
+One claim from the first assessment did not survive the build, and is corrected
+here rather than quietly dropped: **the full-text index does not go stale as
+documents arrive.** The FTS triggers keep it in step, measured on a real store
+rather than assumed. What the `search-index` task actually closes is a
+deployment where the index was never built at all — a reconcile, not a rebuild.
+
+Execution is **at-least-once**, which all four tasks tolerate: two are
+idempotent by construction, one writes nothing, and `wiki-propose` attaches a
+repeated group to the page that already exists rather than minting a second one.
+
+---
+
 [← Back to index](index.md)

@@ -32,6 +32,13 @@ agent = ["datasette-agent>=0.1a0"]
 # picker. `main` is fixed and unreleased.
 #   pip install 'datasette-enrichments @ git+https://github.com/datasette/datasette-enrichments'
 enrichments = ["datasette-enrichments>=0.6a0"]
+# Scheduled tasks, run in-process by Datasette. An extra rather than a
+# dependency for two reasons. It is 0.0.1a2 -- an alpha, and taking one as a
+# hard dependency would contradict the adoption policy in
+# docs/datasette-ecosystem.md. And a deployment that schedules nothing should
+# not carry a scheduler: plugins/orpheus_cron.py registers nothing when this is
+# absent, and `orpheus scheduled run` still runs every task by hand.
+cron = ["datasette-cron>=0.0.1a2"]
 # The extraction engine. Optional only in the sense that a deployment may
 # register its own populator; without one of the two there is no model pass.
 llm = ["langextract>=1.6"]
@@ -73,7 +80,7 @@ pdf = ["pdfminer.six"]
 ocr = ["pytesseract", "pillow"]
 dev = ["pytest>=7", "datasette>=1.0a32", "httpx", "pyyaml", "jsonschema",
        "langextract>=1.6", "llm>=0.20", "llm-echo", "sqlite-utils>=3.36",
-       "rapidfuzz>=3", "networkx>=3"]
+       "rapidfuzz>=3", "networkx>=3", "datasette-cron>=0.0.1a2"]
 
 [project.scripts]
 orpheus = "orpheus.cli:cli"

@@ -15,12 +15,50 @@ does the calling, and the attempt is recorded either way.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import os
 
 from .rubric import CLOUD_POLICIES
 from .store import Store
 from .utils import OrpheusError, new_id, now
+
+
+# A refusal a caller installs around code it does not trust to stay local.
+#
+# The two conditions below are about *this* request: an organisation that has
+# enabled cloud processing, and a person who opted in. There is a third kind of
+# caller neither question fits -- one running with nobody present, where "the
+# person opted in" can only ever be a lie. Rather than teach every future call
+# site to know that about itself, a caller with no person behind it wraps its
+# work in `no_cloud()` and the gate refuses regardless of what is asked.
+#
+# A ContextVar rather than a flag on the store: the refusal is a property of
+# the caller, not of the database, and two callers can share one store.
+_no_cloud: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "orpheus_no_cloud", default=None)
+
+
+@contextlib.contextmanager
+def no_cloud(reason: str):
+    """Refuse any cloud call made inside this block, and say why.
+
+    Set and read on the same thread by design. A caller that hands work to
+    another thread has to install it *inside* that work -- `run_in_executor`
+    does not carry the context across -- which is why the scheduled runner
+    wraps the function it queues rather than the coroutine that queues it.
+    """
+    token = _no_cloud.set(reason)
+    try:
+        yield
+    finally:
+        _no_cloud.reset(token)
+
+
+def cloud_refusal() -> str | None:
+    """The standing refusal in force here, if any. Read for reporting."""
+    return _no_cloud.get()
 
 
 def cloud_policy(store: Store) -> dict:
@@ -65,6 +103,14 @@ def assert_cloud_allowed(store: Store, opt_in: bool,
     Collapsing the two into one setting is the obvious simplification and it
     silently removes one of the two protections.
     """
+    # Before either condition, because it is not a condition about this
+    # request -- it is a caller saying it is not entitled to ask. Checked first
+    # so the reason a scheduled run gives is its own, not "you did not opt in",
+    # which would read as something a config change could fix.
+    refusal = _no_cloud.get()
+    if refusal:
+        raise OrpheusError(refusal)
+
     policy = store.setting("cloud_ai_policy", "disabled")
     if policy not in CLOUD_POLICIES:
         raise OrpheusError(

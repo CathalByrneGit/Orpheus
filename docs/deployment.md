@@ -346,15 +346,55 @@ that needs one now has the piece to build it out of.
 second writer fails at startup with a message naming the holding pid, rather
 than becoming a silent second writer.
 
-The lock guards against a second **process** — a CLI run, a script, a cron job —
-while the server holds the store. Datasette itself does not take it:
-`Store.adopt()` borrows the connection Datasette already opened, and is by
-construction already inside the process that owns it.
+The lock guards against a second **process** opening the store for writing while
+another already has: two CLI runs, a CLI run and a script, two scripts.
+Datasette itself does not take it — `Store.adopt()` borrows the connection
+Datasette already opened — which means it does **not** guard the CLI against a
+running server. See the section below for what that does and does not leave
+safe.
 
 If a writer crashes, the lock remains and its process is gone. The next start
 detects that and refuses with instructions; `--force-lock` takes over. Do this
 only when you have confirmed no other writer is running — the lock is the only
 thing enforcing the constraint the storage design depends on.
+
+---
+
+## Scheduled work, and the ping it needs
+
+Note what that lock does **not** cover. Datasette never takes it — the plugin
+borrows a connection Datasette already opened — so a CLI write run against a
+live server is not refused. It is simply unsupervised: `Store(mode="write")`
+applies migrations, so a command run after an upgrade can move the schema under
+a running server, and its writes contend with the server's with a five-second
+`busy_timeout` between them and `database is locked`. Do not put Orpheus write
+commands in a crontab. Put them in the scheduler instead — the optional `[cron]`
+extra, described in [Work on a clock](scheduled-tasks.md).
+
+One operational trap belongs here beside the WAL one, because it is discovered
+rather than read. **`datasette-cron` starts its scheduler on the first HTTP
+request**, after every startup hook has completed. That is its design and
+nothing on this side can change it. A deployment that nobody touches overnight
+runs no tasks at all, and the nightly verify simply does not happen — with no
+error, because nothing tried.
+
+The Docker image is already covered: its `HEALTHCHECK` hits
+`/-/orpheus/api/health` every 30 seconds, which is traffic. A deployment running
+Datasette some other way needs to arrange the same — point a health check or an
+uptime monitor at
+
+```
+/-/orpheus/api/health
+```
+
+It requires no authentication and touches no document. Confirm it worked by
+looking at `/-/cron` after the first scheduled slot: a task that never fired has
+a `next_run_at` in the past and no runs.
+
+A **read-only** scheduled task (`verify`, `calendar-digest`) is the one thing
+that is still safe from a real crontab: `orpheus scheduled verify` opens the
+store read-only, takes no lock and applies no migration. The two that write
+belong in the scheduler.
 
 ---
 

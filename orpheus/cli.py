@@ -19,6 +19,7 @@ import argparse
 import json
 import shutil
 import sys
+import textwrap
 from pathlib import Path
 
 from . import analysis, auth, bundle as bundle_mod, classify, concepts
@@ -405,6 +406,69 @@ def cmd_redact(args) -> int:
         emit(result, True)
     else:
         print(result["headline"])
+    return 0
+
+
+def cmd_scheduled(args) -> int:
+    """List the tasks a scheduler can run, or run one here and now.
+
+    `run` exists because a schedule is the one thing you cannot test by waiting
+    for it. It does exactly what the scheduler would do -- same chunks, same
+    cloud refusal, same machine actor -- so a task that works here works at
+    three in the morning, and one that does not says why now rather than in a
+    run record nobody opens until Monday.
+
+    Exits non-zero on the same finding the scheduler records as a failed run,
+    which is the same rule `orpheus verify` and `orpheus calendar` already
+    follow: silent when there is nothing to say.
+    """
+    from . import scheduled as scheduled_mod
+
+    if not args.name:
+        catalogue = scheduled_mod.catalogue()
+        if args.json:
+            emit(catalogue, True)
+            return 0
+        for entry in catalogue:
+            mark = " " if entry["available"] else "-"
+            writes = "writes" if entry["writes"] else "reads "
+            print(f"{mark} {entry['name']:<16} {writes}  "
+                  f"{entry['default_schedule']}")
+            for line in textwrap.wrap(entry["summary"], width=72):
+                print(f"      {line}")
+            if not entry["available"]:
+                print(f"      NOT AVAILABLE HERE: needs "
+                      f"{', '.join(entry['needs'])}")
+            print()
+        print("\n  A schedule is declared in Datasette config, not here. "
+              "See docs/scheduled-tasks.md.")
+        return 0
+
+    task = scheduled_mod.get(args.name)
+    config = {}
+    for pair in args.config or []:
+        key, _, value = pair.partition("=")
+        if not _:
+            raise OrpheusError(f"--config takes key=value, not {pair!r}.")
+        config[key] = value
+    # A read-only task opens the store read-only, so running the nightly verify
+    # by hand cannot be what takes the writer lock off a live deployment.
+    store = open_store(args, mode="write" if task.writes else "read")
+    try:
+        result = scheduled_mod.run(store, args.name, config)
+    except scheduled_mod.TaskFailed as failed:
+        if args.json:
+            emit({**failed.result, "failed": True}, True)
+        else:
+            print(f"{failed}")
+        return 1
+    finally:
+        store.close()
+
+    if args.json:
+        emit(result, True)
+    else:
+        print(result.get("headline", "done"))
     return 0
 
 
@@ -1638,6 +1702,13 @@ def build_parser() -> argparse.ArgumentParser:
                                  "later is indistinguishable from data loss")
     redact_cmd.add_argument("--dry-run", action="store_true",
                             help="count what would go; change nothing")
+
+    sched = add("scheduled", cmd_scheduled,
+                "list the tasks a scheduler can run, or run one now")
+    sched.add_argument("name", nargs="?",
+                       help="a task name; omit to list them")
+    sched.add_argument("--config", action="append", metavar="KEY=VALUE",
+                       help="a setting for this run; repeatable")
 
     verify = add("verify", cmd_verify,
                  "check every stored original against its recorded digest")

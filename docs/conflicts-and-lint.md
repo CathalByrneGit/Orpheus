@@ -191,6 +191,12 @@ moments looks perfectly healthy from the inside: every row present, every
 excerpt rendering, every offset pointing into bytes nobody has compared to
 anything. Nothing else in Orpheus would notice.
 
+It is also the task most worth putting on a clock, and one that could not be
+put on a crontab: `orpheus scheduled verify` runs the same pass inside the
+server, a batch at a time so it never holds a page-serving connection for
+minutes, and records the run red with this headline when something is wrong.
+See [Work on a clock](scheduled-tasks.md).
+
 `GET /storage/audit` is the same audit over HTTP, administrator-only. It runs
 the cheap pass corpus-wide; `?verify=1` is bounded to a single `document_id`,
 because hashing the whole corpus would hold the connection Datasette answers

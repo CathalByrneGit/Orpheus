@@ -21,7 +21,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY orpheus/ orpheus/
-RUN pip install --no-cache-dir '.[server]'
+
+# There is no cron daemon in this image and there should not be: it runs one
+# process. A deployment that wants scheduled work builds with
+# `--build-arg ORPHEUS_EXTRAS=server,cron`, which adds datasette-cron and lets
+# the scheduler run inside the process that owns the database. Left out of the
+# default because datasette-cron is an alpha, and because a deployment that
+# schedules nothing should not carry a scheduler.
+# See docs/scheduled-tasks.md.
+ARG ORPHEUS_EXTRAS=server
+RUN pip install --no-cache-dir ".[${ORPHEUS_EXTRAS}]"
 
 COPY plugins/ plugins/
 COPY templates/ templates/
@@ -32,6 +41,9 @@ ENV ORPHEUS_DB=/data/orpheus.sqlite \
 VOLUME ["/data"]
 EXPOSE 8001
 
+# Doubles as the traffic datasette-cron needs: its scheduler loop starts on the
+# first HTTP request and only runs while requests keep arriving, so a container
+# nobody visits overnight would otherwise run no scheduled tasks at all.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
   CMD python3 -c "import urllib.request; \
       urllib.request.urlopen('http://127.0.0.1:8001/-/orpheus/api/health')" || exit 1

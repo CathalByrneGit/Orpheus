@@ -136,7 +136,7 @@ missing rows.
 
 ## Status
 
-995 tests, no third-party dependencies in the core.
+1,035 tests, no third-party dependencies in the core.
 
 ```bash
 pip install -e '.[dev]'
@@ -194,6 +194,7 @@ at [docs/index.md](docs/index.md):
 | [Extraction engines](docs/extraction-engines.md) | Four ways to run the model pass, and when each is right |
 | [API reference](docs/api-reference.md) | Routes, permissions, response shapes |
 | [Deployment](docs/deployment.md) | Running it, and the WAL trap that catches people |
+| [Work on a clock](docs/scheduled-tasks.md) | Scheduled tasks, and the machine actor a write with nobody behind it is filed under |
 | [Developer guide](docs/developer-guide.md) | Setup, tests, troubleshooting |
 | [The corpus run](docs/corpus-run.md) | What real models on real corpora found |
 | [Open decisions](docs/open-decisions.md) | What is still undecided, and what the build corrected |

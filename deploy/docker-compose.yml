@@ -10,6 +10,12 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # Add `,cron` for scheduled tasks -- a nightly storage verify, the wiki
+        # queue populated as documents land. There is no cron daemon in the
+        # image and there should not be; the scheduler runs inside the process
+        # that owns the database. See docs/scheduled-tasks.md.
+        ORPHEUS_EXTRAS: ${ORPHEUS_EXTRAS:-server}
     volumes:
       # Read-write, and it is the only thing that mounts this volume at all.
       - orpheus-data:/data

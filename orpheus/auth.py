@@ -19,8 +19,16 @@ import secrets
 from .audit import record_edit
 from .rubric import ACTIONS, SHARE_ROLES, VISIBILITY
 from .store import Store
-from .utils import (NotFound, PermissionDenied, new_id, now, 
+from .utils import (NotFound, OrpheusError, PermissionDenied, new_id, now,
                     require_choice, require_string, to_json)
+
+
+# Identity providers that are not people. An actor filed under one of these is
+# the deployment acting on its own behalf -- so far, only the scheduler -- and
+# the whole point of giving it a row is that `created_by` can tell the
+# difference. Named here rather than in `scheduled.py` because the rule this
+# list governs is an auth rule, and because `scheduled` imports `auth`.
+MACHINE_IDPS = ("orpheus-scheduled",)
 
 
 # ---------------------------------------------------------------------------
@@ -100,8 +108,19 @@ def create_token(store: Store, actor_id: str, label: str | None = None,
                  expires_at: str | None = None) -> dict:
     """Mint a token. The raw value is returned once and never stored."""
     store.assert_writable()
-    if get_actor(store, actor_id) is None:
+    actor = get_actor(store, actor_id)
+    if actor is None:
         raise NotFound(f"No actor {actor_id!r}.")
+    # A machine actor is a label on rows the deployment wrote for itself, not
+    # an account. It exists so `created_by` on a scheduled proposal says
+    # "scheduled" rather than borrowing whichever administrator happened to
+    # configure the schedule -- and the moment it can hold a credential it
+    # stops being a label and becomes a way in that nobody is watching.
+    if actor["idp"] in MACHINE_IDPS:
+        raise OrpheusError(
+            f"{actor['display_name']!r} is a machine actor ({actor['idp']}). It "
+            "names work the deployment did on its own behalf; it cannot hold a "
+            "token, and nothing can sign in as it.")
     raw = secrets.token_urlsafe(32)
     token_id = new_id("tok")
     store.insert("actor_tokens", {

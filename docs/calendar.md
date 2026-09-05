@@ -17,6 +17,11 @@ expires this quarter, and have I looked at it*.
 orpheus calendar --within-days 90
 ```
 
+It exits non-zero when something is past its date, so it can run on a schedule
+and stay quiet when there is nothing to say —
+`orpheus scheduled calendar-digest`, weekly, is that same behaviour inside the
+server. See [Work on a clock](scheduled-tasks.md).
+
 ```
 2 past its date and 2 in the next 90 days. 0 of 4 shown have been checked by
 a person; the other 4 are machine readings nobody has confirmed. 1 came from a
