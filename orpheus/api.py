@@ -33,6 +33,7 @@ from . import graph as graph_mod
 from . import obligations as obligations_mod
 from . import ontology
 from . import redact as redact_mod
+from . import refs as refs_mod
 from . import registers as registers_mod
 from . import questions as questions_mod
 from . import lint as lint_mod
@@ -53,6 +54,12 @@ def route(method: str, pattern: str, permission: str | None = None):
         _ROUTES.append((method, re.compile(f"^{pattern}$"), fn, permission))
         return fn
     return register
+
+
+# How many references one request may resolve. A page of prose cites tens, not
+# thousands; a cap keeps a single request from walking the corpus one id at a
+# time under cover of looking like a document.
+REF_BATCH = 100
 
 
 class ApiError(OrpheusError):
@@ -1425,6 +1432,42 @@ def get_storage_audit(store, actor, body, **_):
     return ingest_mod.audit_storage(store, verify=verify,
                                     document_id=document_id,
                                     limit=_int(body, "limit", 0) or None)
+
+
+@route("GET", r"/refs/(?P<ref>[^/]+)")
+def get_ref(store, ref, actor, **_):
+    """What one reference points at, as the caller, right now.
+
+    Built for the drafting space, where prose lives outside the store and a
+    citation has to be resolved against the *reader* rather than the author --
+    see `orpheus/refs.py` for why that is the whole design.
+
+    Always 200, even for a reference that resolves to nothing. The status is in
+    the payload because a page of prose resolves many of these at once and one
+    dead citation must not read as a failed request; and because `denied` and
+    `not_found` have to come back through the same door, in the same shape, or
+    the difference between them is readable from the outside.
+    """
+    return refs_mod.resolve(store, ref, actor)
+
+
+@route("POST", "/refs")
+def post_refs(store, actor, body, **_):
+    """A page of prose at once. Same answers, one round trip."""
+    asked = body.get("refs") or []
+    if not isinstance(asked, list):
+        raise ApiError(400, "`refs` must be a list of reference ids.")
+    if len(asked) > REF_BATCH:
+        raise ApiError(400, f"At most {REF_BATCH} references at a time; "
+                            f"{len(asked)} were asked for.")
+    return {"refs": refs_mod.resolve_many(store, asked, actor)}
+
+
+@route("GET", "/refs")
+def get_ref_search(store, actor, body, **_):
+    """Things the caller could cite, for the picker that offers them."""
+    return {"hits": refs_mod.search(store, body.get("q") or "", actor,
+                                    limit=_int(body, "limit", 10))}
 
 
 @route("GET", "/grounding")

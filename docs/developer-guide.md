@@ -60,7 +60,7 @@ looked complete. If ingest fails, check both `pip install -e '.[pdf]'` and
 python3 -m pytest
 ```
 
-1,035 tests, no skips with the `dev` extra installed.
+1,073 tests, no skips with the `dev` extra installed.
 
 ### How the tests are built
 
@@ -308,6 +308,7 @@ orpheus/
 │   ├── registers.py         # reference data, held apart from the corpus
 │   │                        # (expose_column: a JSON key -> indexed column)
 │   ├── scheduled.py         # the tasks a clock can run, and the actor it runs as
+│   ├── refs.py              # citing the store from outside it, resolved per reader
 │   ├── quality.py           # the report Phase 1 exists to produce
 │   ├── benchmark.py         # CUAD scoring
 │   ├── auth.py              # actors, tokens, permissions
@@ -319,6 +320,8 @@ orpheus/
 ├── plugins/orpheus_datasette.py   # the UI, and the API mounted in-process
 │                                # (/-/orpheus/ontology is the survey queue)
 ├── plugins/orpheus_cron.py  # scheduled tasks, if datasette-cron is installed
+├── plugins/orpheus_paper.py # Orpheus references inside datasette-paper
+│   └── ../paper/            # the hand-written ES module that renders them
 ├── frontend/                # the map's front end: Svelte + Vite + d3-force
 │   └── src/lib/             # Map.svelte, and the pure rules its tests pin
 ├── templates/               # the two pages

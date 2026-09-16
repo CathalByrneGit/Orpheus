@@ -1,6 +1,6 @@
 # The Datasette plugins
 
-Four files. One is the surface Orpheus is used through; the other three are
+Five files. One is the surface Orpheus is used through; the other four are
 optional, and each registers nothing when the package it hooks into is absent.
 
 | File | What it is | Needs |
@@ -9,6 +9,7 @@ optional, and each registers nothing when the package it hooks into is absent.
 | `orpheus_agent.py` | Orpheus tools for the chat, so it answers from the store rather than from raw SQL | `orpheus[agent]` |
 | `orpheus_enrichments.py` | The reading pass as a batch job over a selection | `orpheus[enrichments]` |
 | `orpheus_cron.py` | Scheduled tasks — verify, search-index, wiki-propose, calendar-digest | `orpheus[cron]` |
+| `orpheus_paper.py` | Orpheus references inside a `datasette-paper` document, resolved per viewer | `orpheus[paper]` |
 
 **Datasette is the writer, and the core is a library it imports.** There is one
 process. The plugin calls `orpheus.api.handle()` on Datasette's own write

@@ -39,6 +39,13 @@ enrichments = ["datasette-enrichments>=0.6a0"]
 # not carry a scheduler: plugins/orpheus_cron.py registers nothing when this is
 # absent, and `orpheus scheduled run` still runs every task by hand.
 cron = ["datasette-cron>=0.0.1a2"]
+# A collaborative editor to draft in, with Orpheus references inside it. An
+# extra for the same reasons as the others, and with one worth stating: papers
+# live in Datasette's internal database, so they are outside edit_history,
+# outside `orpheus export` and outside the reach of redaction. That is the
+# right place for prose about the corpus and the wrong place for the corpus --
+# see docs/idea-space.md.
+paper = ["datasette-paper>=0.0.2a17"]
 # The extraction engine. Optional only in the sense that a deployment may
 # register its own populator; without one of the two there is no model pass.
 llm = ["langextract>=1.6"]
@@ -80,7 +87,8 @@ pdf = ["pdfminer.six"]
 ocr = ["pytesseract", "pillow"]
 dev = ["pytest>=7", "datasette>=1.0a32", "httpx", "pyyaml", "jsonschema",
        "langextract>=1.6", "llm>=0.20", "llm-echo", "sqlite-utils>=3.36",
-       "rapidfuzz>=3", "networkx>=3", "datasette-cron>=0.0.1a2"]
+       "rapidfuzz>=3", "networkx>=3", "datasette-cron>=0.0.1a2",
+       "datasette-paper>=0.0.2a17"]
 
 [project.scripts]
 orpheus = "orpheus.cli:cli"

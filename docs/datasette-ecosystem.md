@@ -29,7 +29,7 @@ allowed to do, and that conclusion outlived both changes.
 |---|---|---|
 | `datasette-agent` | Chat UI + tool-calling loop over `datasette-llm` | **Adopt as a client, never as a writer.** Its tool hook is the right seam; its `execute_write_sql` is the wrong one |
 | `datasette-accounts` | Username/password accounts in the internal DB | **Adopt.** Settles an open decision, deletes ~half of `auth.py` |
-| `datasette-paper` | Collaborative document editor | **Read it, don't adopt it.** The working reference for the hook Orpheus already emits SQL for |
+| `datasette-paper` | Collaborative document editor | **Adopt as an optional extra** — verdict revised, see below. The room ideas had nowhere to live, and `paper_embed_provider` lets them cite the corpus |
 | `datasette-apps` | Sandboxed HTML/JS apps over allow-listed queries | **Adopt for dashboards.** Wrong shape for anything that writes |
 
 ---
@@ -233,9 +233,28 @@ current state, `document_shares` — arrived at independently for the same reaso
 you cannot reconstruct who changed what unless the log is the source of truth and
 the current row is a projection of it.
 
-**Do not adopt it.** It edits prose collaboratively; Orpheus reviews extracted
-facts. Different problem, and its ProseMirror step log has nothing to say about
-typed amendments to typed properties. Read it for the hook and move on.
+**Do not adopt it — superseded; see below.** The reasoning above stands and the
+conclusion drawn from it did not.
+
+#### The verdict changed, and why
+
+*"It edits prose collaboratively; Orpheus reviews extracted facts. Different
+problem."* That is still exactly right, and it turns out to be the argument
+**for** adopting it rather than against. A reviewer's half-formed argument, note
+or brief is prose; it is not an extracted fact and must never become one. Two
+different problems is the reason the two can sit beside each other without
+either contaminating the other.
+
+What was missed on the first read was `paper_embed_provider` — a hook that lets
+another plugin claim a ref namespace and render it inside a paper. Orpheus
+claims `/-/orpheus/`, so pasting an Orpheus URL into a paper turns it into a
+live, permission-checked, review-aware reference. That is a plugin and a
+150-line ES module, against rebuilding a collaborative editor.
+
+**Adopted as an optional `[paper]` extra.** [A room for ideas](idea-space.md)
+is the full account, including the thing a deployment has to know first: papers
+live in Datasette's internal database, so a *reference* to a redacted document
+breaks correctly and a paragraph that quoted its text does not.
 
 ---
 

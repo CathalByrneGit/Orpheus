@@ -246,6 +246,7 @@ def register_routes():
     return [
         (r"^/-/orpheus$", index_page),
         (r"^/-/orpheus/upload$", upload),
+        (r"^/-/orpheus/ref/(?P<ref>[^/]+)$", ref_permalink),
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)/redact$", redact_act),
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)$", document_page),
         (r"^/-/orpheus/review$", review),
@@ -641,6 +642,40 @@ def _bundle() -> dict | None:
     if not chunk or not chunk.get("file"):
         return None
     return {"js": chunk["file"], "css": list(chunk.get("css") or ())}
+
+
+async def ref_permalink(datasette, request):
+    """One stable URL for anything in the store, whatever kind it is.
+
+    Every object already has a page, but they are at four different shapes of
+    URL and an extracted fact has none of its own -- it is an anchor on its
+    document. Something citing the corpus from outside needs one form it can
+    write down without knowing which, so this resolves the id and sends the
+    reader wherever it actually lives.
+
+    The refusals are pages rather than redirects on purpose. "You may not see
+    this" and "this is not here" answer identically here, for the reason they
+    do everywhere else on this surface: distinguishing them enumerates the
+    corpus. A redacted document is the one exception, because its row was kept
+    precisely so a reader is told it was removed.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    ref = request.url_vars["ref"]
+    status, card = await _call(datasette, request, "GET", f"/refs/{ref}")
+    if status != 200:                                # pragma: no cover - defensive
+        return Response.text("Not found.", status=404)
+
+    if card["status"] == "ok":
+        return Response.redirect(datasette.urls.path(card["href"]))
+    if card["status"] == "redacted":
+        removed = card.get("redaction") or {}
+        return Response.text(
+            f"That document was redacted on {removed.get('at')}. "
+            f"{removed.get('note') or ''}".strip(), status=410)
+    return Response.text(
+        "Nothing here answers to that reference, or it is not yours to see. "
+        "Those answer the same way on purpose.", status=404)
 
 
 async def static_asset(datasette, request):
