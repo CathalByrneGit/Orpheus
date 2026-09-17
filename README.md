@@ -41,6 +41,24 @@ Point it at eight commercial contracts and you get, with no configuration:
 All of it in one SQLite file you can copy, and a browser UI that runs on top of
 it.
 
+## And two things you can add
+
+Optional installs, because a deployment that does not want them should not carry
+them:
+
+- **Somewhere to write it up.** `pip install 'orpheus[paper]'` adds a
+  collaborative editor, and paste an Orpheus URL into it to get a live citation
+  — one that says whether a person has checked the thing you are citing, follows
+  a merged page to its survivor, and resolves against *whoever is reading*
+  rather than whoever wrote. Notes live beside the corpus, not in it.
+  [A room for ideas](docs/idea-space.md).
+- **Work on a clock.** `pip install 'orpheus[cron]'` runs the jobs that want a
+  schedule rather than a button — a nightly check that every stored original is
+  still the file that was ingested, the wiki queue populated as documents land.
+  They run *inside* the server, because a crontab writing to a live store is an
+  unsupervised second writer that applies migrations under it.
+  [Work on a clock](docs/scheduled-tasks.md).
+
 ## Try it
 
 ```bash
@@ -136,15 +154,18 @@ missing rows.
 
 ## Status
 
-1,073 tests, no third-party dependencies in the core.
+1,073 tests, and an end-to-end loop that drives a real browser.
 
 ```bash
 pip install -e '.[dev]'
 python3 -m pytest
 ```
 
-Every extraction engine, the PDF backends and OCR are optional installs, and the
-code names the missing one when you reach for it.
+The core imports nothing outside the standard library, so a store can be opened,
+migrated, read and written by a script with nothing installed. Everything else —
+every extraction engine, the PDF backends, OCR, search, the graph measures, the
+editor, the scheduler — is an optional install, and the code names the missing
+one when you reach for it rather than failing obscurely.
 
 The unit suite calls the core directly, which cannot catch what only breaks with
 a real server in the middle — so `tests/e2e/browser_loop.sh` drives the whole
