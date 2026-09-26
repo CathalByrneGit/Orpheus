@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %}Review queue{% endblock %}
+{% block content %}
+{#
+  One card at a time, decided from the keyboard.
+
+  Every decision posts to the same API the document page's forms post to, so
+  nothing here is a second write path -- the difference is only that the page
+  does not reload between decisions, which is the entire reason it is faster.
+
+  The keys are deliberately not a hidden feature: a queue whose speed depends
+  on shortcuts nobody knows about is a queue nobody gets through quickly.
+#}
+<p><a href="{{ urls.path('/-/orpheus') }}">&larr; Orpheus</a>
+   &middot; <a href="{{ urls.path('/-/orpheus/lint') }}">Lint</a></p>
+
+<h1>Review queue</h1>
+
+{% if error %}<p class="message-error">{{ error }}</p>{% endif %}
+
+<p class="message-info" style="margin-bottom:1em">{{ queue.headline }}</p>
+{% if queue.withheld_note %}<p style="color:#666">{{ queue.withheld_note }}</p>{% endif %}
+
+<style>
+  .rq-card { border:1px solid #ddd; border-radius:6px; padding:1.25em 1.5em;
+             background:#fff; max-width:52em }
+  .rq-meta { color:#666; font-size:.9em; margin:0 0 .75em }
+  .rq-excerpt { border-left:3px solid #2d6a4f; background:#f7faf8;
+                padding:.6em .9em; margin:0 0 1em; font-size:1.05em }
+  .rq-values { border-collapse:collapse; width:100%; margin-bottom:1em }
+  .rq-values th { text-align:left; width:12em; vertical-align:top;
+                  padding:.3em .6em .3em 0; font-weight:600; color:#444 }
+  .rq-values td { padding:.3em 0 }
+  .rq-values input { width:100%; box-sizing:border-box; padding:.3em }
+  .rq-empty th, .rq-empty td { color:#999 }
+  .rq-keys { color:#666; font-size:.9em; margin-top:1em }
+  .rq-keys kbd { background:#eee; border:1px solid #ccc; border-radius:3px;
+                 padding:.1em .4em; font-family:inherit; font-size:.95em }
+  .rq-progress { color:#666; margin:0 0 1em }
+  .rq-tally b { color:#222 }
+  .rq-reason { color:#666; font-style:italic; margin:.4em 0 1em }
+  .rq-busy { opacity:.45; pointer-events:none }
+</style>
+
+<div id="rq-root">
+  <p class="rq-progress">
+    <span id="rq-position"></span>
+    <span class="rq-tally" id="rq-tally"></span>
+  </p>
+  <div class="rq-card" id="rq-card"></div>
+  <p class="rq-keys">
+    <kbd>c</kbd> confirm &middot;
+    <kbd>a</kbd> amend &middot;
+    <kbd>r</kbd> reject &middot;
+    <kbd>s</kbd> skip &middot;
+    <kbd>b</kbd> back &middot;
+    <kbd>o</kbd> open the document
+    <br>
+    In amend: edit a value, then <kbd>Enter</kbd> to save, <kbd>Esc</kbd> to
+    abandon it.
+  </p>
+  <p class="rq-keys" id="rq-status" role="status" aria-live="polite"></p>
+</div>
+
+<script type="application/json" id="rq-cards">{{ queue_json|safe }}</script>
+<script>
+(function () {
+  "use strict";
+  var cards = JSON.parse(document.getElementById("rq-cards").textContent);
+  var root = document.getElementById("rq-root");
+  var cardEl = document.getElementById("rq-card");
+  var positionEl = document.getElementById("rq-position");
+  var tallyEl = document.getElementById("rq-tally");
+  var statusEl = document.getElementById("rq-status");
+  var documentId = {{ (document_id or "")|tojson }};
+
+  var at = 0;
+  var amending = false;
+  var tally = { confirmed: 0, amended: 0, rejected: 0, skipped: 0 };
+  // What each card was decided as, so `back` can say what it is changing and
+  // a re-decision can be labelled honestly rather than called an undo.
+  var decided = {};
+
+  function text(tag, value, className) {
+    var el = document.createElement(tag);
+    el.textContent = value;
+    if (className) el.className = className;
+    return el;
+  }
+
+  function say(message) { statusEl.textContent = message || ""; }
+
+  function renderTally() {
+    var parts = [];
+    ["confirmed", "amended", "rejected", "skipped"].forEach(function (k) {
+      if (tally[k]) parts.push(tally[k] + " " + k);
+    });
+    tallyEl.textContent = parts.length ? " · " + parts.join(", ") : "";
+  }
+
+  function renderDone() {
+    positionEl.textContent = "";
+    renderTally();
+    cardEl.innerHTML = "";
+    cardEl.appendChild(text("p", "That is the batch."));
+    var reviewed = tally.confirmed + tally.amended + tally.rejected;
+    cardEl.appendChild(text("p",
+      reviewed
+        ? "The ranking is computed from what has been reviewed, so the next "
+          + "batch is not simply the next page — it is re-ranked against "
+          + "what you just did."
+        : "Nothing was decided, so the next batch would be the same one."));
+    var again = document.createElement("button");
+    again.textContent = reviewed ? "Next batch" : "Reload";
+    again.addEventListener("click", function () { location.reload(); });
+    cardEl.appendChild(again);
+  }
+
+  function render() {
+    amending = false;
+    if (at >= cards.length) return renderDone();
+    var card = cards[at];
+
+    positionEl.textContent = (at + 1) + " of " + cards.length;
+    renderTally();
+    cardEl.innerHTML = "";
+
+    var meta = card.type_id + " · " + card.confidence_label
+      + " · read from " + card.filename
+      + (card.page_no ? ", page " + card.page_no : "");
+    cardEl.appendChild(text("p", meta, "rq-meta"));
+
+    if (decided[card.instance_id]) {
+      cardEl.appendChild(text("p",
+        "You already marked this " + decided[card.instance_id]
+        + ". Deciding again records a second decision — the first one "
+        + "stays in the history.", "rq-reason"));
+    }
+
+    // The sentence the machine says it read this from. First, because it is
+    // what the decision is actually about.
+    cardEl.appendChild(text("blockquote",
+      card.excerpt || "No excerpt was recorded for this extraction.",
+      "rq-excerpt"));
+
+    var table = document.createElement("table");
+    table.className = "rq-values";
+    card.amendable.forEach(function (name) {
+      var value = card.values[name];
+      var row = document.createElement("tr");
+      // An empty property is shown greyed rather than hidden: a reviewer
+      // correcting a row needs to see the box that is empty, and hiding it
+      // would make "nothing was extracted" look like "nothing exists".
+      if (value === null || value === "") row.className = "rq-empty";
+      var th = document.createElement("th");
+      th.textContent = name;
+      var td = document.createElement("td");
+      td.dataset.property = name;
+      td.textContent = (value === null || value === "") ? "—" : value;
+      row.appendChild(th);
+      row.appendChild(td);
+      table.appendChild(row);
+    });
+    cardEl.appendChild(table);
+    cardEl.appendChild(text("p", card.reason, "rq-reason"));
+  }
+
+  function toInputs() {
+    var card = cards[at];
+    amending = true;
+    var cells = cardEl.querySelectorAll("td[data-property]");
+    cells.forEach(function (cell) {
+      var name = cell.dataset.property;
+      var value = card.values[name];
+      var input = document.createElement("input");
+      input.type = "text";
+      input.name = name;
+      input.value = (value === null || value === undefined) ? "" : value;
+      cell.textContent = "";
+      cell.appendChild(input);
+    });
+    var first = cardEl.querySelector("input");
+    if (first) { first.focus(); first.select(); }
+    say("Editing. Enter saves what you changed; Esc abandons it.");
+  }
+
+  function changedValues() {
+    var card = cards[at];
+    var changes = {};
+    cardEl.querySelectorAll("input[name]").forEach(function (input) {
+      var was = card.values[input.name];
+      var now = input.value;
+      // Unchanged fields are not sent. The core refuses an amendment that
+      // turns out to be empty, and rightly: recording one would flip the row
+      // to `human` on a value the machine got right, and the quality report
+      // counts amendments as machine errors a person had to fix.
+      if (now !== ((was === null || was === undefined) ? "" : String(was))) {
+        changes[input.name] = now;
+      }
+    });
+    return changes;
+  }
+
+  function post(path, body) {
+    return fetch({{ urls.path('/-/orpheus/api')|tojson }} + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(body || {}),
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok) {
+          var message = (data.error && data.error.message)
+            || ("The store refused that (" + res.status + ").");
+          throw new Error(message);
+        }
+        return data;
+      });
+    });
+  }
+
+  function decide(verb, body) {
+    var card = cards[at];
+    root.classList.add("rq-busy");
+    say("Saving…");
+    post("/instances/" + encodeURIComponent(card.instance_id) + "/" + verb, body)
+      .then(function () {
+        // Counted only after the store agreed. A tally that moved on the
+        // keypress would be a count of keystrokes, not of decisions.
+        var was = decided[card.instance_id];
+        if (was) tally[was] -= 1;
+        decided[card.instance_id] = verb + "ed";
+        tally[verb + "ed"] += 1;
+        at += 1;
+        render();
+        say("");
+      })
+      .catch(function (err) {
+        // Stay on the card. Advancing past a refused decision is how a
+        // reviewer comes to believe they reviewed something they did not.
+        say(err.message);
+      })
+      .finally(function () { root.classList.remove("rq-busy"); });
+  }
+
+  function onKey(event) {
+    if (at >= cards.length) return;
+    if (amending) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        var changes = changedValues();
+        if (!Object.keys(changes).length) {
+          say("Nothing was changed. Press c to confirm the value instead — "
+              + "confirming records that you checked it and agreed.");
+          return;
+        }
+        decide("amend", { changes: changes });
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        render();
+        say("");
+      }
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    var card = cards[at];
+    switch (event.key) {
+      case "c": event.preventDefault(); decide("confirm"); break;
+      case "r": event.preventDefault(); decide("reject"); break;
+      case "a": event.preventDefault(); toInputs(); break;
+      case "s":
+        event.preventDefault();
+        if (!decided[card.instance_id]) tally.skipped += 1;
+        at += 1; render(); say("");
+        break;
+      case "b":
+        event.preventDefault();
+        if (at === 0) { say("This is the first card."); return; }
+        at -= 1; render(); say("");
+        break;
+      case "o":
+        event.preventDefault();
+        window.open({{ urls.path('/-/orpheus/document/')|tojson }}
+                    + card.document_id, "_blank", "noopener");
+        break;
+      default: break;
+    }
+  }
+
+  document.addEventListener("keydown", onKey);
+  render();
+})();
+</script>
+{% endblock %}

@@ -20,6 +20,7 @@ from __future__ import annotations
 from . import bundle as bundle_mod
 from . import quality
 from .audit import record_edit
+from .auth import visible_documents
 from .rubric import (CONFIDENCE, RESERVED_PROPS, REVIEWED_STATUSES,
                      STATUSES, confidence_label)
 from .store import Store
@@ -538,3 +539,145 @@ def mark_dependent_evaluations_stale(store: Store, instance_id: str,
         "  SELECT evaluation_id FROM concept_evaluation_dependencies WHERE instance_id = ?)",
         (reason, instance_id))
     return cursor.rowcount
+
+
+# ---------------------------------------------------------------------------
+# The queue, as cards somebody can decide from
+# ---------------------------------------------------------------------------
+
+#: Properties `amend_instance` recomputes for itself, so a box offering to edit
+#: one is a box whose value gets overwritten the moment its source changes.
+#: `amend` accepts them -- this is a behavioural rule, not a declared one, and
+#: the bundle has no way to say "derived" yet -- so the filter lives here and
+#: names where the recomputing happens. If that ever grows past one entry it
+#: belongs in the bundle instead.
+DERIVED_PROPS = ("naive_key",)          # recomputed in `amend_instance` from `name`
+
+#: How many cards one pass hands over. Small on purpose: the ranking changes as
+#: review happens -- five reviews at a level can move it over the line and make
+#: a different level the shortest way to a verdict -- so a long page of cards is
+#: a page that is stale by the time it is halfway read. A short batch, re-ranked
+#: when it runs out, is the honest shape.
+QUEUE_BATCH = 20
+
+
+def review_queue(store: Store, *, actor: dict | None = None,
+                 limit: int = QUEUE_BATCH, min_reviewed: int = 5,
+                 document_id: str | None = None) -> dict:
+    """`triage()`, hydrated into what a person needs in front of them to decide.
+
+    `triage()` answers *which* extraction to look at and says why. It returns
+    ids, which is right for a ranking and useless for reviewing: deciding
+    whether a value is correct means seeing the value, the sentence it was read
+    from, and the page that sentence is on. Fetching those one page-load at a
+    time is the reason a corpus nobody has reviewed stays a corpus nobody has
+    reviewed.
+
+    So this is the same ranking with the evidence attached, and the cost of the
+    attaching is two queries per card -- paid once for a batch rather than once
+    per decision.
+
+    **Only work the actor can actually do.** Filtered on `edit`, not `view`: a
+    viewer can read a shared document and cannot amend a row in it, and a queue
+    that offers a card whose verb is refused wastes the one thing this exists to
+    save. That also makes the corpus-wide queue useful to a reviewer who is not
+    an administrator -- the usual case, since reviewing is the job and
+    administering is not.
+    """
+    ranked = triage(store, limit=limit * 3, min_reviewed=min_reviewed,
+                    document_id=document_id)
+
+    allowed: set[str] | None = None
+    if actor is not None and not actor.get("is_admin"):
+        allowed = {row["document_id"] for row in
+                   visible_documents(store, actor, limit=1000, action="edit")}
+
+    bundle = bundle_mod.active(store)
+    filenames: dict[str, str] = {}
+    cards: list[dict] = []
+    for entry in ranked["queue"]:
+        if allowed is not None and entry["document_id"] not in allowed:
+            continue
+        card = _card(store, entry, bundle, filenames)
+        if card is not None:
+            cards.append(card)
+        if len(cards) >= limit:
+            break
+
+    withheld = (len(ranked["queue"]) - len(cards)) if allowed is not None else 0
+    return {
+        "cards": cards,
+        "n_unreviewed": ranked["n_unreviewed"],
+        "levels": ranked["levels"],
+        "min_reviewed": ranked.get("min_reviewed", min_reviewed),
+        "headline": ranked["headline"],
+        # Said rather than silently shortened. A queue that hands back three
+        # cards when the corpus holds nine hundred unreviewed rows is either a
+        # nearly-finished corpus or a permission boundary, and a reviewer has
+        # no way to tell those apart unless it says which.
+        "n_withheld": withheld,
+        "withheld_note": (
+            f"{withheld} further card(s) are not offered here: they belong to "
+            "documents you may read but not correct."
+            if withheld else None),
+    }
+
+
+def _card(store: Store, entry: dict, bundle: dict | None,
+          filenames: dict[str, str]) -> dict | None:
+    """One ranked entry, with the evidence a decision needs.
+
+    Returns None for an instance that has gone since the ranking was computed --
+    a redaction between the two, most likely. A queue that raised there would
+    let one removed document take down the whole batch.
+    """
+    try:
+        location = locate_instance(store, entry["instance_id"])
+        row = read_instance(store, location["table_name"], entry["instance_id"])
+    except NotFound:
+        return None
+
+    document_id = entry["document_id"]
+    if document_id not in filenames:
+        filenames[document_id] = store.scalar(
+            "SELECT filename FROM documents WHERE document_id = ?",
+            (document_id,)) or document_id
+
+    # The excerpt the machine claimed to read this from. Best-located first
+    # rather than first-written: an instance can carry several provenance rows
+    # -- the deterministic pass and a model pass both finding it -- and the one
+    # worth putting in front of a person is the one located most exactly.
+    #
+    # It is never missing in practice, because the ranking reads
+    # `collect_review_outcomes`, which joins through `provenance` on purpose.
+    # Handled anyway for the race where the row goes between the two queries.
+    evidence = store.one(
+        "SELECT excerpt, page_no, source_label, confidence, alignment "
+        "FROM provenance WHERE instance_id = ? "
+        "ORDER BY confidence DESC, rowid LIMIT 1", (entry["instance_id"],))
+
+    obj = (bundle_mod.object_type(bundle, location["type_id"])
+           if bundle else None)
+    amendable = ([p for p in bundle_mod.property_ids(obj)
+                  if p not in RESERVED_PROPS and p not in DERIVED_PROPS]
+                 if obj else [])
+
+    return {
+        "instance_id": entry["instance_id"],
+        "document_id": document_id,
+        "filename": filenames[document_id],
+        "type_id": entry["type_id"],
+        "confidence": entry["confidence"],
+        "confidence_label": entry["confidence_label"],
+        "source": entry["source"],
+        "reason": entry["reason"],
+        "status": row["status"] if "status" in row.keys() else None,
+        "page_no": evidence["page_no"] if evidence else None,
+        "excerpt": evidence["excerpt"] if evidence else None,
+        "alignment": evidence["alignment"] if evidence else None,
+        # Only the properties the bundle declares and `amend` will accept, in
+        # the bundle's order. Rendering the reserved columns would offer a
+        # person boxes their edit would be refused for touching.
+        "values": {p: row[p] for p in amendable if p in row.keys()},
+        "amendable": amendable,
+    }

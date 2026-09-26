@@ -1384,6 +1384,24 @@ def get_triage(store, actor, body, **_):
                          document_id=document_id)
 
 
+@route("GET", "/review/queue")
+def get_review_queue(store, actor, body, **_):
+    """The ranked queue with the evidence attached, for reviewing one at a time.
+
+    Scoped like `/review/triage`, with one difference that matters: the cards
+    are filtered to documents the caller may **edit**, so a reviewer who is not
+    an administrator gets a working corpus-wide queue of their own documents
+    rather than a refusal. Administrators see everything, as they do everywhere.
+    """
+    document_id = body.get("document_id")
+    if document_id and not auth.can(store, actor, document_id, "edit"):
+        raise PermissionDenied(f"Not permitted to correct {document_id}.")
+    return review.review_queue(
+        store, actor=actor, document_id=document_id,
+        limit=_int(body, "limit", review.QUEUE_BATCH),
+        min_reviewed=_int(body, "min_reviewed", 5))
+
+
 @route("GET", "/lint")
 def get_lint(store, actor, body, **_):
     """The adversarial pass. Administrator only, same reason as `/quality`.

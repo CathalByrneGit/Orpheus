@@ -249,6 +249,7 @@ def register_routes():
         (r"^/-/orpheus/ref/(?P<ref>[^/]+)$", ref_permalink),
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)/redact$", redact_act),
         (r"^/-/orpheus/document/(?P<document_id>[^/]+)$", document_page),
+        (r"^/-/orpheus/review/queue$", review_queue_page),
         (r"^/-/orpheus/review$", review),
         (r"^/-/orpheus/read/act$", read_act),
         (r"^/-/orpheus/read/(?P<document_id>[^/]+)$", read_page),
@@ -276,6 +277,8 @@ def menu_links(datasette, actor):
     if not actor:
         return []
     return [{"href": datasette.urls.path("/-/orpheus"), "label": "Documents"},
+            {"href": datasette.urls.path("/-/orpheus/review/queue"),
+             "label": "Review queue"},
             {"href": datasette.urls.path("/-/orpheus/calendar"),
              "label": "Calendar"},
             {"href": datasette.urls.path("/-/orpheus/wiki"), "label": "Wiki"},
@@ -541,6 +544,45 @@ async def calendar_page(datasette, request):
     return await _render(datasette, request, "orpheus_calendar.html", {
         "calendar": result,
         "windows": (30, 90, 180, 365),
+    })
+
+
+async def review_queue_page(datasette, request):
+    """One finding at a time, with the keys to decide it.
+
+    The document page can already review: it renders every row with a form
+    beside it. What it cannot do is make reviewing *quick*, and quick is the
+    whole constraint -- `orpheus report` answers `insufficient_evidence` until
+    somebody has been through a corpus, so every quality claim this system
+    makes is downstream of a person having the patience to do it.
+
+    Three things are different here, and each is one of the reasons the
+    document page is slow:
+
+    - **The ranking chooses**, not the reader. `review_queue()` is `triage()`
+      with the evidence attached, so a reviewer never scrolls looking for
+      something worth doing.
+    - **The evidence comes with the card.** The excerpt, the page number and
+      the values arrive in one payload rather than one page-load per row.
+    - **A decision does not reload the page.** The verbs post in the
+      background and the next card is already rendered.
+
+    The cards are embedded in the page rather than fetched after it, so the
+    first decision is available the moment the page paints.
+    """
+    if not request.actor:
+        return Response.text("Sign in to use Orpheus.", status=403)
+    document_id = request.args.get("document_id") or None
+    body = {"document_id": document_id} if document_id else {}
+    status, queue = await _call(datasette, request, "GET", "/review/queue", body)
+    if status != 200:
+        return _redirect(datasette, "/-/orpheus",
+                         error=queue["error"]["message"])
+    return await _render(datasette, request, "orpheus_review_queue.html", {
+        "queue": queue,
+        "queue_json": json.dumps(queue["cards"]),
+        "document_id": document_id,
+        "error": request.args.get("error"),
     })
 
 

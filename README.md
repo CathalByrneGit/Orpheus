@@ -37,6 +37,10 @@ Point it at eight commercial contracts and you get, with no configuration:
   document says, conflicts smoothed into agreement.
 - **The original file back**, checked byte for byte against the hash recorded
   when it was ingested.
+- **A review queue**, ranked so the first card is the one that gets the quality
+  report closest to speaking, decided from the keyboard one finding at a time.
+  Measured at [11.6x the document page](docs/review-queue.md), on one page load
+  against twenty-five.
 
 All of it in one SQLite file you can copy, and a browser UI that runs on top of
 it.
@@ -154,7 +158,7 @@ missing rows.
 
 ## Status
 
-1,073 tests, and an end-to-end loop that drives a real browser.
+1,090 tests, and an end-to-end loop that drives a real browser.
 
 ```bash
 pip install -e '.[dev]'
@@ -187,8 +191,9 @@ defects, which is most of the value.
 **What is still open is the human half.** Extraction quality is measured by
 comparing what a person decided against what the machine said, and nobody has
 reviewed a corpus yet: `orpheus report` correctly answers
-`insufficient_evidence`. That number needs a reviewer, not a bigger corpus.
-[Open decisions](docs/open-decisions.md).
+`insufficient_evidence`. That number needs a reviewer, not a bigger corpus —
+which is what [the review queue](docs/review-queue.md) was built to make
+cheap enough to happen. [Open decisions](docs/open-decisions.md).
 
 ---
 
@@ -205,6 +210,7 @@ at [docs/index.md](docs/index.md):
 | [Entities: the wiki](docs/entities.md) | Mentions vs entities, and why a page is a projection |
 | [Reading with the machine](docs/reading-companion.md) | A passage at a time, and why a suggestion is not an extraction |
 | [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
+| [The review queue](docs/review-queue.md) | Reviewing one finding at a time from the keyboard |
 | [Conflicts and lint](docs/conflicts-and-lint.md) | The fourth review verb and the adversarial pass |
 | [What falls due](docs/calendar.md) | The calendar, and the four things it refuses to do |
 | [Network and corroboration](docs/network-and-corroboration.md) | The relation graph, and counting agreement honestly |

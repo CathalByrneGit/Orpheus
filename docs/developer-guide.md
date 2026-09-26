@@ -60,7 +60,7 @@ looked complete. If ingest fails, check both `pip install -e '.[pdf]'` and
 python3 -m pytest
 ```
 
-1,073 tests, no skips with the `dev` extra installed.
+1,090 tests, no skips beyond the optional extras you have not installed.
 
 ### How the tests are built
 
@@ -309,6 +309,7 @@ orpheus/
 │   │                        # (expose_column: a JSON key -> indexed column)
 │   ├── scheduled.py         # the tasks a clock can run, and the actor it runs as
 │   ├── refs.py              # citing the store from outside it, resolved per reader
+│   │                        # (review.py also holds the queue the cards come from)
 │   ├── quality.py           # the report Phase 1 exists to produce
 │   ├── benchmark.py         # CUAD scoring
 │   ├── auth.py              # actors, tokens, permissions

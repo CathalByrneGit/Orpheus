@@ -68,6 +68,7 @@ out would have made the wiki misleading rather than merely incomplete:
 | [Network and corroboration](network-and-corroboration.md) | The relation graph, counting agreement honestly, and what a budget is denominated in |
 | [Questions the corpus raises](questions.md) | Where the shape is worth asking about — and why none of it is a finding |
 | [Provenance and amendment](provenance-and-amendment.md) | The hardest part: how a machine guess becomes a checked fact, and how extraction quality gets measured |
+| [The review queue](review-queue.md) | Reviewing one finding at a time from the keyboard, and the 11.6x that justifies it |
 | [API reference](api-reference.md) | Every route, its permissions, and its response shape |
 | [Deployment](deployment.md) | Running it, and the WAL trap that catches people |
 | [Work on a clock](scheduled-tasks.md) | Scheduled tasks: why a crontab cannot host them, and the machine actor a write with nobody behind it is filed under |

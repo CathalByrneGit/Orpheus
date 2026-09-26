@@ -271,11 +271,19 @@ def set_visibility(store: Store, document_id: str, visibility: str,
     return visibility
 
 
-def visible_documents(store: Store, actor: dict | None, limit: int = 100) -> list[dict]:
-    """Documents this actor may view, via the same rule as `can()`."""
+def visible_documents(store: Store, actor: dict | None, limit: int = 100,
+                      action: str = "view") -> list[dict]:
+    """Documents this actor may act on, via the same rule as `can()`.
+
+    `action` exists because "what may I read" and "what may I correct" are
+    different lists, and a queue that offers work on the first is a queue whose
+    every second card is refused when the person tries to act on it. A viewer
+    can read a shared document and cannot amend a row in it.
+    """
+    require_choice(action, ACTIONS, "action")
     if not actor or not actor.get("actor_id"):
         return []
-    sql = permission_sql("view").replace(
+    sql = permission_sql(action).replace(
         "SELECT d.document_id AS resource",
         "SELECT d.document_id, d.filename, d.doc_type, d.review_status, d.date_added")
     return store.query(sql + " ORDER BY d.date_added DESC LIMIT :limit",

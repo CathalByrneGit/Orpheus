@@ -161,9 +161,14 @@ def gliner2_extract(*, store: Store, document: dict, bundle: dict, text: str,
             "GLiNER2 is not installed. `pip install 'orpheus[gliner]'` (it pulls "
             "in PyTorch), or choose another extraction_engine."
         )
-    from gliner2 import GLiNER2
-
     if _gliner_model is None:
+        # Imported here rather than above, because it is only needed to
+        # *construct* a model. Importing unconditionally meant a caller that
+        # had already supplied one -- a test with a stand-in, a deployment
+        # loading its own -- still had to have PyTorch installed to run code
+        # that never touched it.
+        from gliner2 import GLiNER2
+
         model_id = (store.setting("gliner2_model", None) if store else None) \
             or os.environ.get("ORPHEUS_GLINER_MODEL", "fastino/gliner2-base-v1")
         _gliner_model = GLiNER2.from_pretrained(model_id)
