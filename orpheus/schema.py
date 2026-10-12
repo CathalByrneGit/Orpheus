@@ -886,6 +886,61 @@ MIGRATIONS: list[dict] = [
             "ON entity_register_links (register_id, row_no)",
         ],
     },
+    {
+        "version": 16,
+        "name": "history_chain",
+        # Make the audit trail prove it was not edited.
+        #
+        # `edit_history` has always been append-only *by convention*: nothing
+        # writes except through core functions, which is true, enforced and
+        # tested. But it is a convention, and the file is a SQLite database
+        # anybody holding it can open. A row rewritten with `sqlite3` leaves no
+        # trace, and the one thing this project most insists on -- that the
+        # history is the truth and the current row is a projection of it -- is
+        # the one thing it could not demonstrate.
+        #
+        # So each row now carries the hash of the row before it and a hash of
+        # itself. Rewriting any row breaks every link after it, and the break
+        # names the row. That turns "nothing should have edited this" into
+        # "nothing did".
+        #
+        # What the chain cannot catch on its own is a wholesale rewrite: an
+        # attacker who recomputes the entire chain produces a consistent one.
+        # `history_anchors` is the answer, and only because an anchor is meant
+        # to be copied *out* of the store -- a head hash you wrote down last
+        # Tuesday is evidence the store cannot forge.
+        #
+        # Existing rows are sealed in place, and the sealing is recorded as its
+        # own event rather than done quietly. Hashing a row that was already
+        # tampered with would bless the tampering, so what an enrolment attests
+        # is the content as it stood at enrolment -- never that the row is what
+        # was originally written. `verify_history` says so rather than letting
+        # a reader assume otherwise.
+        "statements": [
+            "ALTER TABLE edit_history ADD COLUMN prev_hash TEXT",
+            "ALTER TABLE edit_history ADD COLUMN row_hash TEXT",
+            # Redaction nulls `previous_value` and `new_value` on rows already
+            # written, by design -- the history keeps what happened and loses
+            # what it said. That makes those rows unrecomputable ever after, so
+            # they are marked rather than silently failing verification. The
+            # chain *linkage* is untouched by a redaction: `row_hash` is not
+            # recomputed, so every following row still points where it did.
+            "ALTER TABLE edit_history ADD COLUMN payload_redacted_at TEXT",
+            """
+            CREATE TABLE IF NOT EXISTS history_anchors (
+                anchor_id   TEXT PRIMARY KEY,
+                seq         INTEGER NOT NULL,
+                head_hash   TEXT NOT NULL,
+                anchored_at TEXT NOT NULL,
+                anchored_by TEXT REFERENCES actors(actor_id),
+                note        TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_history_anchors_seq "
+            "ON history_anchors (seq)",
+        ],
+        "run": lambda store: _seal_history(store),
+    },
 ]
 
 
@@ -1007,3 +1062,53 @@ def _recompute_naive_keys(store) -> int:
              "Legal-form suffixes are now stripped only where they trail, so a "
              "holding company no longer shares a key with its subsidiary."))
     return changed
+
+
+def _seal_history(store) -> int:
+    """Enrol the rows that predate the chain, and say that is what happened.
+
+    Walks `edit_history` in `seq` order and writes each row's link. The
+    enrolment is appended to the history as its own event, which matters more
+    than it looks: what a sealed row attests is its content **as it stood at
+    enrolment**. Hashing a row that had already been tampered with would bless
+    the tampering, and a reader who was not told that would reasonably assume
+    the chain reached back to when the row was written. It does not, and the
+    event says so.
+    """
+    from .audit import chain_digest
+    from .utils import new_id, now, to_json
+
+    rows = store.query("SELECT * FROM edit_history ORDER BY seq")
+    if not rows:
+        # A store created at version 16 has nothing to enrol, and no caveat to
+        # record: its chain starts at its first real event and reaches back to
+        # the beginning. Writing "0 rows were sealed" here would be a bookkeeping
+        # entry claiming something happened, as the first line of every new
+        # store's history.
+        return 0
+
+    prev_hash = None
+    for row in rows:
+        row_hash = chain_digest(prev_hash, row)
+        store.execute(
+            "UPDATE edit_history SET prev_hash = ?, row_hash = ? WHERE seq = ?",
+            (prev_hash, row_hash, row["seq"]))
+        prev_hash = row_hash
+
+    # Appended after the sealing, so it is the first row whose hash attests the
+    # moment it was written rather than the moment it was enrolled.
+    store.execute(
+        "INSERT INTO edit_history (id, table_name, row_id, document_id, action, "
+        "previous_value, new_value, edited_by, edited_at, note, prev_hash, "
+        "row_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (new_id("edit"), "edit_history", "chain", None, "migrate", None,
+         to_json({"rows_sealed": len(rows), "migration": 16}), None, now(),
+         f"{len(rows)} existing row(s) were enrolled in the hash chain. Their "
+         "hashes attest their content as it stood at this moment, not as it "
+         "was written -- nothing before this point can be proved unedited. "
+         "Every row after it can.", prev_hash, None))
+    sealed = store.one(
+        "SELECT * FROM edit_history ORDER BY seq DESC LIMIT 1")
+    store.execute("UPDATE edit_history SET row_hash = ? WHERE seq = ?",
+                  (chain_digest(prev_hash, sealed), sealed["seq"]))
+    return len(rows)

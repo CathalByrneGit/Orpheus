@@ -132,10 +132,14 @@ Worth knowing before you start, because these are deliberate:
 
 ## Four commitments, if you are reading the code
 
-**Nothing is destructively overwritten.** Corrections insert into `edit_history`
-and update the row's status; rejected rows are excluded, never deleted. That is
-both the audit story and the only way to measure whether extraction is
-improving. [Provenance and amendment](docs/provenance-and-amendment.md).
+**Nothing is destructively overwritten, and it can prove it.** Corrections
+insert into `edit_history` and update the row's status; rejected rows are
+excluded, never deleted. That is both the audit story and the only way to
+measure whether extraction is improving. Every row is hash-chained to the one
+before it, so `orpheus history` detects an edit made behind the code's back and
+names the row — append-only used to be a convention in a file anybody could
+open. [Provenance and amendment](docs/provenance-and-amendment.md),
+[the audit trail](docs/audit-trail.md).
 
 **Disagreement is a finding, not a defect.** Two confirmed extractions that
 contradict each other are usually both right about the moment each document was
@@ -158,7 +162,7 @@ missing rows.
 
 ## Status
 
-1,090 tests, and an end-to-end loop that drives a real browser.
+1,111 tests, and an end-to-end loop that drives a real browser.
 
 ```bash
 pip install -e '.[dev]'
@@ -211,6 +215,7 @@ at [docs/index.md](docs/index.md):
 | [Reading with the machine](docs/reading-companion.md) | A passage at a time, and why a suggestion is not an extraction |
 | [Provenance and amendment](docs/provenance-and-amendment.md) | How a machine guess becomes a checked fact |
 | [The review queue](docs/review-queue.md) | Reviewing one finding at a time from the keyboard |
+| [The audit trail](docs/audit-trail.md) | The hash chain, and why an anchor only counts once you copy it out |
 | [Conflicts and lint](docs/conflicts-and-lint.md) | The fourth review verb and the adversarial pass |
 | [What falls due](docs/calendar.md) | The calendar, and the four things it refuses to do |
 | [Network and corroboration](docs/network-and-corroboration.md) | The relation graph, and counting agreement honestly |

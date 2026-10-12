@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
-from . import analysis, asof as asof_mod, auth
+from . import analysis, asof as asof_mod, audit as audit_mod, auth
 from . import bundle as bundle_mod, classify, concepts
 from . import entities as entities_mod
 from . import engines, extract as extract_mod, ingest as ingest_mod
@@ -1537,6 +1537,40 @@ def post_setting(store, actor, body, **_):
         raise PermissionDenied("Changing a setting is an administrator decision.")
     store.set_setting(body["key"], body["value"], _actor_id(actor))
     return {"key": body["key"], "value": body["value"]}
+
+
+@route("GET", "/audit/history")
+def get_history_verification(store, actor, body, **_):
+    """Replay the audit trail's hash chain and say whether it holds.
+
+    Administrator-only: it spans every document, and a broken chain is a
+    statement about the store rather than about any one row.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied(
+            "Verifying the audit trail is an administrator view: it spans "
+            "every document in the store.")
+    return audit_mod.verify_history(store, since=_int(body, "since", 0))
+
+
+@route("GET", "/audit/history/anchors")
+def get_history_anchors(store, actor, body, **_):
+    if not actor.get("is_admin"):
+        raise PermissionDenied("Anchors are an administrator view.")
+    return {"anchors": audit_mod.anchors(store, limit=_int(body, "limit", 20))}
+
+
+@route("POST", "/audit/history/anchor")
+def post_history_anchor(store, actor, body, **_):
+    """Pin the chain's head so a later wholesale rewrite shows up.
+
+    The response says to copy it out of the store, and means it: an anchor
+    kept only in the database it attests is one a rewrite would rewrite too.
+    """
+    if not actor.get("is_admin"):
+        raise PermissionDenied("Recording an anchor is an administrator action.")
+    return audit_mod.anchor(store, actor_id=_actor_id(actor),
+                            note=body.get("note"))
 
 
 @route("GET", "/audit/llm")

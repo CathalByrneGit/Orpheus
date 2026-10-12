@@ -472,6 +472,68 @@ def cmd_scheduled(args) -> int:
     return 0
 
 
+def cmd_history(args) -> int:
+    """Check that the audit trail has not been edited, or pin it so you can.
+
+    `orpheus verify` asks whether the documents are still the documents.
+    This asks the same question about the record of who changed what -- the
+    one this project insists is the truth, and the one that until now rested
+    on a convention rather than a proof.
+
+    Exits non-zero when the chain is broken, so it can gate a restore the same
+    way `verify` does.
+    """
+    from . import audit as audit_mod
+
+    if args.action == "anchor":
+        store = open_store(args)
+        try:
+            result = audit_mod.anchor(store, actor_id=args.actor_id,
+                                      note=args.note)
+        finally:
+            store.close()
+        if args.json:
+            emit(result, True)
+            return 0
+        print(f"row {result['seq']}  {result['head_hash']}")
+        print(f"\n  {result['note']}")
+        return 0
+
+    store = open_store(args, mode="read")
+    try:
+        if args.action == "anchors":
+            found = audit_mod.anchors(store, limit=args.limit)
+            if args.json:
+                emit(found, True)
+                return 0
+            for row in found:
+                print(f"{row['anchored_at']}  row {row['seq']:<7} "
+                      f"{row['head_hash'][:32]}…  {row['note'] or ''}")
+            if not found:
+                print("No anchors recorded. `orpheus history anchor` writes one.")
+            return 0
+
+        report = audit_mod.verify_history(store, since=args.since)
+    finally:
+        store.close()
+
+    if args.json:
+        emit(report, True)
+        return 0 if report["intact"] else 1
+
+    print(report["headline"])
+    if report["broken"]:
+        found = report["broken"]
+        print(f"\n  row {found['seq']}  {found['action']} on "
+              f"{found['table_name']}/{found['row_id']}")
+        print(f"  recorded {found['edited_at']}")
+        print(f"  expected {found['expected']}")
+        print(f"  found    {found['found']}")
+        print("\n  Every row after this one fails too, so only the first is "
+              "shown: it is where the trail stops being evidence.")
+    return 0 if report["intact"] else 1
+
+
 def cmd_verify(args) -> int:
     """Re-read every original and check it against the digest recorded at ingest.
 
@@ -1709,6 +1771,16 @@ def build_parser() -> argparse.ArgumentParser:
                        help="a task name; omit to list them")
     sched.add_argument("--config", action="append", metavar="KEY=VALUE",
                        help="a setting for this run; repeatable")
+
+    history = add("history", cmd_history,
+                  "check the audit trail has not been edited, or anchor it")
+    history.add_argument("action", nargs="?", default="verify",
+                         choices=("verify", "anchor", "anchors"))
+    history.add_argument("--since", type=int, default=0,
+                         help="start the replay after this row")
+    history.add_argument("--actor-id", help="who is recording the anchor")
+    history.add_argument("--note", help="why, on an anchor")
+    history.add_argument("--limit", type=int, default=20)
 
     verify = add("verify", cmd_verify,
                  "check every stored original against its recorded digest")

@@ -245,6 +245,116 @@ rarely has.
 
 ---
 
+## docbank — the storage question, asked again
+
+[docbank][docbank] is an agent-native document system of record: Apache-2.0,
+Go, v0.15.2, 525 commits, 101 stars, **alpha**. A daemon owns a vault on your
+own machine and serves a CLI, a web app, a TUI, an authenticated HTTP API, an
+MCP endpoint, and a Go library for embedding. It stores PDFs, images, text,
+email and recordings; extracts and indexes their text; keeps every saved
+version; and exports verified bundles.
+
+Evaluated because the question put to it was a good one: *could this be the
+storage and organising layer, with Datasette building the ontology stack on
+top?*
+
+[docbank]: https://github.com/kenn-io/docbank
+
+### The measurement that answers it
+
+What docbank would replace, counted rather than estimated:
+
+| | lines |
+|---|---|
+| `storage_path_for`, `hash_file` | 22 |
+| `original` | 92 |
+| `audit_document_ids`, `audit_entries`, `summarise_audit`, `audit_storage`, `_audit_headline` | 132 |
+| **total** | **246** |
+| the core | **22,635** |
+
+**1.1%.** That is the whole of Orpheus's blob storage: put a file at
+`storage/documents/<ab>/<sha256>`, hash it, hand it back, check it still hashes
+the same.
+
+### Why the framing does not hold
+
+"Storage and organising layer, with the ontology stack on top" assumes the
+ontology stack sits above document storage. It does not.
+
+**Orpheus's system of record is not the documents. It is the claims about
+them** — `instances_*`, `provenance`, `edit_history`, `entities`,
+`entity_mentions`, `tensions`, the four review states. Those are assertions
+with an author, a confidence, a located excerpt and a decision history.
+docbank is a system of record for *documents*: versions, tags, albums, trash,
+folders. The two are records of different objects, and docbank has no opinion
+about the one Orpheus exists for.
+
+So moving documents into it moves 1.1% and leaves the ontology stack exactly
+where it is.
+
+### The blocker
+
+Embedding is **Go only** (`go.kenn.io/docbank`). From Python the only path is
+HTTP to a daemon holding an exclusive lock on its root.
+
+That is the architecture this project deleted. The R implementation had a
+Plumber API owning the single write connection with Datasette mounted
+read-only beside it, and removing it is recorded above as one of the port's
+main wins. "Datasette is the writer, the core is a library it imports, there is
+one process" is what everything else rests on. Reintroducing a second process,
+in a second language, with its own lock, lifecycle and backup discipline, to
+own 246 lines, is a bad trade at any quality of daemon.
+
+It is also **single-owner**: loopback-authenticated daemon, no user accounts or
+roles. Orpheus would keep its whole permission model and docbank would be a
+privileged backend that must never be reachable by a user. And taking an alpha
+as the *storage* layer is a far larger bet than taking one as an optional
+extra, which is the policy [the ecosystem verdicts](datasette-ecosystem.md)
+already set.
+
+### Two things assumed and checked, because both would have been wrong
+
+**Redaction is not a blocker.** "Keeps every saved version" sounds
+irreconcilable with a subject access request, and is not: trash → empty trash →
+garbage collection reclaims unreferenced content, repack compacts dead space,
+and old versions can be pruned. Bytes genuinely go.
+
+**The audit story is not marketing.** Permanent audited history is opt-in per
+scope, irreversible once enabled, "cannot be edited through Docbank", verified
+by replaying events, and comparable against evidence held outside the vault.
+
+### What was taken
+
+That last one, and it is why this evaluation was worth doing.
+
+`edit_history` was append-only **by convention**: nothing writes except through
+`record_edit`, which is true, enforced and tested, and still a convention in a
+file anybody holding can open with `sqlite3`. A rewritten row left no trace —
+so the claim this project rests on hardest was the one claim it could not
+demonstrate.
+
+docbank's shape is the right one: hash-chain the log, verify by replay, and let
+the head be compared against something stored outside. That is now
+[the audit trail's chain](audit-trail.md) — `prev_hash`/`row_hash` on every
+row, `orpheus history` to verify, and anchors that only mean anything once you
+copy them out of the store.
+
+Their **verified export bundles** are worth reading before the decision-pack
+idea in [open decisions](open-decisions.md) gets built; it is the same idea,
+already implemented.
+
+### Verdict
+
+**Do not adopt.** It replaces 1.1% of the core at the cost of the invariant the
+other 98.9% is built on, and it has nothing to say about an ontology stack,
+which is a record of claims rather than of documents. **Read it for the audited
+history**, which was better than ours and now is not.
+
+A note on method: `docbank.ai` was unreachable from the environment this was
+written in, so the reading is of the repository rather than the site.
+
+---
+
 ## LatticeDB — the storage question, asked properly
 
 [LatticeDB][lattice] is an embedded single-file property-graph database in Zig:

@@ -297,9 +297,16 @@ def redact_document(store: Store, document_id: str, *, actor_id: str | None = No
         counts["history_payloads_cleared"] = store.scalar(
             f"SELECT COUNT(*) FROM edit_history WHERE ({where}) AND "
             "(previous_value IS NOT NULL OR new_value IS NOT NULL)", params)
+        # Marked as well as cleared. The row keeps the `row_hash` it was
+        # written with, so the chain still runs through it and everything
+        # after it verifies -- but its content is gone and can never be
+        # recomputed, so `verify_history` must be able to tell that apart from
+        # a row somebody edited. Without the mark, every redaction would read
+        # as tampering.
         store.execute(
             "UPDATE edit_history SET previous_value = NULL, new_value = NULL, "
-            f"note = NULL WHERE {where}", params)
+            f"note = NULL, payload_redacted_at = ? WHERE {where}",
+            (now(), *params))
 
         cleared = {column: None for column in TOMBSTONE_CLEARS}
         cleared["filename"] = REDACTED_FILENAME

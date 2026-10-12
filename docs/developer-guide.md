@@ -60,7 +60,7 @@ looked complete. If ingest fails, check both `pip install -e '.[pdf]'` and
 python3 -m pytest
 ```
 
-1,090 tests, no skips beyond the optional extras you have not installed.
+1,111 tests, no skips beyond the optional extras you have not installed.
 
 ### How the tests are built
 

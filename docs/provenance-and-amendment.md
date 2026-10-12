@@ -76,6 +76,12 @@ Every mutation writes to `edit_history` **inside the same transaction as the
 change it describes**, so a change and its audit row commit or roll back
 together.
 
+Each row is also **hash-chained to the one before it**, so an edit made behind
+the code's back — `sqlite3` on the file — breaks the chain and is named by
+`orpheus history`. Append-only was a convention until it was a chain; see
+[the audit trail](audit-trail.md) for what that proves, and the two things it
+deliberately does not.
+
 | Column | Meaning |
 |---|---|
 | `seq` | Monotonic. This, not `edited_at`, defines order |
